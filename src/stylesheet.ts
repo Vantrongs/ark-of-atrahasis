@@ -18,6 +18,7 @@ export function createSafeStyleSheet(realStyle: HTMLStyleElement): SafeStyleShee
     },
   };
 
+  document.head.appendChild(realStyle);
   registerPair(wrapper, realStyle as unknown as Element);
   return wrapper;
 }
