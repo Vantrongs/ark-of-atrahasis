@@ -1,7 +1,13 @@
-const DANGEROUS_PROTOCOLS = /^\s*(javascript|data|vbscript|blob|file)\s*:/i;
+const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
 export function isUrlSafe(url: string): boolean {
-  return !DANGEROUS_PROTOCOLS.test(url);
+  if (typeof url !== "string") return false;
+  try {
+    const parsed = new URL(url);
+    return ALLOWED_PROTOCOLS.has(parsed.protocol);
+  } catch {
+    return false;
+  }
 }
 
 const CSS_URL_PATTERN = /url\s*\(|(-webkit-)?image-set\s*\(/i;
