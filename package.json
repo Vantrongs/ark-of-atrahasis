@@ -20,13 +20,17 @@
     "prepublishOnly": "tsup"
   },
   "keywords": [
-    "ses",
-    "secure-ecmascript",
-    "compartment",
-    "dom",
-    "safe",
     "sandbox",
-    "wrapper"
+    "dom",
+    "javascript",
+    "wrapper",
+    "typescript",
+    "frontend",
+    "ses",
+    "bluearchive",
+    "cute-and-funny",
+    "hardened-js",
+    "ark-of-atrahasis"
   ],
   "license": "GPL-3.0-only",
   "devDependencies": {
