@@ -1,6 +1,6 @@
 {
   "name": "ark-of-atrahasis",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Safe DOM wrapper made for the usage in Secure ECMAScript compartments",
   "type": "module",
   "main": "./dist/index.js",
@@ -28,7 +28,7 @@
     "sandbox",
     "wrapper"
   ],
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "devDependencies": {
     "@types/bun": "latest",
     "tsup": "^8.0.0"
