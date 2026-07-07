@@ -28,6 +28,12 @@ export interface SafeTextNode {
   remove(): void;
 }
 
+export interface SafeStyleSheet {
+  setCSS(value: string): void;
+  getCSS(): string;
+  remove(): void;
+}
+
 export interface SafeElement {
   appendChild(child: SafeElement | SafeTextNode): void;
   insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void;
@@ -310,6 +316,8 @@ export interface SafeDocument {
   createRp(): SafeElement;
 
   createRawText(): SafeTextNode;
+
+  createStyle(): SafeStyleSheet;
 
   getElement(id: string): SafeElement | null;
 }

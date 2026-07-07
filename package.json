@@ -1,6 +1,6 @@
 {
   "name": "ark-of-atrahasis",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Safe DOM wrapper made for the usage in Secure ECMAScript compartments",
   "type": "module",
   "main": "./dist/index.js",

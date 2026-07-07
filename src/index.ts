@@ -2,6 +2,7 @@ import type {
   SafeDocument,
   SafeElement,
   SafeTextNode,
+  SafeStyleSheet,
   FormattingTag,
   HeadingLevel,
   ListType,
@@ -30,11 +31,13 @@ import {
   createSafeDescriptionListElement,
 } from "./element.ts";
 import { createSafeTextNode } from "./text.ts";
+import { createSafeStyleSheet } from "./stylesheet.ts";
 
 export type {
   SafeDocument,
   SafeElement,
   SafeTextNode,
+  SafeStyleSheet,
   SafeEvent,
   SafeStyle,
   SafeInputElement,
@@ -155,6 +158,10 @@ export function createSafeDocument(pluginRoot: HTMLElement): SafeDocument {
 
     createRawText(): SafeTextNode {
       return createSafeTextNode(document.createTextNode(""));
+    },
+
+    createStyle(): SafeStyleSheet {
+      return createSafeStyleSheet(document.createElement("style"));
     },
 
     getElement(id: string): SafeElement | null {
