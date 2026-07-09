@@ -77,7 +77,13 @@ function simple(tag: string): SafeElement {
   return createSafeElement(document.createElement(tag));
 }
 
-export function createSafeDocument(pluginRoot: HTMLElement): SafeDocument {
+export function createSafeDocument(pluginRootID: string): SafeDocument {
+  const pluginRoot: HTMLElement | null = document.getElementById(pluginRootID);
+
+  if (!pluginRoot) {
+    throw new Error(`No HTML element with the '${pluginRootID}' id was found`);
+  }
+
   return {
     createDiv(): SafeElement { return simple("div"); },
     createSpan(): SafeElement { return simple("span"); },
