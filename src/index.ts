@@ -116,6 +116,9 @@ export function createSafeDocument(pluginRootID: string): SafeDocument {
       if (type === "description") return createSafeDescriptionListElement(document.createElement("dl") as HTMLDListElement);
       throw new Error(`Unknown list type: ${type}`);
     },
+    createListItem(): SafeElement { return simple("li"); },
+    createTerm(): SafeElement { return simple("dt"); },
+    createDescription(): SafeElement { return simple("dd"); },
 
     createTable(): SafeElement { return simple("table"); },
     createThead(): SafeElement { return simple("thead"); },

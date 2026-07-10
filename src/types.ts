@@ -269,6 +269,9 @@ export interface SafeDocument {
   createPre(): SafeElement;
 
   createList(type: ListType): SafeListElement | SafeDescriptionListElement;
+  createListItem(): SafeElement;
+  createTerm(): SafeElement;
+  createDescription(): SafeElement;
 
   createTable(): SafeElement;
   createThead(): SafeElement;
