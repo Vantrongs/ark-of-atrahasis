@@ -188,5 +188,8 @@ tests through `test:unit`; it does not run the property directory twice.
 | `npm run test:package` | Clean Git archive, exact manifest/dependency pins, publish allowlist, packed ESM runtime, and declaration compatibility |
 | `npm run check` | The same aggregate command executed by the protected CI job |
 
-Publication and terminal CI links are added to this section only after the
-draft pull request exists and its live `check` job succeeds.
+Publication evidence is the draft [property/model pull request #16](https://github.com/Vantrongs/ark-of-atrahasis/pull/16)
+against `agent/issue-1-integration`. Its terminal live result is recorded on the
+[PR checks page](https://github.com/Vantrongs/ark-of-atrahasis/pull/16/checks);
+integration requires that the single `check` job is green on the final pushed
+commit.
