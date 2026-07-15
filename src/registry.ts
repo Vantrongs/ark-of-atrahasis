@@ -8,6 +8,10 @@ export type RealNode = Element | Text;
 export type NodeState = "active" | "disposed" | "revoked";
 export type AccountedResource = "text" | "attribute" | "style" | "request";
 
+export interface PendingPhysicalEffect {
+  cleanup(): void;
+}
+
 export interface RegistryEntry {
   readonly owner: object;
   readonly wrapper: SafeNode;
@@ -15,7 +19,9 @@ export interface RegistryEntry {
   readonly specializedKind?: SpecializedElementKind;
   state: NodeState;
   accountingReleased: boolean;
+  styleCleanupRequired: boolean;
   readonly listeners: Set<() => void>;
+  readonly pendingEffects: Set<PendingPhysicalEffect>;
   readonly resources: Record<AccountedResource, Map<string, number>>;
 }
 
@@ -64,7 +70,9 @@ export class NodeRegistry {
       real,
       state: "active",
       accountingReleased: false,
+      styleCleanupRequired: false,
       listeners: new Set(),
+      pendingEffects: new Set(),
       resources: {
         text: new Map(),
         attribute: new Map(),

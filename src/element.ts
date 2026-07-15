@@ -429,10 +429,17 @@ export function createSafeInputElement(
     },
     setChecked(value: boolean): void {
       const primitive = requireBoolean(value, "SafeInputElement.setChecked.value");
-      context.nodeOperation(realEl, () => {
-        requireCheckableInputState(context.platform, realEl, "SafeInputElement.setChecked.state");
-        context.platform.setInputChecked(realEl, primitive);
-      });
+      context.setIDL(
+        realEl,
+        primitive,
+        () => context.platform.getInputChecked(realEl),
+        (next) => context.platform.setInputChecked(realEl, next),
+        () => requireCheckableInputState(
+          context.platform,
+          realEl,
+          "SafeInputElement.setChecked.state",
+        ),
+      );
     },
     getChecked(): boolean {
       return context.nodeOperation(realEl, () => {
@@ -678,9 +685,12 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
     },
     setSelected(value: boolean): void {
       const primitive = requireBoolean(value, "SafeOptionElement.setSelected.value");
-      context.nodeOperation(realEl, () => {
-        context.platform.setOptionSelected(realEl, primitive);
-      });
+      context.setIDL(
+        realEl,
+        primitive,
+        () => context.platform.getOptionSelected(realEl),
+        (next) => context.platform.setOptionSelected(realEl, next),
+      );
     },
     setDisabled(value: boolean): void {
       booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeOptionElement.setDisabled.value"));
@@ -864,7 +874,12 @@ export function createSafeVideoElement(
     },
     setMuted(value: boolean): void {
       const primitive = requireBoolean(value, "SafeVideoElement.setMuted.value");
-      context.nodeOperation(realEl, () => context.platform.setMediaMuted(realEl, primitive));
+      context.setIDL(
+        realEl,
+        primitive,
+        () => context.platform.getMediaMuted(realEl),
+        (next) => context.platform.setMediaMuted(realEl, next),
+      );
     },
     setPoster(url: string): SafeURLDecision {
       return applyURLDecision(
@@ -914,7 +929,12 @@ export function createSafeAudioElement(
     },
     setMuted(value: boolean): void {
       const primitive = requireBoolean(value, "SafeAudioElement.setMuted.value");
-      context.nodeOperation(realEl, () => context.platform.setMediaMuted(realEl, primitive));
+      context.setIDL(
+        realEl,
+        primitive,
+        () => context.platform.getMediaMuted(realEl),
+        (next) => context.platform.setMediaMuted(realEl, next),
+      );
     },
   }) as SafeAudioElement, realEl, "audio");
 }
