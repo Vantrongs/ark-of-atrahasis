@@ -44,6 +44,8 @@ export interface EventSnapshotter {
   ) => SafeEventDispatch<Extract<SafeEvent, { readonly kind: Kind }>>;
 }
 
+type Completer = <Value>(value: Value) => Value;
+
 const apply = Reflect.apply;
 const EMPTY_TOUCHES: readonly SafeTouchSnapshot[] = Object.freeze([]);
 
@@ -481,14 +483,14 @@ function createSnapshot(
 }
 
 /** Capture realm-local WebIDL accessors before an adversarial event arrives. */
-export function createEventSnapshotter(realm: unknown): EventSnapshotter {
+export function createEventSnapshotter(realm: unknown, complete: Completer): EventSnapshotter {
   const accessors = captureEventAccessors(realm);
   const open = Object.freeze(<Kind extends SafeEventKind>(
     nativeEvent: Event,
     kind: Kind,
   ): SafeEventDispatch<Extract<SafeEvent, { readonly kind: Kind }>> => {
     const cell: NativeEventCell = { nativeEvent };
-    const event = createSnapshot(nativeEvent, kind, accessors, cell) as Extract<SafeEvent, { readonly kind: Kind }>;
+    const event = complete(createSnapshot(nativeEvent, kind, accessors, cell)) as Extract<SafeEvent, { readonly kind: Kind }>;
     let closed = false;
     const close = Object.freeze((): void => {
       if (closed) return;

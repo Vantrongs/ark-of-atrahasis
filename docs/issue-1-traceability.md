@@ -78,8 +78,28 @@ test or packaging proof runs in CI.
   denied or malformed URL setter calls consume operation and cumulative-request
   attempt budgets.
 
-This evidence is intentionally partial: it does not complete the unchecked SES,
-form-isolation, primitive/numeric, public-type, or real-browser criteria above.
+This runtime-core evidence is intentionally partial and does not by itself
+complete the form-isolation, primitive/numeric, public-type, or SES criteria
+above.
+
+### SES completion evidence (partial)
+
+- `src/context.ts` requires and behaviorally validates a host-supplied
+  `Hardener`, then uses one completion seam to harden before canonical wrapper
+  registration or public return. No runtime SES import or dependency is added.
+- `test/completion-boundary.test.ts` covers missing/accessor/non-function,
+  no-op, shallow, identity-changing, throwing, replacement-returning, and
+  stateful hardeners, including rollback of a failed root claim.
+- `test/ses.node.mjs` runs after SES 2.2.0 lockdown with two compartments and
+  independent roots; it checks authority absence, immutable live capabilities,
+  cross-owner isolation, post-disposal typed errors, and pass-style 1.8.1 for
+  primitive-only error and URL records.
+- `test/browser/ses.spec.mjs` runs the browser bundle after real lockdown in the
+  existing Chromium, Firefox, and WebKit Playwright projects.
+
+This evidence remains partial and deliberately leaves the final issue
+checkboxes unchanged until the excluded primitive/form/type work and final
+integration traceability pass are complete.
 
 ## Acceptance evidence
 

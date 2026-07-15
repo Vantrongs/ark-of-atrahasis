@@ -87,6 +87,10 @@ function applyURLDecision(
 export function createSafeElement(context: DocumentContext, realEl: Element): SafeElement {
   const known = context.registry.getWrapper<SafeElement>(realEl);
   if (known) return known;
+  return context.complete(buildSafeElement(context, realEl), realEl);
+}
+
+function buildSafeElement(context: DocumentContext, realEl: Element): SafeElement {
   const htmlEl = realEl as HTMLElement;
 
   const wrapper: SafeElement = {
@@ -206,16 +210,15 @@ export function createSafeElement(context: DocumentContext, realEl: Element): Sa
     style: createSafeStyle(context, htmlEl),
   };
 
-  context.register(wrapper, realEl);
   return wrapper;
 }
 
 export function createSafeInputElement(context: DocumentContext, realEl: HTMLInputElement): SafeInputElement {
   const known = context.registry.getWrapper<SafeInputElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setType(type: string): void {
       attribute(context, realEl, "type", isInputTypeAllowed(type) ? type.toLowerCase() : undefined);
     },
@@ -265,15 +268,15 @@ export function createSafeInputElement(context: DocumentContext, realEl: HTMLInp
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
       return addSafeEvent(context, realEl, "input", "input", handler);
     },
-  }) as SafeInputElement;
+  }) as SafeInputElement, realEl);
 }
 
 export function createSafeTextareaElement(context: DocumentContext, realEl: HTMLTextAreaElement): SafeTextareaElement {
   const known = context.registry.getWrapper<SafeTextareaElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setValue(value: string): void {
       const text = String(value);
       context.setText(realEl, "value", text, () => {
@@ -306,15 +309,15 @@ export function createSafeTextareaElement(context: DocumentContext, realEl: HTML
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
       return addSafeEvent(context, realEl, "input", "input", handler);
     },
-  }) as SafeTextareaElement;
+  }) as SafeTextareaElement, realEl);
 }
 
 export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSelectElement): SafeSelectElement {
   const known = context.registry.getWrapper<SafeSelectElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setValue(value: string): void {
       const text = String(value);
       context.setText(realEl, "value", text, () => {
@@ -331,15 +334,15 @@ export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSe
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
       return addSafeEvent(context, realEl, "change", "input", handler);
     },
-  }) as SafeSelectElement;
+  }) as SafeSelectElement, realEl);
 }
 
 export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOptionElement): SafeOptionElement {
   const known = context.registry.getWrapper<SafeOptionElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setValue(value: string): void { attribute(context, realEl, "value", String(value)); },
     setSelected(value: boolean): void {
       context.nodeOperation(realEl, () => {
@@ -348,42 +351,42 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
     },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setLabel(value: string): void { attribute(context, realEl, "label", String(value)); },
-  }) as SafeOptionElement;
+  }) as SafeOptionElement, realEl);
 }
 
 export function createSafeButtonElement(context: DocumentContext, realEl: HTMLButtonElement): SafeButtonElement {
   const known = context.registry.getWrapper<SafeButtonElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setType(type: string): void {
       attribute(context, realEl, "type", isButtonTypeAllowed(type) ? type.toLowerCase() : undefined);
     },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setName(value: string): void { attribute(context, realEl, "name", String(value)); },
     setValue(value: string): void { attribute(context, realEl, "value", String(value)); },
-  }) as SafeButtonElement;
+  }) as SafeButtonElement, realEl);
 }
 
 export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLabelElement): SafeLabelElement {
   const known = context.registry.getWrapper<SafeLabelElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setFor(value: string): void { attribute(context, realEl, "for", String(value)); },
-  }) as SafeLabelElement;
+  }) as SafeLabelElement, realEl);
 }
 
 export function createSafeFieldsetElement(context: DocumentContext, realEl: HTMLFieldSetElement): SafeFieldsetElement {
   const known = context.registry.getWrapper<SafeFieldsetElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-  }) as SafeFieldsetElement;
+  }) as SafeFieldsetElement, realEl);
 }
 
 export function createSafeImageElement(
@@ -392,9 +395,9 @@ export function createSafeImageElement(
 ): SafeImageElement {
   const known = context.registry.getWrapper<SafeImageElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -409,7 +412,7 @@ export function createSafeImageElement(
       attribute(context, realEl, "height", String(Number(value) | 0));
     },
     setLoading(value: string): void { attribute(context, realEl, "loading", String(value)); },
-  }) as SafeImageElement;
+  }) as SafeImageElement, realEl);
 }
 
 export function createSafeAnchorElement(
@@ -418,9 +421,9 @@ export function createSafeAnchorElement(
 ): SafeAnchorElement {
   const known = context.registry.getWrapper<SafeAnchorElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setHref(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -429,7 +432,7 @@ export function createSafeAnchorElement(
         () => context.urlPolicy.decide("anchor.href", url),
       );
     },
-  }) as SafeAnchorElement;
+  }) as SafeAnchorElement, realEl);
 }
 
 export function createSafeVideoElement(
@@ -438,9 +441,9 @@ export function createSafeVideoElement(
 ): SafeVideoElement {
   const known = context.registry.getWrapper<SafeVideoElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -465,7 +468,7 @@ export function createSafeVideoElement(
         () => context.urlPolicy.decide("video.poster", url),
       );
     },
-  }) as SafeVideoElement;
+  }) as SafeVideoElement, realEl);
 }
 
 export function createSafeAudioElement(
@@ -474,9 +477,9 @@ export function createSafeAudioElement(
 ): SafeAudioElement {
   const known = context.registry.getWrapper<SafeAudioElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -489,7 +492,7 @@ export function createSafeAudioElement(
     setAutoplay(value: boolean): void { booleanAttribute(context, realEl, "autoplay", value); },
     setLoop(value: boolean): void { booleanAttribute(context, realEl, "loop", value); },
     setMuted(value: boolean): void { booleanAttribute(context, realEl, "muted", value); },
-  }) as SafeAudioElement;
+  }) as SafeAudioElement, realEl);
 }
 
 export function createSafeSourceElement(
@@ -498,9 +501,9 @@ export function createSafeSourceElement(
 ): SafeSourceElement {
   const known = context.registry.getWrapper<SafeSourceElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -510,28 +513,28 @@ export function createSafeSourceElement(
       );
     },
     setType(value: string): void { attribute(context, realEl, "type", String(value)); },
-  }) as SafeSourceElement;
+  }) as SafeSourceElement, realEl);
 }
 
 export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCanvasElement): SafeCanvasElement {
   const known = context.registry.getWrapper<SafeCanvasElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
     setHeight(value: number): void {
       attribute(context, realEl, "height", String(Number(value) | 0));
     },
-  }) as SafeCanvasElement;
+  }) as SafeCanvasElement, realEl);
 }
 
 export function createSafeTableCellElement(context: DocumentContext, realEl: HTMLTableCellElement): SafeTableCellElement {
   const known = context.registry.getWrapper<SafeTableCellElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setColspan(value: number): void {
       attribute(context, realEl, "colspan", String(Number(value) | 0));
     },
@@ -540,58 +543,58 @@ export function createSafeTableCellElement(context: DocumentContext, realEl: HTM
     },
     setScope(value: string): void { attribute(context, realEl, "scope", String(value)); },
     setHeaders(value: string): void { attribute(context, realEl, "headers", String(value)); },
-  }) as SafeTableCellElement;
+  }) as SafeTableCellElement, realEl);
 }
 
 export function createSafeDetailsElement(context: DocumentContext, realEl: HTMLDetailsElement): SafeDetailsElement {
   const known = context.registry.getWrapper<SafeDetailsElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setOpen(value: boolean): void { booleanAttribute(context, realEl, "open", value); },
-  }) as SafeDetailsElement;
+  }) as SafeDetailsElement, realEl);
 }
 
 export function createSafeDialogElement(context: DocumentContext, realEl: HTMLDialogElement): SafeDialogElement {
   const known = context.registry.getWrapper<SafeDialogElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setOpen(value: boolean): void { booleanAttribute(context, realEl, "open", value); },
-  }) as SafeDialogElement;
+  }) as SafeDialogElement, realEl);
 }
 
 export function createSafeProgressElement(context: DocumentContext, realEl: HTMLProgressElement): SafeProgressElement {
   const known = context.registry.getWrapper<SafeProgressElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setValue(value: number): void { attribute(context, realEl, "value", String(Number(value))); },
     setMax(value: number): void { attribute(context, realEl, "max", String(Number(value))); },
-  }) as SafeProgressElement;
+  }) as SafeProgressElement, realEl);
 }
 
 export function createSafeMeterElement(context: DocumentContext, realEl: HTMLMeterElement): SafeMeterElement {
   const known = context.registry.getWrapper<SafeMeterElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     setValue(value: number): void { attribute(context, realEl, "value", String(Number(value))); },
     setMin(value: number): void { attribute(context, realEl, "min", String(Number(value))); },
     setMax(value: number): void { attribute(context, realEl, "max", String(Number(value))); },
-  }) as SafeMeterElement;
+  }) as SafeMeterElement, realEl);
 }
 
 export function createSafeListElement(context: DocumentContext, realEl: HTMLUListElement | HTMLOListElement): SafeListElement {
   const known = context.registry.getWrapper<SafeListElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     createItem(): SafeElement {
       const li = createSafeElement(context, context.createElement("li"));
       try {
@@ -602,15 +605,15 @@ export function createSafeListElement(context: DocumentContext, realEl: HTMLULis
         throw error;
       }
     },
-  }) as SafeListElement;
+  }) as SafeListElement, realEl);
 }
 
 export function createSafeDescriptionListElement(context: DocumentContext, realEl: HTMLDListElement): SafeDescriptionListElement {
   const known = context.registry.getWrapper<SafeDescriptionListElement>(realEl);
   if (known) return known;
-  const base = createSafeElement(context, realEl);
+  const base = buildSafeElement(context, realEl);
 
-  return Object.assign(base, {
+  return context.complete(Object.assign(base, {
     createTerm(): SafeElement {
       const dt = createSafeElement(context, context.createElement("dt"));
       try {
@@ -631,5 +634,5 @@ export function createSafeDescriptionListElement(context: DocumentContext, realE
         throw error;
       }
     },
-  }) as SafeDescriptionListElement;
+  }) as SafeDescriptionListElement, realEl);
 }

@@ -149,6 +149,9 @@ export interface SafeStyle {
 export type EventHandler<Event extends SafeEvent = SafeEvent> = (event: Event) => void;
 export type EventCleanup = () => void;
 
+/** Host-supplied SES-compatible recursive object graph finalizer. */
+export type Hardener = <Value>(value: Value) => Value;
+
 /** Per-document hard limits. Values are aggregate live usage, except operations. */
 export interface SafeDocumentQuotas {
   readonly nodes: number;
@@ -168,6 +171,11 @@ export interface SafeDocumentQuotas {
 }
 
 export interface SafeDocumentOptions {
+  /**
+   * The host must call SES lockdown before importing this package and pass its
+   * resulting global harden function here as an own data property.
+   */
+  readonly harden: Hardener;
   readonly quotas?: Partial<SafeDocumentQuotas>;
   /** Missing policy means every URL-bearing sink is denied. */
   readonly urlPolicy?: SafeURLPolicy;

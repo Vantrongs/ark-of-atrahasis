@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { createSafeDocument, SafeDOMError } from "../src/index.ts";
+import { isSafeDOMError } from "../src/index.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
@@ -28,14 +29,14 @@ describe("owner-realm platform boundary", () => {
       thrown = error;
     }
 
-    expect(thrown).toBeInstanceOf(SafeDOMError);
-    if (!(thrown instanceof SafeDOMError)) return;
+    expect(isSafeDOMError(thrown)).toBe(true);
+    if (!isSafeDOMError(thrown)) return;
     expect(thrown).toMatchObject({
       name: "SafeDOMError",
       code: "DOM_OPERATION_FAILED",
       operation: "ShadowRoot.removeChild",
-      stack: undefined,
     });
+    expect(Object.hasOwn(thrown, "stack")).toBe(false);
     expect(Object.hasOwn(thrown, "cause")).toBe(false);
   });
 
@@ -165,9 +166,9 @@ function expectSafeError(action: () => unknown, code: string): void {
     thrown = error;
   }
 
-  expect(thrown).toBeInstanceOf(SafeDOMError);
-  if (!(thrown instanceof SafeDOMError)) return;
+  expect(isSafeDOMError(thrown)).toBe(true);
+  if (!isSafeDOMError(thrown)) return;
   expect(thrown.code).toBe(code);
-  expect(thrown.stack).toBeUndefined();
+  expect(Object.hasOwn(thrown, "stack")).toBe(false);
   expect(Object.hasOwn(thrown, "cause")).toBe(false);
 }

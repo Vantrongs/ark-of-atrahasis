@@ -21,9 +21,16 @@ const page = `<!doctype html>
     </form>
     <p id="outside-sentinel" data-state="host-owned">outside-original</p>
     <iframe id="foreign-realm" src="/iframe.html"></iframe>
+    <script src="/ses/lockdown.umd.min.js"></script>
+    <script>lockdown();</script>
     <script type="module">
       import { createSafeDocument } from "/dist/index.js";
-      globalThis.arkPublicAPI = Object.freeze({ createSafeDocument });
+      const createHardenedSafeDocument = (root, options = {}) => {
+        return createSafeDocument(root, { ...options, harden });
+      };
+      globalThis.arkPublicAPI = harden({
+        createSafeDocument: createHardenedSafeDocument,
+      });
       globalThis.arkHarnessReady = true;
     </script>
   </body>
@@ -48,6 +55,12 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/" || url.pathname === "/health" || url.pathname === "/barrier") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(url.pathname === "/" ? page : "ok");
+      return;
+    }
+    if (url.pathname === "/ses/lockdown.umd.min.js") {
+      const artifact = await readFile(`${repositoryRoot}node_modules/ses/dist/lockdown.umd.min.js`);
+      response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      response.end(artifact);
       return;
     }
     if (url.pathname === "/iframe.html") {

@@ -12,7 +12,7 @@ import {
   requirePrimitiveBoolean,
   requirePrimitiveString,
 } from "../src/primitives.ts";
-import { SafeDOMError } from "../src/errors.ts";
+import { isSafeDOMError } from "../src/errors.ts";
 
 const requestBearingCSS: ReadonlyArray<readonly [string, string]> = [
   ["plain url", "background: url(https://attacker.test/pixel)"],
@@ -117,8 +117,8 @@ test("primitive guards never invoke attacker coercion hooks", () => {
   assert.equal(scanCSSNetworkRisk(stateful).risky, true);
   assert.equal(isInputTypeAllowed(stateful), false);
   assert.equal(isButtonTypeAllowed(stateful), false);
-  assert.throws(() => requirePrimitiveString(stateful, "test.string"), SafeDOMError);
-  assert.throws(() => requirePrimitiveBoolean(stateful, "test.boolean"), SafeDOMError);
-  assert.throws(() => requireFiniteNumber(stateful, "test.number"), SafeDOMError);
+  assert.throws(() => requirePrimitiveString(stateful, "test.string"), isSafeDOMError);
+  assert.throws(() => requirePrimitiveBoolean(stateful, "test.boolean"), isSafeDOMError);
+  assert.throws(() => requireFiniteNumber(stateful, "test.number"), isSafeDOMError);
   assert.equal(coercions, 0);
 });

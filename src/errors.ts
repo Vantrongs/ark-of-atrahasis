@@ -6,6 +6,7 @@ export type SafeDOMErrorCode =
   | "DUPLICATE_REGISTRATION"
   | "OWNER_DOCUMENT_MISMATCH"
   | "ERR_INVALID_ARGUMENT"
+  | "ERR_INVALID_HARDENER"
   | "ERR_INVALID_POLICY"
   | "ERR_URL_DENIED"
   | "DOCUMENT_DISPOSED"
@@ -15,6 +16,13 @@ export type SafeDOMErrorCode =
   | "QUOTA_EXCEEDED"
   | "DOM_OPERATION_FAILED";
 
+export interface SafeDOMError {
+  readonly name: "SafeDOMError";
+  readonly code: SafeDOMErrorCode;
+  readonly operation: string;
+  readonly message: string;
+}
+
 const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze({
   INVALID_ROOT: "The root capability is invalid",
   ROOT_ALREADY_CLAIMED: "The root capability is already claimed",
@@ -23,6 +31,7 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   DUPLICATE_REGISTRATION: "The DOM node already has a different wrapper",
   OWNER_DOCUMENT_MISMATCH: "The DOM node belongs to a different document",
   ERR_INVALID_ARGUMENT: "The operation received an invalid argument",
+  ERR_INVALID_HARDENER: "The host hardener is invalid",
   ERR_INVALID_POLICY: "The host security policy is invalid",
   ERR_URL_DENIED: "The URL was denied by host policy",
   DOCUMENT_DISPOSED: "The safe document has been disposed",
@@ -33,35 +42,50 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   DOM_OPERATION_FAILED: "The platform DOM operation failed",
 });
 
-/**
- * Stable errors produced by the capability boundary itself.
- *
- * Native DOM exceptions are never used to signal ownership failures.
- */
-export class SafeDOMError extends Error {
-  readonly code: SafeDOMErrorCode;
-  readonly operation: string;
+const ERROR_CODES: ReadonlySet<string> = new Set(Object.keys(ERROR_MESSAGES));
+const ERROR_RECORD_PROTOTYPE = Object.prototype;
 
-  constructor(code: SafeDOMErrorCode, operation: string) {
-    super(ERROR_MESSAGES[code]);
-    this.name = "SafeDOMError";
-    this.code = code;
-    this.operation = operation;
+/** Create a primitive-only, pass-by-copy boundary error record. */
+export function createSafeDOMError(code: SafeDOMErrorCode, operation: string): SafeDOMError {
+  return Object.freeze({
+    name: "SafeDOMError" as const,
+    code,
+    operation,
+    message: ERROR_MESSAGES[code],
+  });
+}
 
-    Object.defineProperty(this, "stack", {
-      value: undefined,
-      configurable: false,
-      enumerable: false,
-      writable: false,
-    });
-    Object.freeze(this);
+/** Recognize the stable record without consulting getters or prototypes. */
+export function isSafeDOMError(value: unknown): value is SafeDOMError {
+  if (value === null || typeof value !== "object") return false;
+  try {
+    if (Object.getPrototypeOf(value) !== ERROR_RECORD_PROTOTYPE) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const readString = (name: string): string | undefined => {
+      const descriptor = descriptors[name];
+      return descriptor && "value" in descriptor && typeof descriptor.value === "string"
+        ? descriptor.value
+        : undefined;
+    };
+    const code = readString("code");
+    return (
+      Object.isFrozen(value)
+      && Reflect.ownKeys(descriptors).length === 4
+      && readString("name") === "SafeDOMError"
+      && code !== undefined
+      && ERROR_CODES.has(code)
+      && readString("operation") !== undefined
+      && readString("message") === ERROR_MESSAGES[code as SafeDOMErrorCode]
+    );
+  } catch {
+    return false;
   }
 }
 
 export function invalidArgument(operation: string): SafeDOMError {
-  return new SafeDOMError("ERR_INVALID_ARGUMENT", operation);
+  return createSafeDOMError("ERR_INVALID_ARGUMENT", operation);
 }
 
 export function invalidPolicy(operation: string): SafeDOMError {
-  return new SafeDOMError("ERR_INVALID_POLICY", operation);
+  return createSafeDOMError("ERR_INVALID_POLICY", operation);
 }

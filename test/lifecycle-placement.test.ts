@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSafeDocument, type SafeURLPolicy } from "../src/index.ts";
+import type { SafeURLPolicy } from "../src/index.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 const REQUEST_POLICY: SafeURLPolicy = {
   baseURL: "https://example.test/",

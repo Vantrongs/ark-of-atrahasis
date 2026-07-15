@@ -23,6 +23,5 @@ export function createSafeTextNode(context: DocumentContext, realText: Text): Sa
     dispose(): void { context.disposeNode(realText); },
   };
 
-  context.register(wrapper, realText);
-  return wrapper;
+  return context.complete(wrapper, realText);
 }

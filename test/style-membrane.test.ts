@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { test } from "vitest";
 
-import { SafeDOMError } from "../src/errors.ts";
-import { createSafeDocument } from "../src/index.ts";
+import { isSafeDOMError } from "../src/errors.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 import { createStylePolicy, type SafeStylePolicy } from "../src/style-policy.ts";
 
 function fixture(): { dom: JSDOM; root: ShadowRoot } {
@@ -52,7 +52,7 @@ test("generic lookup cannot turn a pre-existing style element into raw CSS autho
   assert.equal(existing.textContent, before);
   assert.throws(
     () => createSafeDocument(existing as unknown as ShadowRoot),
-    (error: unknown) => error instanceof SafeDOMError && error.code === "INVALID_ROOT",
+    (error: unknown) => isSafeDOMError(error) && error.code === "INVALID_ROOT",
   );
 });
 
@@ -162,7 +162,7 @@ test("malicious host style policy accessors collapse to a stable safe error", ()
   assert.throws(
     () => createStylePolicy(policy as unknown as SafeStylePolicy),
     (error: unknown) =>
-      error instanceof SafeDOMError &&
+      isSafeDOMError(error) &&
       error.code === "ERR_INVALID_POLICY" &&
       error.operation === "stylePolicy.allowedProperties",
   );
@@ -172,7 +172,7 @@ test("an invalid style policy does not consume the ShadowRoot capability", () =>
   const { root } = fixture();
   assert.throws(
     () => createSafeDocument(root, { stylePolicy: { allowedProperties: ["width", "nope"] as never } }),
-    (error: unknown) => error instanceof SafeDOMError && error.code === "ERR_INVALID_POLICY",
+    (error: unknown) => isSafeDOMError(error) && error.code === "ERR_INVALID_POLICY",
   );
   assert.doesNotThrow(() => createSafeDocument(root));
 });

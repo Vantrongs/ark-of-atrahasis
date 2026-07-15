@@ -1,5 +1,5 @@
 import type { SafeElement, SafeTextNode } from "./types.ts";
-import { SafeDOMError } from "./errors.ts";
+import { createSafeDOMError } from "./errors.ts";
 
 export type SafeNode = SafeElement | SafeTextNode;
 export type SafeChildNode = SafeElement | SafeTextNode;
@@ -36,7 +36,7 @@ export class NodeRegistry {
 
   register(wrapper: SafeNode, real: RealNode): RegistryEntry {
     if (this.#ownerDocumentOf(real) !== this.#ownerDocument) {
-      throw new SafeDOMError(
+      throw createSafeDOMError(
         "OWNER_DOCUMENT_MISMATCH",
         "A wrapper can only own nodes from its ShadowRoot document",
       );
@@ -46,7 +46,7 @@ export class NodeRegistry {
     const byWrapper = this.#entryByWrapper.get(wrapper);
     if (byReal?.wrapper === wrapper && byWrapper?.real === real) return byReal;
     if (byReal || byWrapper) {
-      throw new SafeDOMError(
+      throw createSafeDOMError(
         "DUPLICATE_REGISTRATION",
         "A DOM node has exactly one canonical wrapper per SafeDocument",
       );
@@ -99,7 +99,7 @@ export class NodeRegistry {
   requireEntry(wrapper: SafeNode): RegistryEntry {
     const entry = this.getEntryByWrapper(wrapper);
     if (!entry) {
-      throw new SafeDOMError(
+      throw createSafeDOMError(
         "CROSS_OWNER",
         "The supplied wrapper is not owned by this SafeDocument",
       );

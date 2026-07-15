@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { SafeDOMError } from "../src/errors.ts";
+import { isSafeDOMError } from "../src/errors.ts";
 import { createURLPolicy, type SafeURLPolicy } from "../src/url-policy.ts";
 
 const policy: SafeURLPolicy = {
@@ -36,7 +36,7 @@ test("URL policy denies every sink by default", () => {
     if (!decision.allowed) {
       assert.equal(decision.error.code, "ERR_URL_DENIED");
       assert.equal(decision.error.operation, sink);
-      assert.equal(decision.error.stack, undefined);
+      assert.equal(Object.hasOwn(decision.error, "stack"), false);
       assert.equal(Object.isFrozen(decision.error), true);
     }
   }
@@ -115,13 +115,13 @@ test("URL decisions reject objects without invoking stateful coercion", () => {
 test("invalid host policy throws only the stable library error", () => {
   assert.throws(
     () => createURLPolicy({ baseURL: "javascript:alert(1)", sinks: {} }),
-    (error: unknown) => error instanceof SafeDOMError && error.code === "ERR_INVALID_POLICY",
+    (error: unknown) => isSafeDOMError(error) && error.code === "ERR_INVALID_POLICY",
   );
   assert.throws(
     () => createURLPolicy({
       baseURL: "https://example.test/",
       sinks: { "image.src": { allowedOrigins: [] } },
     }),
-    (error: unknown) => error instanceof SafeDOMError && error.code === "ERR_INVALID_POLICY",
+    (error: unknown) => isSafeDOMError(error) && error.code === "ERR_INVALID_POLICY",
   );
 });

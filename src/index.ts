@@ -37,8 +37,8 @@ import { createSafeTextNode } from "./text.ts";
 import { invalidArgument } from "./errors.ts";
 import { requireFiniteNumber, requirePrimitiveString } from "./primitives.ts";
 
-export { SafeDOMError } from "./errors.ts";
-export type { SafeDOMErrorCode } from "./errors.ts";
+export { isSafeDOMError } from "./errors.ts";
+export type { SafeDOMError, SafeDOMErrorCode } from "./errors.ts";
 export type {
   SafeDocument,
   SafeElement,
@@ -84,6 +84,7 @@ export type {
   EventCleanup,
   SafeDocumentOptions,
   SafeDocumentQuotas,
+  Hardener,
 } from "./types.ts";
 
 export {
@@ -134,12 +135,12 @@ function simple(context: DocumentContext, tag: string): SafeElement {
  */
 export function createSafeDocument(
   root: ShadowRoot,
-  options: SafeDocumentOptions = {},
+  options: SafeDocumentOptions,
 ): SafeDocument {
   const context = createDocumentContext(root, options);
   const { registry } = context;
 
-  return {
+  const document: SafeDocument = {
     appendChild(child): void {
       context.documentOperation(() => {
         context.platform.appendChild(
@@ -291,4 +292,11 @@ export function createSafeDocument(
       });
     },
   };
+
+  try {
+    return context.complete(document);
+  } catch (error) {
+    context.abandonInitialization();
+    throw error;
+  }
 }

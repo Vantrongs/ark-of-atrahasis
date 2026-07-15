@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { createSafeDocument, SafeDOMError } from "../src/index.ts";
+import { isSafeDOMError } from "../src/index.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
@@ -89,8 +90,8 @@ describe("strict ShadowRoot capability core", () => {
       createSafeDocument(null as unknown as ShadowRoot);
       throw new Error("expected createSafeDocument to fail");
     } catch (error) {
-      expect(error).toBeInstanceOf(SafeDOMError);
-      expect((error as SafeDOMError).code).toBe("INVALID_ROOT");
+      expect(isSafeDOMError(error)).toBe(true);
+      if (isSafeDOMError(error)) expect(error.code).toBe("INVALID_ROOT");
     }
   });
 });
