@@ -114,6 +114,246 @@ test("denied image, link, media, and form actions leave the host and browser led
   expectNoUnapprovedActivity(browserLedger);
 });
 
+test("opaque identifier and form namespace leaves host form, named access, and autofill state unchanged", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(() => {
+    const mount = document.querySelector("#mount");
+    const hostForm = document.querySelector("#host-form");
+    const hostControl = document.querySelector("#host-control");
+    const outside = document.querySelector("#outside-sentinel");
+    if (!(mount instanceof HTMLElement) ||
+        !(hostForm instanceof HTMLFormElement) ||
+        !(hostControl instanceof HTMLInputElement) ||
+        !(outside instanceof HTMLElement)) {
+      throw new Error("host fixture is incomplete");
+    }
+    hostControl.id = "shared-key";
+    hostControl.name = "shared-key";
+    hostControl.value = "host-value";
+    hostControl.autocomplete = "email";
+    const hostLabel = document.createElement("label");
+    hostLabel.htmlFor = "shared-key";
+    hostLabel.textContent = "host label";
+    hostForm.prepend(hostLabel);
+
+    const snapshotHost = () => ({
+      formValues: new FormData(hostForm).getAll("shared-key"),
+      namedItemIsHost: hostForm.elements.namedItem("shared-key") === hostControl,
+      idLookupIsHost: document.getElementById("shared-key") === hostControl,
+      nameLookupIsHostOnly: document.getElementsByName("shared-key").length === 1 &&
+        document.getElementsByName("shared-key")[0] === hostControl,
+      documentNamedIsHost: document["shared-key"] === hostControl,
+      windowNamedIsHost: window["shared-key"] === hostControl,
+      value: hostControl.value,
+      checked: hostControl.checked,
+      autocomplete: hostControl.autocomplete,
+      controlHTML: hostControl.outerHTML,
+      labelHTML: hostLabel.outerHTML,
+      formAction: hostForm.action,
+    });
+    const before = snapshotHost();
+
+    const root = mount.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const input = safeDocument.createInput();
+    const textarea = safeDocument.createTextarea();
+    const select = safeDocument.createSelect();
+    const option = safeDocument.createOption();
+    const button = safeDocument.createButton();
+    const radioA = safeDocument.createInput();
+    const radioB = safeDocument.createInput();
+    const label = safeDocument.createLabel();
+    const described = safeDocument.createDiv();
+    const cell = safeDocument.createTh();
+
+    input.setId("shared-key");
+    textarea.setId("textarea-key");
+    select.setId("select-key");
+    button.setId("button-key");
+    for (const control of [input, textarea, select, button]) control.setName("shared-key");
+    option.setValue("safe-option");
+    option.setText("safe option");
+    select.appendChild(option);
+    radioA.setType("radio");
+    radioB.setType("radio");
+    radioA.setName("radio-choice");
+    radioB.setName("radio-choice");
+    label.setFor("shared-key");
+    label.setText("safe label");
+    described.setAria("controls", "shared-key textarea-key");
+    cell.setHeaders("shared-key textarea-key");
+    for (const node of [
+      label,
+      input,
+      textarea,
+      select,
+      button,
+      radioA,
+      radioB,
+      described,
+      cell,
+    ]) {
+      safeDocument.appendChild(node);
+    }
+
+    const secondMount = document.createElement("div");
+    document.body.append(secondMount);
+    const secondRoot = secondMount.attachShadow({ mode: "open" });
+    const secondDocument = globalThis.arkPublicAPI.createSafeDocument(secondRoot);
+    const secondInput = secondDocument.createInput();
+    secondInput.setId("shared-key");
+    secondInput.setName("shared-key");
+    secondDocument.appendChild(secondInput);
+
+    const physicalInput = root.querySelector("input");
+    const physicalTextarea = root.querySelector("textarea");
+    const physicalSelect = root.querySelector("select");
+    const physicalButton = root.querySelector("button");
+    const physicalLabel = root.querySelector("label");
+    const physicalRadios = [...root.querySelectorAll('input[type="radio"]')];
+    const physicalDescribed = root.querySelector("div");
+    const physicalCell = root.querySelector("th");
+    const secondPhysicalInput = secondRoot.querySelector("input");
+    if (!(physicalInput instanceof HTMLInputElement) ||
+        !(physicalTextarea instanceof HTMLTextAreaElement) ||
+        !(physicalSelect instanceof HTMLSelectElement) ||
+        !(physicalButton instanceof HTMLButtonElement) ||
+        !(physicalLabel instanceof HTMLLabelElement) ||
+        !(physicalDescribed instanceof HTMLElement) ||
+        !(physicalCell instanceof HTMLTableCellElement) ||
+        !(secondPhysicalInput instanceof HTMLInputElement) ||
+        physicalRadios.length !== 2) {
+      throw new Error("safe namespace controls were not created");
+    }
+
+    const namespaceValues = [
+      physicalInput.id,
+      physicalInput.name,
+      physicalTextarea.id,
+      physicalTextarea.name,
+      physicalSelect.id,
+      physicalSelect.name,
+      physicalButton.id,
+      physicalButton.name,
+      physicalLabel.htmlFor,
+      physicalDescribed.getAttribute("aria-controls") ?? "",
+      physicalCell.headers,
+    ];
+    const tokenPattern = /^aoa-[in]-[0-9a-f]{48}(?: aoa-i-[0-9a-f]{48})*$/;
+    const namespaceValuesOpaque = namespaceValues.every((value) => (
+      tokenPattern.test(value) && !value.includes("shared-key")
+    ));
+    const perDocumentOpaque = physicalInput.id !== secondPhysicalInput.id &&
+      physicalInput.name !== secondPhysicalInput.name;
+    const sameNameWithinDocument = [
+      physicalTextarea.name,
+      physicalSelect.name,
+      physicalButton.name,
+    ].every((value) => value === physicalInput.name);
+
+    physicalLabel.click();
+    const labelTargetsSafeInput = root.activeElement === physicalInput;
+    physicalRadios[0].click();
+    physicalRadios[1].click();
+    const radioGroupingPreserved = physicalRadios[0].checked === false &&
+      physicalRadios[1].checked === true;
+    physicalInput.focus();
+    physicalInput.value = "guest-value";
+    physicalInput.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "x",
+      inputType: "insertText",
+    }));
+    physicalButton.click();
+
+    const autofillFacing = {
+      autocompleteOff: [
+        physicalInput.autocomplete,
+        physicalTextarea.autocomplete,
+        physicalSelect.autocomplete,
+      ].every((value) => value === "off"),
+      namesAreOpaque: [physicalInput, physicalTextarea, physicalSelect].every((control) => (
+        /^aoa-n-[0-9a-f]{48}$/.test(control.name) && control.name !== "shared-key"
+      )),
+      idsAreOpaque: [physicalInput, physicalTextarea, physicalSelect].every((control) => (
+        /^aoa-i-[0-9a-f]{48}$/.test(control.id) && !control.id.includes("shared-key")
+      )),
+      formsNull: [physicalInput, physicalTextarea, physicalSelect, physicalButton]
+        .every((control) => control.form === null),
+      buttonType: physicalButton.type,
+    };
+
+    document.body.append(physicalInput);
+    label.getFor();
+    let revokedCode = null;
+    try {
+      input.getId();
+    } catch (error) {
+      revokedCode = error?.code ?? null;
+    }
+    const reparentCleanup = {
+      idRemoved: !physicalInput.hasAttribute("id"),
+      nameRemoved: !physicalInput.hasAttribute("name"),
+      revokedCode,
+      lookupNull: safeDocument.getElement("shared-key") === null,
+    };
+
+    return {
+      before,
+      after: snapshotHost(),
+      namespaceValuesOpaque,
+      perDocumentOpaque,
+      sameNameWithinDocument,
+      labelTargetsSafeInput,
+      radioGroupingPreserved,
+      localLookupCanonical: safeDocument.getElement("textarea-key") === textarea,
+      logicalGetters: {
+        id: textarea.getId(),
+        for: label.getFor(),
+        headers: cell.getHeaders(),
+        aria: described.getAria("controls"),
+      },
+      autofillFacing,
+      reparentCleanup,
+    };
+  });
+
+  await flushBrowserWork(page);
+  expect(result.after).toEqual(result.before);
+  expect(result).toMatchObject({
+    namespaceValuesOpaque: true,
+    perDocumentOpaque: true,
+    sameNameWithinDocument: true,
+    labelTargetsSafeInput: true,
+    radioGroupingPreserved: true,
+    localLookupCanonical: true,
+    logicalGetters: {
+      id: "textarea-key",
+      for: "shared-key",
+      headers: "shared-key textarea-key",
+      aria: "shared-key textarea-key",
+    },
+    autofillFacing: {
+      autocompleteOff: true,
+      namesAreOpaque: true,
+      idsAreOpaque: true,
+      formsNull: true,
+      buttonType: "button",
+    },
+    reparentCleanup: {
+      idRemoved: true,
+      nameRemoved: true,
+      revokedCode: "NODE_REVOKED",
+      lookupNull: true,
+    },
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
 test("raw host reparent, adopt, and detach-to-external placement revoke before guest mutation", async ({
   page,
   browserLedger,

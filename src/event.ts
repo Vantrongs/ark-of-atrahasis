@@ -11,6 +11,7 @@ import type {
   SafeTouchEvent,
   SafeTouchSnapshot,
 } from "./types.ts";
+import type { EventTargetResolution } from "./identifier-namespace.ts";
 
 type PlatformFunction = (...arguments_: unknown[]) => unknown;
 type GetterRecord = Readonly<Record<string, PlatformFunction | undefined>>;
@@ -24,7 +25,6 @@ interface EventAccessors {
   readonly touchEvent: GetterRecord;
   readonly focus: GetterRecord;
   readonly input: GetterRecord;
-  readonly element: GetterRecord;
   readonly inputElement: GetterRecord;
   readonly controlValueGetters: readonly (PlatformFunction | undefined)[];
   readonly touchList: GetterRecord;
@@ -184,7 +184,6 @@ function captureEventAccessors(realm: unknown): EventAccessors {
     ]),
     focus: captureGetters(realm, "FocusEvent", ["relatedTarget"]),
     input: captureGetters(realm, "InputEvent", ["data", "inputType", "isComposing"]),
-    element: captureGetters(realm, "Element", ["id"]),
     inputElement: captureGetters(realm, "HTMLInputElement", ["checked"]),
     controlValueGetters: Object.freeze(valueGetters),
     touchList: Object.freeze({
@@ -239,9 +238,17 @@ function readNumber(getter: PlatformFunction | undefined, receiver: unknown): nu
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function snapshotTarget(target: unknown, accessors: EventAccessors): SafeEventTargetSnapshot {
+type EventTargetResolver = (target: unknown) => EventTargetResolution;
+
+function snapshotTarget(
+  target: unknown,
+  accessors: EventAccessors,
+  resolveTarget: EventTargetResolver,
+): SafeEventTargetSnapshot {
+  const resolution = resolveTarget(target);
+  if (!resolution.owned) return Object.freeze({ id: "" });
   const snapshot: { id: string; value?: string; checked?: boolean } = {
-    id: readString(accessors.element.id, target),
+    id: resolution.localId,
   };
 
   for (const valueGetter of accessors.controlValueGetters) {
@@ -257,8 +264,14 @@ function snapshotTarget(target: unknown, accessors: EventAccessors): SafeEventTa
   return Object.freeze(snapshot);
 }
 
-function snapshotRelatedTarget(target: unknown, accessors: EventAccessors): SafeEventTargetSnapshot | null {
-  return target === null || target === undefined ? null : snapshotTarget(target, accessors);
+function snapshotRelatedTarget(
+  target: unknown,
+  accessors: EventAccessors,
+  resolveTarget: EventTargetResolver,
+): SafeEventTargetSnapshot | null {
+  return target === null || target === undefined
+    ? null
+    : snapshotTarget(target, accessors, resolveTarget);
 }
 
 function modifiers(getters: GetterRecord, nativeEvent: Event): SafeModifierSnapshotRecord {
@@ -302,6 +315,7 @@ function baseSnapshot(
   nativeEvent: Event,
   accessors: EventAccessors,
   cell: NativeEventCell,
+  resolveTarget: EventTargetResolver,
 ): SafeEventBaseRecord {
   return {
     kind,
@@ -312,8 +326,12 @@ function baseSnapshot(
     defaultPrevented: readBoolean(accessors.event.defaultPrevented, nativeEvent),
     eventPhase: readNumber(accessors.event.eventPhase, nativeEvent),
     timeStamp: readNumber(accessors.event.timeStamp, nativeEvent),
-    target: snapshotTarget(readUnknown(accessors.event.target, nativeEvent), accessors),
-    currentTarget: snapshotTarget(readUnknown(accessors.event.currentTarget, nativeEvent), accessors),
+    target: snapshotTarget(readUnknown(accessors.event.target, nativeEvent), accessors, resolveTarget),
+    currentTarget: snapshotTarget(
+      readUnknown(accessors.event.currentTarget, nativeEvent),
+      accessors,
+      resolveTarget,
+    ),
     preventDefault: cancellationCapability(cell, accessors.eventMethods.preventDefault),
     stopPropagation: cancellationCapability(cell, accessors.eventMethods.stopPropagation),
     stopImmediatePropagation: cancellationCapability(cell, accessors.eventMethods.stopImmediatePropagation),
@@ -336,7 +354,11 @@ interface SafeEventBaseRecord {
   readonly stopImmediatePropagation: () => boolean;
 }
 
-function mouseFields(nativeEvent: Event, accessors: EventAccessors): Omit<
+function mouseFields(
+  nativeEvent: Event,
+  accessors: EventAccessors,
+  resolveTarget: EventTargetResolver,
+): Omit<
   SafeMouseEvent,
   keyof SafeEventBaseRecord | "kind"
 > {
@@ -354,11 +376,19 @@ function mouseFields(nativeEvent: Event, accessors: EventAccessors): Omit<
     movementY: readNumber(accessors.mouse.movementY, nativeEvent),
     button: readNumber(accessors.mouse.button, nativeEvent),
     buttons: readNumber(accessors.mouse.buttons, nativeEvent),
-    relatedTarget: snapshotRelatedTarget(readUnknown(accessors.mouse.relatedTarget, nativeEvent), accessors),
+    relatedTarget: snapshotRelatedTarget(
+      readUnknown(accessors.mouse.relatedTarget, nativeEvent),
+      accessors,
+      resolveTarget,
+    ),
   };
 }
 
-function snapshotTouch(touch: unknown, accessors: EventAccessors): SafeTouchSnapshot {
+function snapshotTouch(
+  touch: unknown,
+  accessors: EventAccessors,
+  resolveTarget: EventTargetResolver,
+): SafeTouchSnapshot {
   return Object.freeze({
     identifier: readNumber(accessors.touch.identifier, touch),
     screenX: readNumber(accessors.touch.screenX, touch),
@@ -371,11 +401,15 @@ function snapshotTouch(touch: unknown, accessors: EventAccessors): SafeTouchSnap
     radiusY: readNumber(accessors.touch.radiusY, touch),
     rotationAngle: readNumber(accessors.touch.rotationAngle, touch),
     force: readNumber(accessors.touch.force, touch),
-    target: snapshotTarget(readUnknown(accessors.touch.target, touch), accessors),
+    target: snapshotTarget(readUnknown(accessors.touch.target, touch), accessors, resolveTarget),
   });
 }
 
-function snapshotTouchList(list: unknown, accessors: EventAccessors): readonly SafeTouchSnapshot[] {
+function snapshotTouchList(
+  list: unknown,
+  accessors: EventAccessors,
+  resolveTarget: EventTargetResolver,
+): readonly SafeTouchSnapshot[] {
   const rawLength = readUnknown(accessors.touchList.length, list);
   if (
     typeof rawLength !== "number" ||
@@ -397,7 +431,9 @@ function snapshotTouchList(list: unknown, accessors: EventAccessors): readonly S
     } catch {
       continue;
     }
-    if (touch !== null && touch !== undefined) snapshots.push(snapshotTouch(touch, accessors));
+    if (touch !== null && touch !== undefined) {
+      snapshots.push(snapshotTouch(touch, accessors, resolveTarget));
+    }
   }
   return Object.freeze(snapshots);
 }
@@ -407,8 +443,9 @@ function createSnapshot(
   kind: SafeEventKind,
   accessors: EventAccessors,
   cell: NativeEventCell,
+  resolveTarget: EventTargetResolver,
 ): SafeEvent {
-  const base = baseSnapshot(kind, nativeEvent, accessors, cell);
+  const base = baseSnapshot(kind, nativeEvent, accessors, cell, resolveTarget);
 
   switch (kind) {
     case "keyboard": {
@@ -425,14 +462,18 @@ function createSnapshot(
       return Object.freeze(snapshot);
     }
     case "mouse": {
-      const snapshot: SafeMouseEvent = { ...base, kind, ...mouseFields(nativeEvent, accessors) };
+      const snapshot: SafeMouseEvent = {
+        ...base,
+        kind,
+        ...mouseFields(nativeEvent, accessors, resolveTarget),
+      };
       return Object.freeze(snapshot);
     }
     case "pointer": {
       const snapshot: SafePointerEvent = {
         ...base,
         kind,
-        ...mouseFields(nativeEvent, accessors),
+        ...mouseFields(nativeEvent, accessors, resolveTarget),
         pointerId: readNumber(accessors.pointer.pointerId, nativeEvent),
         width: readNumber(accessors.pointer.width, nativeEvent),
         height: readNumber(accessors.pointer.height, nativeEvent),
@@ -451,9 +492,21 @@ function createSnapshot(
         ...base,
         kind,
         ...modifiers(accessors.touchEvent, nativeEvent),
-        touches: snapshotTouchList(readUnknown(accessors.touchEvent.touches, nativeEvent), accessors),
-        targetTouches: snapshotTouchList(readUnknown(accessors.touchEvent.targetTouches, nativeEvent), accessors),
-        changedTouches: snapshotTouchList(readUnknown(accessors.touchEvent.changedTouches, nativeEvent), accessors),
+        touches: snapshotTouchList(
+          readUnknown(accessors.touchEvent.touches, nativeEvent),
+          accessors,
+          resolveTarget,
+        ),
+        targetTouches: snapshotTouchList(
+          readUnknown(accessors.touchEvent.targetTouches, nativeEvent),
+          accessors,
+          resolveTarget,
+        ),
+        changedTouches: snapshotTouchList(
+          readUnknown(accessors.touchEvent.changedTouches, nativeEvent),
+          accessors,
+          resolveTarget,
+        ),
       };
       return Object.freeze(snapshot);
     }
@@ -461,7 +514,11 @@ function createSnapshot(
       const snapshot: SafeFocusEvent = {
         ...base,
         kind,
-        relatedTarget: snapshotRelatedTarget(readUnknown(accessors.focus.relatedTarget, nativeEvent), accessors),
+        relatedTarget: snapshotRelatedTarget(
+          readUnknown(accessors.focus.relatedTarget, nativeEvent),
+          accessors,
+          resolveTarget,
+        ),
       };
       return Object.freeze(snapshot);
     }
@@ -483,14 +540,24 @@ function createSnapshot(
 }
 
 /** Capture realm-local WebIDL accessors before an adversarial event arrives. */
-export function createEventSnapshotter(realm: unknown, complete: Completer): EventSnapshotter {
+export function createEventSnapshotter(
+  realm: unknown,
+  complete: Completer,
+  resolveTarget: EventTargetResolver,
+): EventSnapshotter {
   const accessors = captureEventAccessors(realm);
   const open = Object.freeze(<Kind extends SafeEventKind>(
     nativeEvent: Event,
     kind: Kind,
   ): SafeEventDispatch<Extract<SafeEvent, { readonly kind: Kind }>> => {
     const cell: NativeEventCell = { nativeEvent };
-    const event = complete(createSnapshot(nativeEvent, kind, accessors, cell)) as Extract<SafeEvent, { readonly kind: Kind }>;
+    const event = complete(createSnapshot(
+      nativeEvent,
+      kind,
+      accessors,
+      cell,
+      resolveTarget,
+    )) as Extract<SafeEvent, { readonly kind: Kind }>;
     let closed = false;
     const close = Object.freeze((): void => {
       if (closed) return;

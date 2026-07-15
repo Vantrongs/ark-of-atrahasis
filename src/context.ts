@@ -1,6 +1,13 @@
 import { createSafeDOMError, isSafeDOMError, type SafeDOMError } from "./errors.ts";
 import { createEventSnapshotter, type EventSnapshotter } from "./event.ts";
 import {
+  createIdentifierNamespace,
+  type IdentifierNamespace,
+  type IdentifierReferenceKind,
+  type NamespaceQuotaDelta,
+  type PreparedNamespaceMutation,
+} from "./identifier-namespace.ts";
+import {
   NodeRegistry,
   type AccountedResource,
   type RealNode,
@@ -36,6 +43,9 @@ export const DEFAULT_SAFE_DOCUMENT_QUOTAS: Readonly<SafeDocumentQuotas> = Object
   styleBytes: 256_000,
   requests: 64,
   requestAttempts: 256,
+  identifierMappings: 4_096,
+  identifierReferences: 8_192,
+  identifierBytes: 256_000,
 });
 
 type QuotaUsage = { -readonly [Name in keyof SafeDocumentQuotas]: number };
@@ -60,6 +70,9 @@ const QUOTA_NAMES = [
   "styleBytes",
   "requests",
   "requestAttempts",
+  "identifierMappings",
+  "identifierReferences",
+  "identifierBytes",
 ] as const;
 
 interface NormalizedOptions {
@@ -226,6 +239,17 @@ export interface DocumentContext {
     value: string | null | undefined,
     validate?: () => void,
   ): void;
+  setLocalId(real: Element, local: string): void;
+  getLocalId(real: Element): string;
+  setLocalName(real: Element, local: string): void;
+  setLocalIdReference(
+    real: Element,
+    attributeName: string,
+    local: string,
+    kind: IdentifierReferenceKind,
+  ): void;
+  getLocalIdReference(real: Element, attributeName: string): string | undefined;
+  lookupLocalId(local: string): SafeElement | null;
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
   setURLAttribute(
     real: Element,
@@ -289,6 +313,7 @@ class DocumentContextImplementation implements DocumentContext {
   readonly urlPolicy: URLPolicyEngine;
   readonly stylePolicy: StylePolicyEngine;
   readonly eventSnapshotter: EventSnapshotter;
+  readonly #identifierNamespace: IdentifierNamespace;
   readonly #harden: Hardener;
   readonly #quotas: SafeDocumentQuotas;
   readonly #usage: QuotaUsage = {
@@ -300,6 +325,9 @@ class DocumentContextImplementation implements DocumentContext {
     styleBytes: 0,
     requests: 0,
     requestAttempts: 0,
+    identifierMappings: 0,
+    identifierReferences: 0,
+    identifierBytes: 0,
   };
   #disposed = false;
   #disposalComplete = false;
@@ -318,11 +346,13 @@ class DocumentContextImplementation implements DocumentContext {
     this.#quotas = resolveQuotas(normalizedOptions.quotas);
     this.platform = createPlatformOps(ownerDocument, view);
     this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
+    this.#identifierNamespace = createIdentifierNamespace(root, this.registry, this.platform);
     this.urlPolicy = createURLPolicy(normalizedOptions.urlPolicy, this.platform.URL);
     this.stylePolicy = createStylePolicy(normalizedOptions.stylePolicy);
     this.eventSnapshotter = createEventSnapshotter(
       view,
       <Value>(value: Value): Value => this.complete(value),
+      (target) => this.#identifierNamespace.resolveEventTarget(target),
     );
   }
 
@@ -478,6 +508,54 @@ class DocumentContextImplementation implements DocumentContext {
         else this.platform.setAttribute(real, name, value);
       });
     });
+  }
+
+  setLocalId(real: Element, local: string): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      this.#commitNamespaceMutation(entry, this.#identifierNamespace.prepareId(entry, local));
+    });
+  }
+
+  getLocalId(real: Element): string {
+    return this.nodeOperation(real, () => {
+      return this.#identifierNamespace.readId(this.#requireEntryByReal(real));
+    });
+  }
+
+  setLocalName(real: Element, local: string): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      this.#commitNamespaceMutation(entry, this.#identifierNamespace.prepareName(entry, local));
+    });
+  }
+
+  setLocalIdReference(
+    real: Element,
+    attributeName: string,
+    local: string,
+    kind: IdentifierReferenceKind,
+  ): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      this.#commitNamespaceMutation(
+        entry,
+        this.#identifierNamespace.prepareReference(entry, attributeName, local, kind),
+      );
+    });
+  }
+
+  getLocalIdReference(real: Element, attributeName: string): string | undefined {
+    return this.nodeOperation(real, () => {
+      return this.#identifierNamespace.readReference(
+        this.#requireEntryByReal(real),
+        attributeName,
+      );
+    });
+  }
+
+  lookupLocalId(local: string): SafeElement | null {
+    return this.documentOperation(() => this.#identifierNamespace.lookup(local));
   }
 
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void {
@@ -649,7 +727,16 @@ class DocumentContextImplementation implements DocumentContext {
       }
     }
 
-    this.#disposalComplete = this.registry.entries().length === 0;
+    if (this.registry.entries().length === 0) {
+      try {
+        this.#identifierNamespace.assertEmpty();
+        this.#disposalComplete = true;
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose.namespace");
+      }
+    }
     if (firstFailure !== undefined) throw firstFailure;
   }
 
@@ -692,6 +779,88 @@ class DocumentContextImplementation implements DocumentContext {
       throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
     }
     this.#usage[name] = next;
+  }
+
+  #commitNamespaceMutation(
+    entry: RegistryEntry,
+    prepared: PreparedNamespaceMutation,
+  ): void {
+    if (!this.platform.isElement(entry.real)) {
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.element");
+    }
+    const real = entry.real;
+    const attributeAmount = prepared.physicalValue === null
+      ? 0
+      : utf8ByteLength(prepared.attributeName) + utf8ByteLength(prepared.physicalValue);
+    const previousAmount = entry.resources.attribute.get(prepared.attributeName) ?? 0;
+    const aggregate = new Map<keyof SafeDocumentQuotas, number>();
+    aggregate.set("attributeBytes", attributeAmount - previousAmount);
+    for (const delta of prepared.quotaDeltas) {
+      aggregate.set(delta.name, (aggregate.get(delta.name) ?? 0) + delta.amount);
+    }
+    for (const [name, delta] of aggregate) {
+      if (delta > 0 && this.#usage[name] + delta > this.#quotas[name]) {
+        throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
+      }
+    }
+
+    const previousPhysical = this.platform.getAttribute(real, prepared.attributeName);
+    for (const [name, delta] of aggregate) this.#usage[name] += delta;
+    try {
+      if (prepared.physicalValue === null) {
+        this.platform.removeAttribute(real, prepared.attributeName);
+      } else {
+        this.platform.setAttribute(real, prepared.attributeName, prepared.physicalValue);
+      }
+    } catch (mutationError) {
+      let restoreFailed = false;
+      try {
+        if (previousPhysical === null) this.platform.removeAttribute(real, prepared.attributeName);
+        else this.platform.setAttribute(real, prepared.attributeName, previousPhysical);
+      } catch {
+        restoreFailed = true;
+      }
+      for (const [name, delta] of aggregate) this.#usage[name] -= delta;
+      if (restoreFailed) {
+        let retainedAttributeAmount = Math.max(previousAmount, attributeAmount);
+        try {
+          const observed = this.platform.getAttribute(real, prepared.attributeName);
+          retainedAttributeAmount = observed === null
+            ? 0
+            : utf8ByteLength(prepared.attributeName) + utf8ByteLength(observed);
+        } catch {
+          // The exact physical state is unavailable. Retain the larger known
+          // amount until terminal cleanup confirms the attribute is absent.
+        }
+        this.#usage.attributeBytes += retainedAttributeAmount - previousAmount;
+        if (retainedAttributeAmount === 0) {
+          entry.resources.attribute.delete(prepared.attributeName);
+        } else {
+          entry.resources.attribute.set(prepared.attributeName, retainedAttributeAmount);
+        }
+        this.#identifierNamespace.recordFailedMutation(entry, prepared);
+        for (const reservation of prepared.failureQuotaReservations) {
+          this.#usage[reservation.name] += reservation.amount;
+        }
+        entry.state = "revoked";
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.rollback");
+      }
+      if (isSafeDOMError(mutationError)) throw mutationError;
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.mutation");
+    }
+
+    prepared.commit();
+    if (attributeAmount === 0) entry.resources.attribute.delete(prepared.attributeName);
+    else entry.resources.attribute.set(prepared.attributeName, attributeAmount);
+  }
+
+  #applyNamespaceDeltas(deltas: readonly NamespaceQuotaDelta[]): void {
+    for (const delta of deltas) {
+      if (this.#usage[delta.name] + delta.amount < 0) {
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.accounting");
+      }
+    }
+    for (const delta of deltas) this.#usage[delta.name] += delta.amount;
   }
 
   #auditPlacements(): Set<RegistryEntry> {
@@ -737,12 +906,33 @@ class DocumentContextImplementation implements DocumentContext {
 
   #clearOwnedResources(entry: RegistryEntry): void {
     if (!this.platform.isElement(entry.real)) return;
+    let firstFailure: SafeDOMError | undefined;
+    try {
+      this.#identifierNamespace.clearPhysicalEffects(entry);
+    } catch (error) {
+      firstFailure ??= isSafeDOMError(error)
+        ? error
+        : createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.clear");
+    }
     for (const name of entry.resources.request.keys()) {
-      this.platform.removeAttribute(entry.real, name);
+      try {
+        this.platform.removeAttribute(entry.real, name);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.clearRequest");
+      }
     }
     if (entry.resources.style.size > 0) {
-      this.platform.removeAttribute(entry.real, "style");
+      try {
+        this.platform.removeAttribute(entry.real, "style");
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.clearStyle");
+      }
     }
+    if (firstFailure !== undefined) throw firstFailure;
   }
 
   #finalizeTerminalSubtree(
@@ -786,14 +976,37 @@ class DocumentContextImplementation implements DocumentContext {
 
     // Capability revocation happens before cleanup, but live accounting is
     // retained until every request/style/listener effect is physically gone.
-    this.#clearOwnedResources(entry);
-    for (const cleanup of [...entry.listeners]) cleanup();
-    if (detach !== "none") {
-      const parent = this.platform.parentNode(entry.real);
-      if (parent !== null && (detach === "always" || parent === this.root)) {
-        this.platform.removeChild(parent, entry.real, "Node.remove");
+    let firstFailure: SafeDOMError | undefined;
+    try {
+      this.#clearOwnedResources(entry);
+    } catch (error) {
+      firstFailure ??= isSafeDOMError(error)
+        ? error
+        : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.resources`);
+    }
+    for (const cleanup of [...entry.listeners]) {
+      try {
+        cleanup();
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.listener`);
       }
     }
+    if (detach !== "none") {
+      try {
+        const parent = this.platform.parentNode(entry.real);
+        if (parent !== null && (detach === "always" || parent === this.root)) {
+          this.platform.removeChild(parent, entry.real, "Node.remove");
+        }
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.detach`);
+      }
+    }
+    if (firstFailure !== undefined) throw firstFailure;
+    this.#applyNamespaceDeltas(this.#identifierNamespace.releaseEntry(entry).quotaDeltas);
     for (const resource of Object.keys(entry.resources) as AccountedResource[]) {
       const quota = RESOURCE_QUOTA[resource];
       for (const amount of entry.resources[resource].values()) this.#usage[quota] -= amount;

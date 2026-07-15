@@ -56,6 +56,106 @@ describe("placement enforcement", () => {
     expect(outside.firstElementChild).toBe(raw);
   });
 
+  it("clears every physical namespace effect before releasing a raw-reparented subtree", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: {
+        identifierMappings: 2,
+        identifierReferences: 3,
+        identifierBytes: 2,
+      },
+    });
+    const parent = safeDocument.createDiv();
+    const input = safeDocument.createInput();
+    const label = safeDocument.createLabel();
+    const cell = safeDocument.createTh();
+    input.setId("x");
+    input.setName("y");
+    input.setAria("controls", "x");
+    label.setFor("x");
+    cell.setHeaders("x");
+    parent.appendChild(input);
+    parent.appendChild(label);
+    parent.appendChild(cell);
+    safeDocument.appendChild(parent);
+
+    const rawParent = requireElement(root.querySelector("div"));
+    const rawInput = requireElement(rawParent.querySelector("input"));
+    const rawLabel = requireElement(rawParent.querySelector("label"));
+    const rawCell = requireElement(rawParent.querySelector("th"));
+    const outside = document.createElement("section");
+    document.body.appendChild(outside);
+    outside.appendChild(rawParent);
+
+    expectCode(() => parent.getText(), "PLACEMENT_VIOLATION");
+    for (const [element, names] of [
+      [rawInput, ["id", "name", "aria-controls"]],
+      [rawLabel, ["for"]],
+      [rawCell, ["headers"]],
+    ] as const) {
+      for (const name of names) expect(element.hasAttribute(name)).toBe(false);
+    }
+
+    const replacementInput = safeDocument.createInput();
+    const replacementLabel = safeDocument.createLabel();
+    const replacementCell = safeDocument.createTh();
+    replacementInput.setId("x");
+    replacementInput.setName("y");
+    replacementInput.setAria("controls", "x");
+    replacementLabel.setFor("x");
+    replacementCell.setHeaders("x");
+  });
+
+  it("retains namespace accounting after cleanup failure and releases it on retry", () => {
+    const prototype = window.Element.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      throw new Error("expected Element.prototype.removeAttribute");
+    }
+    const nativeRemoveAttribute = descriptor.value;
+    let failNextIdCleanup = false;
+    Object.defineProperty(prototype, "removeAttribute", {
+      ...descriptor,
+      value(this: Element, name: string): void {
+        if (failNextIdCleanup && name === "id") {
+          failNextIdCleanup = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeRemoveAttribute, this, [name]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { identifierMappings: 2, identifierBytes: 2 },
+      });
+      const input = safeDocument.createInput();
+      input.setId("x");
+      input.setName("y");
+      safeDocument.appendChild(input);
+      const raw = requireElement(root.querySelector("input"));
+      const outside = document.createElement("section");
+      document.body.appendChild(outside);
+      outside.appendChild(raw);
+      failNextIdCleanup = true;
+
+      expectCode(() => input.getId(), "DOM_OPERATION_FAILED");
+      expect(raw.hasAttribute("id")).toBe(true);
+      expect(raw.hasAttribute("name")).toBe(false);
+      const blocked = safeDocument.createDiv();
+      expectCode(() => blocked.setId("z"), "QUOTA_EXCEEDED");
+
+      expect(() => input.dispose()).not.toThrow();
+      expect(raw.hasAttribute("id")).toBe(false);
+      const replacement = safeDocument.createInput();
+      replacement.setId("x");
+      replacement.setName("y");
+    } finally {
+      Object.defineProperty(prototype, "removeAttribute", descriptor);
+    }
+  });
+
   it("clears nested URL, style, and listeners before releasing revoked accounting", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
@@ -173,7 +273,9 @@ describe("placement enforcement", () => {
   it("revokes a node adopted into another document", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
-    const wrapper = safeDocument.createDiv();
+    const wrapper = safeDocument.createInput();
+    wrapper.setId("adopted-id");
+    wrapper.setName("adopted-name");
     safeDocument.appendChild(wrapper);
     const raw = requireElement(root.firstElementChild);
     const foreignDocument = document.implementation.createHTMLDocument("foreign");
@@ -183,6 +285,8 @@ describe("placement enforcement", () => {
     expect(raw.ownerDocument).toBe(foreignDocument);
     expect(raw.textContent).toBe("");
     expect(raw.parentNode).toBe(null);
+    expect(raw.hasAttribute("id")).toBe(false);
+    expect(raw.hasAttribute("name")).toBe(false);
   });
 
   it("suppresses callbacks after raw placement is compromised", () => {
@@ -387,7 +491,7 @@ describe("detach and disposal", () => {
   it("uses captured attribute and listener methods despite hostile own shadowing", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
-      quotas: { attributeBytes: 5, listeners: 1 },
+      quotas: { attributeBytes: 56, listeners: 1 },
     });
     const wrapper = safeDocument.createDiv();
     safeDocument.appendChild(wrapper);
@@ -398,7 +502,8 @@ describe("detach and disposal", () => {
     });
 
     expect(() => wrapper.setId("abc")).not.toThrow();
-    expect(raw.getAttribute("id")).toBe("abc");
+    expect(raw.getAttribute("id")).toMatch(/^aoa-i-[0-9a-f]{48}$/);
+    expect(wrapper.getId()).toBe("abc");
     const handler = vi.fn();
     const cleanup = wrapper.onClick(handler);
     raw.dispatchEvent(new Event("click"));
@@ -450,13 +555,16 @@ describe("exact quota accounting", () => {
   });
 
   it("counts aggregate serialized attribute name and value bytes", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 5 } });
+    const denied = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 55 } });
+    expectCode(() => denied.createDiv().setId("abc"), "QUOTA_EXCEEDED");
+
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 56 } });
     const first = safeDocument.createDiv();
 
-    first.setId("abc"); // `id` + `abc` = 5 UTF-8 bytes
-    expectCode(() => first.setId("abcd"), "QUOTA_EXCEEDED");
-    expect(first.getId()).toBe("abc");
+    first.setId("abc"); // `id` + a 54-byte opaque physical token = 56 bytes.
     expectCode(() => first.setTitle(""), "QUOTA_EXCEEDED");
+    first.setId("abcd"); // Same-size physical replacement is allowed at the full budget.
+    expect(first.getId()).toBe("abcd");
 
     first.dispose();
     const replacement = safeDocument.createDiv();

@@ -59,6 +59,8 @@ type BooleanGetter<ElementType extends Element> = (this: ElementType) => boolean
 type BooleanSetter<ElementType extends Element> = (this: ElementType, value: boolean) => void;
 type NumberGetter<ElementType extends Element> = (this: ElementType) => number;
 type NumberSetter<ElementType extends Element> = (this: ElementType, value: number) => void;
+type CryptoGetter = (this: Window) => Crypto;
+type GetRandomValues = (this: Crypto, array: Uint8Array) => Uint8Array;
 
 export interface InputMutationPreview {
   readonly value: string;
@@ -75,6 +77,7 @@ function prototypeOwns(prototype: object, value: object): boolean {
 
 export interface PlatformOps {
   readonly URL: typeof URL;
+  randomHex(byteLength: number): string;
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
   appendChild(parent: Node, child: Node, operation?: string): void;
@@ -157,6 +160,9 @@ export interface PlatformOps {
 class OwnerRealmPlatformOps implements PlatformOps {
   readonly URL: typeof URL;
   readonly #ownerDocument: Document;
+  readonly #crypto: Crypto;
+  readonly #getRandomValues: GetRandomValues;
+  readonly #Uint8Array: typeof Uint8Array;
   readonly #elementPrototype: object;
   readonly #createElement: (qualifiedName: string) => HTMLElement;
   readonly #createTextNode: Document["createTextNode"];
@@ -230,6 +236,19 @@ class OwnerRealmPlatformOps implements PlatformOps {
   constructor(ownerDocument: Document, view: Window & typeof globalThis) {
     this.#ownerDocument = ownerDocument;
     this.URL = view.URL;
+    const cryptoGetter = captureAccessor<CryptoGetter>(
+      view,
+      "crypto",
+      "get",
+      "Window.crypto.capture",
+    );
+    this.#crypto = Reflect.apply(cryptoGetter, view, []);
+    this.#getRandomValues = captureMethod<GetRandomValues>(
+      Object.getPrototypeOf(this.#crypto),
+      "getRandomValues",
+      "Crypto.getRandomValues.capture",
+    );
+    this.#Uint8Array = view.Uint8Array;
     const nodePrototype = view.Node.prototype;
     const elementPrototype = view.Element.prototype;
     this.#elementPrototype = elementPrototype;
@@ -388,6 +407,28 @@ class OwnerRealmPlatformOps implements PlatformOps {
 
   createElement(tag: string): HTMLElement {
     return this.#invoke("Document.createElement", this.#createElement, this.#ownerDocument, [tag]);
+  }
+
+  randomHex(byteLength: number): string {
+    let bytes: Uint8Array;
+    try {
+      bytes = new this.#Uint8Array(byteLength);
+    } catch {
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "Uint8Array.constructor");
+    }
+    this.#invoke("Crypto.getRandomValues", this.#getRandomValues, this.#crypto, [bytes]);
+    try {
+      const alphabet = "0123456789abcdef";
+      let result = "";
+      for (let index = 0; index < byteLength; index += 1) {
+        const byte = bytes[index] ?? 0;
+        result += alphabet[byte >>> 4] ?? "";
+        result += alphabet[byte & 0x0f] ?? "";
+      }
+      return result;
+    } catch {
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "PlatformOps.randomHex");
+    }
   }
 
   createTextNode(value: string): Text {

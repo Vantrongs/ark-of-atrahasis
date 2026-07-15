@@ -75,11 +75,18 @@ test("real SES completes capabilities for two mutually distrusting compartments"
 
   secondGuest.evaluate(`
     globalThis.div = safeDocument.createDiv();
+    div.setId("first-input");
     div.setText("second-value");
     safeDocument.appendChild(div);
   `);
   assert.equal(secondGuest.evaluate("div.getText()"), "second-value");
+  assert.equal(secondGuest.evaluate('safeDocument.getElement("first-input") === div'), true);
   assert.equal(secondGuest.evaluate("'poison' in safeDocument || 'poison' in div.style"), false);
+  assert.equal(secondGuest.evaluate(`
+    Reflect.ownKeys(safeDocument).some(key =>
+      typeof key === "string" && /namespace|token|physical/i.test(key)
+    )
+  `), false);
 
   secondGuest.globalThis.foreign = firstInput;
   assert.equal(
@@ -95,6 +102,10 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   );
 
   const nativeInput = firstRoot.querySelector("input");
+  const nativeSecond = secondRoot.querySelector("div");
+  assert.match(nativeInput.id, /^aoa-i-[0-9a-f]{48}$/);
+  assert.match(nativeSecond.id, /^aoa-i-[0-9a-f]{48}$/);
+  assert.notEqual(nativeInput.id, nativeSecond.id);
   nativeInput.dispatchEvent(new dom.window.MouseEvent("click", { cancelable: true }));
   const snapshot = firstGuest.evaluate("snapshot");
   assert.equal(Object.isFrozen(snapshot), true);

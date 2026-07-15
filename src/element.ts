@@ -68,6 +68,8 @@ import {
 } from "./input-state-contract.ts";
 import {
   ARIA_ROLES,
+  ARIA_IDREF_LIST_NAMES,
+  ARIA_IDREF_NAMES,
   AUTOCOMPLETE_VALUES,
   BUTTON_TYPES,
   DIR_VALUES,
@@ -80,6 +82,13 @@ import {
 } from "./vocabularies.ts";
 
 const MAX_CANVAS_PIXELS = 16_777_216;
+const ASCII_WHITESPACE = /[\t\n\f\r ]/;
+
+function requireIdentifierToken(value: string, operation: string): string {
+  const primitive = requireString(value, operation);
+  if (ASCII_WHITESPACE.test(primitive)) throw invalidArgument(operation);
+  return primitive;
+}
 
 function addSafeEvent<Kind extends SafeEventKind>(
   context: DocumentContext,
@@ -192,14 +201,10 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
       );
     },
     setId(value: string): void {
-      const primitive = requireString(value, "SafeElement.setId.value");
-      attribute(context, realEl, "id", primitive === "" ? null : primitive);
+      context.setLocalId(realEl, requireIdentifierToken(value, "SafeElement.setId.value"));
     },
     getId(): string {
-      return context.nodeOperation(
-        realEl,
-        () => context.platform.getAttribute(realEl, "id") ?? "",
-      );
+      return context.getLocalId(realEl);
     },
     setTitle(value: string): void {
       attribute(context, realEl, "title", requireString(value, "SafeElement.setTitle.value"));
@@ -244,15 +249,37 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
     setAria(key: string, value: string): void {
       const primitiveKey = requireString(key, "SafeElement.setAria.key");
       if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.setAria.key");
+      const canonicalKey = asciiLowercase(primitiveKey);
       const primitiveValue = requireString(value, "SafeElement.setAria.value");
-      attribute(context, realEl, `aria-${primitiveKey}`, primitiveValue);
+      if ((ARIA_IDREF_NAMES as readonly string[]).includes(canonicalKey)) {
+        context.setLocalIdReference(
+          realEl,
+          `aria-${canonicalKey}`,
+          requireIdentifierToken(primitiveValue, "SafeElement.setAria.value"),
+          "single",
+        );
+        return;
+      }
+      if ((ARIA_IDREF_LIST_NAMES as readonly string[]).includes(canonicalKey)) {
+        context.setLocalIdReference(realEl, `aria-${canonicalKey}`, primitiveValue, "list");
+        return;
+      }
+      attribute(context, realEl, `aria-${canonicalKey}`, primitiveValue);
     },
     getAria(key: string): string | undefined {
       const primitiveKey = requireString(key, "SafeElement.getAria.key");
       if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.getAria.key");
-      return context.nodeOperation(realEl, () => {
-        return context.platform.getAttribute(realEl, `aria-${primitiveKey}`) ?? undefined;
-      });
+      const canonicalKey = asciiLowercase(primitiveKey);
+      if (
+        (ARIA_IDREF_NAMES as readonly string[]).includes(canonicalKey)
+        || (ARIA_IDREF_LIST_NAMES as readonly string[]).includes(canonicalKey)
+      ) {
+        return context.getLocalIdReference(realEl, `aria-${canonicalKey}`);
+      }
+      return context.nodeOperation(
+        realEl,
+        () => context.platform.getAttribute(realEl, `aria-${canonicalKey}`) ?? undefined,
+      );
     },
 
     onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "click", "mouse", handler, "SafeElement.onClick.handler"); },
@@ -463,8 +490,7 @@ export function createSafeInputElement(
       attribute(context, realEl, "autofocus", null);
     },
     setName(value: string): void {
-      const primitive = requireString(value, "SafeInputElement.setName.value");
-      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+      context.setLocalName(realEl, requireString(value, "SafeInputElement.setName.value"));
     },
     setInputMode(value: string): void {
       attribute(context, realEl, "inputmode", requireAsciiKeyword(value, INPUT_MODE_VALUES, "SafeInputElement.setInputMode.value"));
@@ -554,8 +580,7 @@ export function createSafeTextareaElement(
       attribute(context, realEl, "wrap", requireAsciiKeyword(value, TEXTAREA_WRAP_VALUES, "SafeTextareaElement.setWrap.value"));
     },
     setName(value: string): void {
-      const primitive = requireString(value, "SafeTextareaElement.setName.value");
-      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+      context.setLocalName(realEl, requireString(value, "SafeTextareaElement.setName.value"));
     },
     setAutocomplete(value: string): void {
       attribute(context, realEl, "autocomplete", requireExactKeyword(value, AUTOCOMPLETE_VALUES, "SafeTextareaElement.setAutocomplete.value"));
@@ -575,12 +600,16 @@ export function createSafeTextareaElement(
   return context.complete(wrapper, realEl);
 }
 
-export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSelectElement): SafeSelectElement {
+export function createSafeSelectElement(
+  context: DocumentContext,
+  realEl: HTMLSelectElement,
+  initializeNonForm = false,
+): SafeSelectElement {
   const known = context.registry.getWrapper<SafeSelectElement>(realEl);
   if (known) return known;
   const base = buildSafeElement(context, realEl);
 
-  return context.complete(Object.assign(base, {
+  const wrapper = Object.assign(base, {
     setValue(value: string): void {
       const text = requireString(value, "SafeSelectElement.setValue.value");
       context.setText(realEl, "value", text, () => {
@@ -600,13 +629,18 @@ export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSe
       booleanAttribute(context, realEl, "multiple", requireBoolean(value, "SafeSelectElement.setMultiple.value"));
     },
     setName(value: string): void {
-      const primitive = requireString(value, "SafeSelectElement.setName.value");
-      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+      context.setLocalName(realEl, requireString(value, "SafeSelectElement.setName.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
       return addSafeEvent(context, realEl, "change", "input", handler, "SafeSelectElement.onChange.handler");
     },
-  }) as SafeSelectElement, realEl);
+  }) as SafeSelectElement;
+  if (initializeNonForm) {
+    return context.completeInitialized(wrapper, realEl, [
+      { name: "autocomplete", value: "off" },
+    ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
+  }
+  return context.complete(wrapper, realEl);
 }
 
 export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOptionElement): SafeOptionElement {
@@ -653,8 +687,7 @@ export function createSafeButtonElement(
       booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeButtonElement.setDisabled.value"));
     },
     setName(value: string): void {
-      const primitive = requireString(value, "SafeButtonElement.setName.value");
-      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+      context.setLocalName(realEl, requireString(value, "SafeButtonElement.setName.value"));
     },
     setValue(value: string): void {
       attribute(context, realEl, "value", requireString(value, "SafeButtonElement.setValue.value"));
@@ -675,7 +708,15 @@ export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLab
 
   return context.complete(Object.assign(base, {
     setFor(value: string): void {
-      attribute(context, realEl, "for", requireString(value, "SafeLabelElement.setFor.value"));
+      context.setLocalIdReference(
+        realEl,
+        "for",
+        requireIdentifierToken(value, "SafeLabelElement.setFor.value"),
+        "single",
+      );
+    },
+    getFor(): string {
+      return context.getLocalIdReference(realEl, "for") ?? "";
     },
   }) as SafeLabelElement, realEl);
 }
@@ -926,7 +967,15 @@ export function createSafeTableCellElement(context: DocumentContext, realEl: HTM
       attribute(context, realEl, "scope", requireAsciiKeyword(value, TABLE_SCOPE_VALUES, "SafeTableCellElement.setScope.value"));
     },
     setHeaders(value: string): void {
-      attribute(context, realEl, "headers", requireString(value, "SafeTableCellElement.setHeaders.value"));
+      context.setLocalIdReference(
+        realEl,
+        "headers",
+        requireString(value, "SafeTableCellElement.setHeaders.value"),
+        "list",
+      );
+    },
+    getHeaders(): string {
+      return context.getLocalIdReference(realEl, "headers") ?? "";
     },
   }) as SafeTableCellElement, realEl);
 }

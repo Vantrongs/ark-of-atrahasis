@@ -40,6 +40,55 @@ describe("owner-realm platform boundary", () => {
     expect(Object.hasOwn(thrown, "cause")).toBe(false);
   });
 
+  it("keeps owner-realm entropy and typed-array operations captured after construction", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const root = makeRoot(foreignDocument);
+    const safeDocument = createSafeDocument(root);
+    const cryptoPrototype = Object.getPrototypeOf(foreignWindow.crypto);
+    const randomDescriptor = Object.getOwnPropertyDescriptor(cryptoPrototype, "getRandomValues");
+    if (randomDescriptor === undefined) throw new Error("expected getRandomValues descriptor");
+    const uintDescriptor = Object.getOwnPropertyDescriptor(foreignWindow, "Uint8Array");
+    const typedArrayPrototype = Object.getPrototypeOf(foreignWindow.Uint8Array.prototype);
+    const iteratorDescriptor = Object.getOwnPropertyDescriptor(
+      typedArrayPrototype,
+      Symbol.iterator,
+    );
+    if (iteratorDescriptor === undefined) throw new Error("expected typed-array iterator descriptor");
+
+    Object.defineProperty(cryptoPrototype, "getRandomValues", {
+      ...randomDescriptor,
+      value: () => { throw foreignDocument.body; },
+    });
+    Object.defineProperty(foreignWindow, "Uint8Array", {
+      configurable: true,
+      value: () => { throw foreignWindow; },
+    });
+    Object.defineProperty(typedArrayPrototype, Symbol.iterator, {
+      ...iteratorDescriptor,
+      value: () => { throw foreignDocument.documentElement; },
+    });
+
+    try {
+      const input = safeDocument.createInput();
+      input.setId("logical-id");
+      input.setName("logical-name");
+      safeDocument.appendChild(input);
+      const raw = root.querySelector("input");
+      expect(raw?.id).toMatch(/^aoa-i-[0-9a-f]{48}$/);
+      expect(raw?.name).toMatch(/^aoa-n-[0-9a-f]{48}$/);
+      expect(input.getId()).toBe("logical-id");
+    } finally {
+      Object.defineProperty(cryptoPrototype, "getRandomValues", randomDescriptor);
+      Object.defineProperty(typedArrayPrototype, Symbol.iterator, iteratorDescriptor);
+      if (uintDescriptor === undefined) delete (foreignWindow as { Uint8Array?: unknown }).Uint8Array;
+      else Object.defineProperty(foreignWindow, "Uint8Array", uintDescriptor);
+    }
+  });
+
   it("normalizes native invalid topology from an owned element tree", () => {
     const safeDocument = createSafeDocument(makeRoot());
     const parent = safeDocument.createDiv();
@@ -414,13 +463,14 @@ describe("owner-realm platform boundary", () => {
 
     try {
       const root = makeRoot(foreignDocument);
-      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 25 } });
+      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 71 } });
       const input = safeDocument.createInput();
       safeDocument.appendChild(input);
       expectSafeError(() => input.setMinLength(2), "DOM_OPERATION_FAILED", "HTMLInputElement.minLength.set");
       expect(() => input.setId("x")).not.toThrow();
       expect(root.querySelector("input")?.hasAttribute("minlength")).toBe(false);
-      expect(root.querySelector("input")?.id).toBe("x");
+      expect(root.querySelector("input")?.id).toMatch(/^aoa-i-[0-9a-f]{48}$/);
+      expect(input.getId()).toBe("x");
     } finally {
       Object.defineProperty(foreignWindow.HTMLInputElement.prototype, "minLength", descriptor);
     }

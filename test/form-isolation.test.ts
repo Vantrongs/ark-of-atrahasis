@@ -17,11 +17,13 @@ describe("strict non-form controls", () => {
   test.each([
     { factory: "input" as const, bytes: 15 },
     { factory: "textarea" as const, bytes: 15 },
+    { factory: "select" as const, bytes: 15 },
     { factory: "button" as const, bytes: 10 },
   ])("policy-owned $factory defaults consume and release exactly $bytes attribute bytes", ({ factory, bytes }) => {
     const createControl = (safeDocument: ReturnType<typeof createSafeDocument>) => {
       if (factory === "input") return safeDocument.createInput();
       if (factory === "textarea") return safeDocument.createTextarea();
+      if (factory === "select") return safeDocument.createSelect();
       return safeDocument.createButton();
     };
     const deniedRoot = makeRoot();
