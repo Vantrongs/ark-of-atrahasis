@@ -76,7 +76,7 @@ async function runPackedReadmeBrowserExamples({
   sourceDirectory,
 }) {
   const { chromium } = await import("@playwright/test");
-  const sesDirectory = join(sourceDirectory, "node_modules", "ses");
+  const sesBundle = join(sourceDirectory, "node_modules", "ses", "dist", "ses.mjs");
   const packageBundle = join(installedPackageDirectory, "dist", "index.js");
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -92,7 +92,7 @@ async function runPackedReadmeBrowserExamples({
 <body><div id="plugin-a-root"></div>
 <script type="importmap">${JSON.stringify({ imports: {
   "ark-of-atrahasis": "/package/index.js",
-  ses: "/ses/index.js",
+  ses: "/ses.mjs",
 } })}</script>
 <script type="module" src="/readme-example-${index}.mjs"></script></body></html>`);
         return;
@@ -113,13 +113,9 @@ async function runPackedReadmeBrowserExamples({
         );
         return;
       }
-      if (url.pathname.startsWith("/ses/")) {
-        const relativePath = decodeURIComponent(url.pathname.slice("/ses/".length));
-        if (relativePath === "" || relativePath.split("/").includes("..")) {
-          throw new Error("invalid SES module path");
-        }
+      if (url.pathname === "/ses.mjs") {
         response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-        response.end(readFileSync(join(sesDirectory, relativePath)));
+        response.end(readFileSync(sesBundle));
         return;
       }
       response.writeHead(404).end("not found");
