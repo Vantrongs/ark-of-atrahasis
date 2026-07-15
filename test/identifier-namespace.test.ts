@@ -3,19 +3,13 @@
 import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ARIA_IDREF_LIST_NAMES, ARIA_IDREF_NAMES } from "../src/index.ts";
+import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 import {
   assertStableBoundaryError,
   captureThrown,
   propertyParameters,
 } from "./support/property-config.ts";
-
-function makeRoot(): ShadowRoot {
-  const host = document.createElement("div");
-  host.style.contain = "paint";
-  document.body.appendChild(host);
-  return host.attachShadow({ mode: "open" });
-}
 
 function requireElement<ElementType extends Element>(value: ElementType | null): ElementType {
   if (value === null) throw new Error("expected the test DOM element to exist");

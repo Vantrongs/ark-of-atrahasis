@@ -9,6 +9,7 @@ import {
 	type SafeVoidElement,
 	type SpecializedElementKind,
 } from "../src/index.ts";
+import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 const CHILD_TEXT_METHODS = [
@@ -162,13 +163,6 @@ const SPECIALIZED_FACTORIES: Readonly<
 	list: (safeDocument) => safeDocument.createList("unordered"),
 	"description-list": (safeDocument) => safeDocument.createList("description"),
 };
-
-function makeRoot(): ShadowRoot {
-	const host = document.createElement("div");
-	host.style.contain = "paint";
-	document.body.appendChild(host);
-	return host.attachShadow({ mode: "open" });
-}
 
 describe("public element runtime families", () => {
 	beforeEach(() => {

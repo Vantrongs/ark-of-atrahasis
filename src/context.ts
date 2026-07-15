@@ -1,5 +1,10 @@
 import { createSafeDOMError, isSafeDOMError, type SafeDOMError } from "./errors.ts";
-import { createEventSnapshotter, type EventSnapshotter } from "./event.ts";
+import {
+  createEventSnapshotter,
+  ROOT_BUBBLE_FENCE_EVENT_TYPES,
+  TARGET_FENCE_EVENT_TYPES,
+  type EventSnapshotter,
+} from "./event.ts";
 import {
   createIdentifierNamespace,
   type IdentifierNamespace,
@@ -15,7 +20,14 @@ import {
   type RegistryEntry,
   type SafeNode,
 } from "./registry.ts";
-import type { Hardener, SafeDocumentOptions, SafeDocumentQuotas, SafeElement } from "./types.ts";
+import type {
+  Hardener,
+  SafeDocumentOptions,
+  SafeDocumentQuotas,
+  SafeDocumentRateLimit,
+  SafeDocumentRates,
+  SafeElement,
+} from "./types.ts";
 import {
   createStylePolicy,
   type SafeStylePolicy,
@@ -51,6 +63,11 @@ export const DEFAULT_SAFE_DOCUMENT_QUOTAS: Readonly<SafeDocumentQuotas> = Object
   identifierBytes: 256_000,
 });
 
+export const DEFAULT_SAFE_DOCUMENT_RATES: Readonly<SafeDocumentRates> = Object.freeze({
+  operations: Object.freeze({ limit: 10_000, windowMs: 1_000 }),
+  requestAttempts: Object.freeze({ limit: 32, windowMs: 1_000 }),
+});
+
 type QuotaUsage = { -readonly [Name in keyof SafeDocumentQuotas]: number };
 type ResourceQuota = Exclude<
   keyof SafeDocumentQuotas,
@@ -78,9 +95,20 @@ const QUOTA_NAMES = [
   "identifierBytes",
 ] as const;
 
+const RATE_NAMES = ["operations", "requestAttempts"] as const;
+type RateName = (typeof RATE_NAMES)[number];
+
+interface RateWindowState {
+  count: number;
+  failed: boolean;
+  lastObservedAt?: number;
+  startedAt?: number;
+}
+
 interface NormalizedOptions {
   readonly harden: Hardener;
   readonly quotas?: Partial<SafeDocumentQuotas>;
+  readonly rates?: Partial<SafeDocumentRates>;
   readonly urlPolicy?: SafeURLPolicy;
   readonly stylePolicy?: SafeStylePolicy;
 }
@@ -100,11 +128,39 @@ function readOwnDataProperty<Value>(
   }
 }
 
+type OwnDataProperty<Value> =
+  | { readonly present: false }
+  | { readonly present: true; readonly value: Value };
+
+function readOwnDataPropertyEntry<Value>(
+  record: object,
+  property: PropertyKey,
+  error: () => SafeDOMError,
+): OwnDataProperty<Value> {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(record, property);
+    if (descriptor === undefined) return { present: false };
+    if (!("value" in descriptor)) throw error();
+    return { present: true, value: descriptor.value };
+  } catch {
+    throw error();
+  }
+}
+
 function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedOptions {
   if (options === null || typeof options !== "object") throw invalidHardener();
 
   const harden = readOwnDataProperty<Hardener>(options, "harden", invalidHardener);
   if (typeof harden !== "function") throw invalidHardener();
+
+  const rates = readOwnDataPropertyEntry<Partial<SafeDocumentRates> | undefined>(
+    options,
+    "rates",
+    () => createSafeDOMError("INVALID_RATE", "createSafeDocument.options.rates"),
+  );
+  if (rates.present && rates.value === undefined) {
+    throw createSafeDOMError("INVALID_RATE", "createSafeDocument.options.rates");
+  }
 
   completeWithHardener(harden, { nested: { method: (): boolean => true } });
 
@@ -115,6 +171,7 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
       "quotas",
       () => createSafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas"),
     ),
+    rates: rates.present ? rates.value : undefined,
     urlPolicy: readOwnDataProperty(
       options,
       "urlPolicy",
@@ -194,6 +251,46 @@ function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeD
     }
   }
   return resolved;
+}
+
+function invalidRate(operation: string): SafeDOMError {
+  return createSafeDOMError("INVALID_RATE", operation);
+}
+
+function resolveRateLimit(value: unknown, name: RateName): SafeDocumentRateLimit {
+  const operation = `createSafeDocument.options.rates.${name}`;
+  if (value === null || typeof value !== "object") throw invalidRate(operation);
+  const limit = readOwnDataProperty<number>(value, "limit", () => invalidRate(`${operation}.limit`));
+  const windowMs = readOwnDataProperty<number>(
+    value,
+    "windowMs",
+    () => invalidRate(`${operation}.windowMs`),
+  );
+  if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 0) {
+    throw invalidRate(`${operation}.limit`);
+  }
+  if (typeof windowMs !== "number" || !Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw invalidRate(`${operation}.windowMs`);
+  }
+  return Object.freeze({ limit, windowMs });
+}
+
+function resolveRates(supplied: Partial<SafeDocumentRates> | undefined): SafeDocumentRates {
+  if (supplied !== undefined && (supplied === null || typeof supplied !== "object")) {
+    throw invalidRate("createSafeDocument.options.rates");
+  }
+  const resolved = { ...DEFAULT_SAFE_DOCUMENT_RATES };
+  if (supplied !== undefined) {
+    for (const name of RATE_NAMES) {
+      const entry = readOwnDataPropertyEntry<unknown>(
+        supplied,
+        name,
+        () => invalidRate(`createSafeDocument.options.rates.${name}`),
+      );
+      if (entry.present) resolved[name] = resolveRateLimit(entry.value, name);
+    }
+  }
+  return Object.freeze(resolved);
 }
 
 export type StyleMutationResult =
@@ -337,6 +434,13 @@ class DocumentContextImplementation implements DocumentContext {
   readonly #identifierNamespace: IdentifierNamespace;
   readonly #harden: Hardener;
   readonly #quotas: SafeDocumentQuotas;
+  readonly #rates: SafeDocumentRates;
+  readonly #rateWindows: Record<RateName, RateWindowState> = {
+    operations: { count: 0, failed: false },
+    requestAttempts: { count: 0, failed: false },
+  };
+  readonly #rootBoundaryController: AbortController;
+  #rootBoundaryDisposed = false;
   readonly #usage: QuotaUsage = {
     nodes: 0,
     listeners: 0,
@@ -365,6 +469,7 @@ class DocumentContextImplementation implements DocumentContext {
     this.ownerDocument = ownerDocument;
     this.ownerRealm = view;
     this.#quotas = resolveQuotas(normalizedOptions.quotas);
+    this.#rates = resolveRates(normalizedOptions.rates);
     this.platform = createPlatformOps(ownerDocument, view);
     this.platform.assertPaintContainedRoot(root);
     this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
@@ -376,6 +481,7 @@ class DocumentContextImplementation implements DocumentContext {
       <Value>(value: Value): Value => this.complete(value),
       (target) => this.#identifierNamespace.resolveEventTarget(target),
     );
+    this.#rootBoundaryController = this.#installRootBoundary();
   }
 
   complete<Value>(value: Value): Value;
@@ -415,9 +521,19 @@ class DocumentContextImplementation implements DocumentContext {
   #register(wrapper: SafeNode, real: RealNode, specializedKind?: SpecializedElementKind): void {
     this.#assertDocumentActive();
     this.#reserve("nodes", 1);
+    let boundaryCleanup: (() => void) | undefined;
     try {
-      this.registry.register(wrapper, real, specializedKind);
+      if (this.platform.isElement(real)) {
+        boundaryCleanup = this.#installTargetBoundary(real);
+      }
+      const entry = this.registry.register(wrapper, real, specializedKind);
+      if (boundaryCleanup !== undefined) entry.listeners.add(boundaryCleanup);
     } catch (error) {
+      try {
+        boundaryCleanup?.();
+      } catch {
+        // Preserve the authoritative registration failure for the discarded node.
+      }
       this.#usage.nodes -= 1;
       throw error;
     }
@@ -440,15 +556,23 @@ class DocumentContextImplementation implements DocumentContext {
 
     let nodesReserved = false;
     let attributesReserved = false;
+    let boundaryCleanup: (() => void) | undefined;
     try {
       this.#reserve("nodes", 1);
       nodesReserved = true;
       this.#reserve("attributeBytes", attributeBytes);
       attributesReserved = true;
       initialize();
+      boundaryCleanup = this.#installTargetBoundary(real);
       const entry = this.registry.register(wrapper, real, specializedKind);
+      entry.listeners.add(boundaryCleanup);
       for (const [name, amount] of resources) entry.resources.attribute.set(name, amount);
     } catch (error) {
+      try {
+        boundaryCleanup?.();
+      } catch {
+        // Preserve the authoritative initialization failure for the discarded node.
+      }
       if (attributesReserved) this.#usage.attributeBytes -= attributeBytes;
       if (nodesReserved) this.#usage.nodes -= 1;
       for (const name of resources.keys()) {
@@ -466,7 +590,7 @@ class DocumentContextImplementation implements DocumentContext {
   documentOperation<T>(action: () => T): T {
     this.#assertDocumentActive();
     this.#auditPlacements();
-    this.#reserve("operations", 1);
+    this.#reserveCall("operations");
     return action();
   }
 
@@ -481,7 +605,7 @@ class DocumentContextImplementation implements DocumentContext {
       );
     }
     this.#assertEntryActive(entry);
-    this.#reserve("operations", 1);
+    this.#reserveCall("operations");
     return action();
   }
 
@@ -660,7 +784,7 @@ class DocumentContextImplementation implements DocumentContext {
     decide: () => SafeURLDecision,
   ): SafeURLDecision {
     return this.nodeOperation(real, () => {
-      this.#reserve("requestAttempts", 1);
+      this.#reserveCall("requestAttempts");
       const decision = this.complete(decide());
       if (!decision.allowed) return decision;
 
@@ -828,6 +952,13 @@ class DocumentContextImplementation implements DocumentContext {
     }
 
     let firstFailure: SafeDOMError | undefined;
+    try {
+      this.#disposeRootBoundary();
+    } catch (error) {
+      firstFailure = isSafeDOMError(error)
+        ? error
+        : createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose.eventBoundary");
+    }
     for (const entry of trackedEntries) {
       try {
         const state = entry.state === "revoked" ? "revoked" : "disposed";
@@ -839,7 +970,7 @@ class DocumentContextImplementation implements DocumentContext {
       }
     }
 
-    if (this.registry.entries().length === 0) {
+    if (this.registry.entries().length === 0 && this.#rootBoundaryDisposed) {
       try {
         this.#identifierNamespace.assertEmpty();
         this.#disposalComplete = true;
@@ -891,6 +1022,109 @@ class DocumentContextImplementation implements DocumentContext {
       throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
     }
     this.#usage[name] = next;
+  }
+
+  #reserveCall(name: RateName): void {
+    this.#reserveRate(name);
+    this.#reserve(name, 1);
+  }
+
+  #reserveRate(name: RateName): void {
+    const state = this.#rateWindows[name];
+    if (state.failed) {
+      throw createSafeDOMError(
+        "RATE_LIMIT_EXCEEDED",
+        `SafeDocument rate clock failed: ${name}`,
+      );
+    }
+
+    let now: number;
+    try {
+      now = this.platform.monotonicNow();
+    } catch {
+      state.failed = true;
+      throw createSafeDOMError(
+        "RATE_LIMIT_EXCEEDED",
+        `SafeDocument rate clock failed: ${name}`,
+      );
+    }
+    if (state.lastObservedAt !== undefined && now < state.lastObservedAt) {
+      state.failed = true;
+      throw createSafeDOMError(
+        "RATE_LIMIT_EXCEEDED",
+        `SafeDocument rate clock failed: ${name}`,
+      );
+    }
+    state.lastObservedAt = now;
+
+    const rate = this.#rates[name];
+    if (state.startedAt === undefined || now - state.startedAt >= rate.windowMs) {
+      state.startedAt = now;
+      state.count = 0;
+    }
+    if (state.count >= rate.limit) {
+      throw createSafeDOMError(
+        "RATE_LIMIT_EXCEEDED",
+        `SafeDocument rate exceeded: ${name}`,
+      );
+    }
+    state.count += 1;
+  }
+
+  #installRootBoundary(): AbortController {
+    const controller = this.platform.createAbortController();
+    const signal = this.platform.getAbortSignal(controller);
+    const stopAtRoot = (event: Event): void => {
+      this.platform.stopEventPropagation(event);
+    };
+    try {
+      for (const eventName of ROOT_BUBBLE_FENCE_EVENT_TYPES) {
+        this.platform.addEventListener(this.root, eventName, stopAtRoot, signal);
+      }
+      return controller;
+    } catch (error) {
+      try {
+        this.platform.abort(controller);
+      } catch {
+        // The original normalized installation error remains authoritative.
+      }
+      if (isSafeDOMError(error)) throw error;
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.eventBoundary");
+    }
+  }
+
+  #installTargetBoundary(real: Element): () => void {
+    const controller = this.platform.createAbortController();
+    const signal = this.platform.getAbortSignal(controller);
+    const stopAtTarget = (event: Event): void => {
+      this.platform.stopEventPropagation(event);
+    };
+    try {
+      for (const eventName of TARGET_FENCE_EVENT_TYPES) {
+        this.platform.addEventListener(real, eventName, stopAtTarget, signal);
+      }
+    } catch (error) {
+      try {
+        this.platform.abort(controller);
+      } catch {
+        // The original normalized installation error remains authoritative.
+      }
+      if (isSafeDOMError(error)) throw error;
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.eventBoundary");
+    }
+
+    let active = true;
+    return (): void => {
+      if (!active) return;
+      this.platform.abort(controller);
+      active = false;
+    };
+  }
+
+  #disposeRootBoundary(): void {
+    if (this.#rootBoundaryDisposed) return;
+    this.platform.abort(this.#rootBoundaryController);
+    this.#rootBoundaryDisposed = true;
   }
 
   #commitNamespaceMutation(

@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 const origin = "http://127.0.0.1:4173";
+const webkitExecutablePath = process.env.ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: "./test/browser",
@@ -15,13 +16,22 @@ export default defineConfig({
   outputDir: ".artifacts/playwright",
   use: {
     baseURL: origin,
+    hasTouch: true,
     serviceWorkers: "block",
     trace: "retain-on-failure",
   },
   projects: [
     { name: "chromium", use: { browserName: "chromium" } },
     { name: "firefox", use: { browserName: "firefox" } },
-    { name: "webkit", use: { browserName: "webkit" } },
+    {
+      name: "webkit",
+      use: {
+        browserName: "webkit",
+        ...(webkitExecutablePath === undefined
+          ? {}
+          : { launchOptions: { executablePath: webkitExecutablePath } }),
+      },
+    },
   ],
   webServer: {
     command: "node test/browser/server.mjs",

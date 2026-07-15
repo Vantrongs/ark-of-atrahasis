@@ -2,14 +2,8 @@
 
 import { beforeEach, describe, expect, test } from "vitest";
 import type { SafeDocument } from "../src/index.ts";
+import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
-
-function makeRoot(documentValue: Document = document): ShadowRoot {
-  const host = documentValue.createElement("div");
-  host.style.contain = "paint";
-  documentValue.body.append(host);
-  return host.attachShadow({ mode: "open" });
-}
 
 beforeEach(() => {
   document.body.replaceChildren();

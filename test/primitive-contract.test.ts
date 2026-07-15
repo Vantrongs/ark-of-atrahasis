@@ -15,14 +15,8 @@ import {
   type EventHandler,
   type SafeDocument,
 } from "../src/index.ts";
+import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
-
-function makeRoot(): ShadowRoot {
-  const host = document.createElement("div");
-  host.style.contain = "paint";
-  document.body.append(host);
-  return host.attachShadow({ mode: "open" });
-}
 
 beforeEach(() => {
   document.body.replaceChildren();

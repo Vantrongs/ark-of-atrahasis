@@ -16,6 +16,37 @@ import type { EventTargetResolution } from "./identifier-namespace.ts";
 type PlatformFunction = (...arguments_: unknown[]) => unknown;
 type GetterRecord = Readonly<Record<string, PlatformFunction | undefined>>;
 
+/** Event families whose native bubble path terminates at the strictly owned root. */
+export const ROOT_BUBBLE_FENCE_EVENT_TYPES = Object.freeze([
+  "beforeinput",
+  "change",
+  "click",
+  "contextmenu",
+  "dblclick",
+  "focusin",
+  "focusout",
+  "input",
+  "keydown",
+  "keyup",
+  "mousedown",
+  "mouseenter",
+  "mouseleave",
+  "mousemove",
+  "mouseup",
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "reset",
+  "scroll",
+  "submit",
+  "touchend",
+  "touchmove",
+  "touchstart",
+] as const);
+
+/** Advertised composed events that skip the ShadowRoot bubble phase. */
+export const TARGET_FENCE_EVENT_TYPES = Object.freeze(["blur", "focus"] as const);
+
 interface EventAccessors {
   readonly event: GetterRecord;
   readonly eventMethods: GetterRecord;

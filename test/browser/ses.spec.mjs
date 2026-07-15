@@ -6,6 +6,101 @@ import {
   test,
 } from "./fixtures.mjs";
 
+const BASE_EVENT_FIELDS = [
+  "bubbles",
+  "cancelable",
+  "composed",
+  "currentTarget",
+  "defaultPrevented",
+  "eventPhase",
+  "kind",
+  "preventDefault",
+  "stopImmediatePropagation",
+  "stopPropagation",
+  "target",
+  "timeStamp",
+  "type",
+];
+const MODIFIER_FIELDS = ["altKey", "ctrlKey", "metaKey", "shiftKey"];
+const MOUSE_FIELDS = [
+  "button",
+  "buttons",
+  "clientX",
+  "clientY",
+  "movementX",
+  "movementY",
+  "offsetX",
+  "offsetY",
+  "pageX",
+  "pageY",
+  "relatedTarget",
+  "screenX",
+  "screenY",
+];
+const EVENT_FIELDS = Object.freeze({
+  generic: [...BASE_EVENT_FIELDS].sort(),
+  keyboard: [
+    ...BASE_EVENT_FIELDS,
+    ...MODIFIER_FIELDS,
+    "code",
+    "isComposing",
+    "key",
+    "location",
+    "repeat",
+  ].sort(),
+  mouse: [...BASE_EVENT_FIELDS, ...MODIFIER_FIELDS, ...MOUSE_FIELDS].sort(),
+  pointer: [
+    ...BASE_EVENT_FIELDS,
+    ...MODIFIER_FIELDS,
+    ...MOUSE_FIELDS,
+    "height",
+    "isPrimary",
+    "pointerId",
+    "pointerType",
+    "pressure",
+    "tangentialPressure",
+    "tiltX",
+    "tiltY",
+    "twist",
+    "width",
+  ].sort(),
+  touch: [
+    ...BASE_EVENT_FIELDS,
+    ...MODIFIER_FIELDS,
+    "changedTouches",
+    "targetTouches",
+    "touches",
+  ].sort(),
+  focus: [...BASE_EVENT_FIELDS, "relatedTarget"].sort(),
+  input: [...BASE_EVENT_FIELDS, "data", "inputType", "isComposing"].sort(),
+});
+const TOUCH_FIELDS = [
+  "clientX",
+  "clientY",
+  "force",
+  "identifier",
+  "pageX",
+  "pageY",
+  "radiusX",
+  "radiusY",
+  "rotationAngle",
+  "screenX",
+  "screenY",
+  "target",
+].sort();
+const CONTROL_EVENT_FIELDS = new Set([
+  "kind",
+  "preventDefault",
+  "stopImmediatePropagation",
+  "stopPropagation",
+]);
+const POISONED_EVENT_FIELDS = Object.freeze(Object.fromEntries(
+  Object.entries(EVENT_FIELDS).map(([family, fields]) => [
+    family,
+    fields.filter((field) => !CONTROL_EVENT_FIELDS.has(field)),
+  ]),
+));
+
 test("real browser SES hardens the completed public capability graph", async ({
   page,
   browserLedger,
@@ -275,6 +370,547 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     placementCleanup: { idRemoved: true, nameRemoved: true, stillOutside: true },
     placementError: { code: "PLACEMENT_VIOLATION", frozen: true, noCause: true, noStack: true },
     terminalError: { code: "NODE_REVOKED", frozen: true, noCause: true, noStack: true },
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
+test("real browser SES enforces operation and request-attempt time windows", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(async () => {
+    const createRoot = () => {
+      const host = document.createElement("div");
+      host.style.contain = "paint";
+      document.body.append(host);
+      return { host, root: host.attachShadow({ mode: "closed" }) };
+    };
+    const operationFixture = createRoot();
+    const requestFixture = createRoot();
+    const operationDocument = globalThis.arkPublicAPI.createSafeDocument(operationFixture.root, {
+      quotas: { operations: 20 },
+      rates: { operations: { limit: 2, windowMs: 40 } },
+    });
+    const requestDocument = globalThis.arkPublicAPI.createSafeDocument(requestFixture.root, {
+      quotas: { operations: 20, requestAttempts: 20 },
+      rates: {
+        operations: { limit: 20, windowMs: 40 },
+        requestAttempts: { limit: 2, windowMs: 40 },
+      },
+    });
+    const operationGuest = new Compartment({ operationDocument });
+    const requestGuest = new Compartment({ requestDocument });
+    const operationBeforeReset = operationGuest.evaluate(`
+      globalThis.capture = action => {
+        try {
+          action();
+          return null;
+        } catch (error) {
+          return { code: error.code, frozen: Object.isFrozen(error), operation: error.operation };
+        }
+      };
+      globalThis.element = operationDocument.createDiv();
+      element.getText();
+      capture(() => element.getText());
+    `);
+    const requestBeforeReset = requestGuest.evaluate(`
+      globalThis.capture = action => {
+        try {
+          action();
+          return null;
+        } catch (error) {
+          return { code: error.code, frozen: Object.isFrozen(error), operation: error.operation };
+        }
+      };
+      globalThis.image = requestDocument.createImage();
+      image.setSrc("https://denied.example/one.png");
+      image.setSrc("https://denied.example/two.png");
+      capture(() => image.setSrc("https://denied.example/three.png"));
+    `);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const operationAfterReset = operationGuest.evaluate("element.getText()");
+    const requestAfterReset = requestGuest.evaluate(
+      'image.setSrc("https://denied.example/reset.png").allowed',
+    );
+    operationDocument.dispose();
+    requestDocument.dispose();
+    operationFixture.host.remove();
+    requestFixture.host.remove();
+    return {
+      operationAfterReset,
+      operationBeforeReset,
+      requestAfterReset,
+      requestBeforeReset,
+    };
+  });
+
+  expect(result).toEqual({
+    operationAfterReset: "",
+    operationBeforeReset: {
+      code: "RATE_LIMIT_EXCEEDED",
+      frozen: true,
+      operation: "SafeDocument rate exceeded: operations",
+    },
+    requestAfterReset: false,
+    requestBeforeReset: {
+      code: "RATE_LIMIT_EXCEEDED",
+      frozen: true,
+      operation: "SafeDocument rate exceeded: requestAttempts",
+    },
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
+test("real browser SES snapshots every advertised event family and public field", async ({
+  browserName,
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const setup = await page.evaluate(({
+    allowTouchConstructorFallback,
+    poisonedEventFields,
+    touchFields,
+  }) => {
+    const host = document.createElement("div");
+    Object.assign(host.style, {
+      contain: "paint",
+      height: "120px",
+      width: "240px",
+    });
+    document.body.append(host);
+    const root = host.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const target = safeDocument.createInput();
+    target.setId("event-target");
+    target.setType("checkbox");
+    target.setValue("event-value");
+    target.setChecked(true);
+    const related = safeDocument.createInput();
+    related.setId("event-related");
+    related.setValue("related-value");
+    const touchTarget = safeDocument.createDiv();
+    touchTarget.setId("touch-target");
+    for (const wrapper of [target, related, touchTarget]) safeDocument.appendChild(wrapper);
+    const rawTarget = root.querySelectorAll("input")[0];
+    const rawRelated = root.querySelectorAll("input")[1];
+    const rawTouchTarget = root.querySelector("div");
+    if (
+      !(rawTarget instanceof HTMLInputElement)
+      || !(rawRelated instanceof HTMLInputElement)
+      || !(rawTouchTarget instanceof HTMLDivElement)
+    ) {
+      throw new Error("event matrix targets are missing");
+    }
+    Object.assign(rawTouchTarget.style, {
+      display: "block",
+      height: "40px",
+      width: "100px",
+    });
+
+    let poisonReads = 0;
+    const poison = (event, properties) => properties.map((property) => {
+      try {
+        Object.defineProperty(event, property, {
+          configurable: true,
+          get: () => {
+            poisonReads += 1;
+            throw document.body;
+          },
+        });
+        return property;
+      } catch {
+        return `rejected:${property}`;
+      }
+    });
+    const poisoned = {};
+    const nestedMouse = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: 7,
+      clientY: 8,
+    });
+    const dispatchNested = harden(() => rawTarget.dispatchEvent(nestedMouse));
+    const guest = new Compartment({ dispatchNested, target, touchTarget });
+    guest.evaluate(`
+      globalThis.snapshots = {};
+      globalThis.controls = {
+        innerDuring: false,
+        innerLateDuringOuter: false,
+        outerDuring: false,
+        outerStillLive: false,
+      };
+      globalThis.inMouse = false;
+      target.onScroll(event => { snapshots.generic = event; });
+      target.onKeyDown(event => { snapshots.keyboard = event; });
+      target.onClick(event => {
+        if (inMouse) {
+          snapshots.inner = event;
+          controls.innerDuring = event.preventDefault();
+          return;
+        }
+        inMouse = true;
+        snapshots.mouse = event;
+        controls.outerDuring = event.preventDefault();
+        dispatchNested();
+        controls.innerLateDuringOuter = snapshots.inner.preventDefault();
+        controls.outerStillLive = event.stopPropagation();
+        inMouse = false;
+      });
+      target.onPointerDown(event => { snapshots.pointer = event; });
+      target.onFocus(event => { snapshots.focus = event; });
+      target.onInput(event => { snapshots.input = event; });
+      touchTarget.onTouchStart(event => { snapshots.touch = event; });
+    `);
+
+    const generic = new Event("scroll", { bubbles: true, cancelable: true, composed: true });
+    poisoned.generic = poison(generic, poisonedEventFields.generic);
+    rawTarget.dispatchEvent(generic);
+
+    const keyboard = new KeyboardEvent("keydown", {
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+      code: "KeyK",
+      composed: true,
+      ctrlKey: true,
+      isComposing: true,
+      key: "k",
+      location: 1,
+      repeat: true,
+      shiftKey: true,
+    });
+    poisoned.keyboard = poison(keyboard, poisonedEventFields.keyboard);
+    rawTarget.dispatchEvent(keyboard);
+
+    const mouse = new MouseEvent("click", {
+      altKey: true,
+      bubbles: true,
+      button: 1,
+      buttons: 2,
+      cancelable: true,
+      clientX: 20,
+      clientY: 30,
+      composed: true,
+      ctrlKey: true,
+      relatedTarget: rawRelated,
+      screenX: 40,
+      screenY: 50,
+      shiftKey: true,
+    });
+    poisoned.mouse = poison(mouse, poisonedEventFields.mouse);
+    rawTarget.dispatchEvent(mouse);
+
+    const pointer = new PointerEvent("pointerdown", {
+      altKey: true,
+      bubbles: true,
+      buttons: 1,
+      cancelable: true,
+      clientX: 60,
+      clientY: 70,
+      composed: true,
+      height: 9,
+      isPrimary: true,
+      pointerId: 41,
+      pointerType: "pen",
+      pressure: 0.75,
+      relatedTarget: rawRelated,
+      tangentialPressure: 0.125,
+      twist: 180,
+      width: 12,
+    });
+    poisoned.pointer = poison(pointer, poisonedEventFields.pointer);
+    rawTarget.dispatchEvent(pointer);
+
+    const focus = new FocusEvent("focus", {
+      bubbles: false,
+      cancelable: true,
+      composed: true,
+      relatedTarget: rawRelated,
+    });
+    poisoned.focus = poison(focus, poisonedEventFields.focus);
+    rawTarget.dispatchEvent(focus);
+
+    const input = new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      data: "x",
+      inputType: "insertText",
+      isComposing: true,
+    });
+    poisoned.input = poison(input, poisonedEventFields.input);
+    rawTarget.dispatchEvent(input);
+
+    let touchMode = "constructor";
+    let touch;
+    let touchEvent;
+    try {
+      touch = new Touch({
+        clientX: 3,
+        clientY: 4,
+        force: 0.5,
+        identifier: 7,
+        pageX: 5,
+        pageY: 6,
+        radiusX: 7,
+        radiusY: 8,
+        rotationAngle: 9,
+        screenX: 1,
+        screenY: 2,
+        target: rawTouchTarget,
+      });
+      touchEvent = new TouchEvent("touchstart", {
+        bubbles: true,
+        cancelable: true,
+        changedTouches: [touch],
+        composed: true,
+        ctrlKey: true,
+        targetTouches: [touch],
+        touches: [touch],
+      });
+    } catch (error) {
+      if (!allowTouchConstructorFallback) throw error;
+      touchMode = "playwright-trusted-touch";
+      poisoned.touch = "trusted-injection-no-pre-dispatch-object";
+    }
+    if (touch !== undefined && touchEvent !== undefined) {
+      poisoned.touch = {
+        event: poison(touchEvent, poisonedEventFields.touch),
+        point: poison(touch, touchFields),
+      };
+      rawTouchTarget.dispatchEvent(touchEvent);
+    }
+
+    const touchRect = rawTouchTarget.getBoundingClientRect();
+    globalThis.__arkEventMatrix = {
+      guest,
+      host,
+      mouse,
+      nestedMouse,
+      poisoned,
+      safeDocument,
+      getPoisonReads: () => poisonReads,
+    };
+    return {
+      touchMode,
+      touchPoint: {
+        x: touchRect.left + touchRect.width / 2,
+        y: touchRect.top + touchRect.height / 2,
+      },
+    };
+  }, {
+    allowTouchConstructorFallback: browserName === "webkit",
+    poisonedEventFields: POISONED_EVENT_FIELDS,
+    touchFields: TOUCH_FIELDS,
+  });
+
+  if (setup.touchMode === "playwright-trusted-touch") {
+    await page.touchscreen.tap(setup.touchPoint.x, setup.touchPoint.y);
+  }
+
+  const result = await page.evaluate(() => {
+    const state = globalThis.__arkEventMatrix;
+    const snapshots = state.guest.evaluate("snapshots");
+    const deeplyFrozen = (root) => {
+      const pending = [root];
+      const seen = new Set();
+      while (pending.length > 0) {
+        const value = pending.pop();
+        if ((typeof value !== "object" && typeof value !== "function") || value === null) continue;
+        if (seen.has(value)) continue;
+        if (!Object.isFrozen(value)) return false;
+        seen.add(value);
+        for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+          if ("value" in descriptor) pending.push(descriptor.value);
+          else if (descriptor.get !== undefined || descriptor.set !== undefined) return false;
+        }
+      }
+      return true;
+    };
+    const summarize = (event) => {
+      const data = {};
+      for (const key of Reflect.ownKeys(event)) {
+        const value = event[key];
+        data[key] = typeof value === "function"
+          ? { frozen: Object.isFrozen(value), type: "function" }
+          : value;
+      }
+      return {
+        data,
+        deeplyFrozen: deeplyFrozen(event),
+        keys: Reflect.ownKeys(event).sort(),
+        timeStampFinite: Number.isFinite(event.timeStamp),
+      };
+    };
+    const summaries = {};
+    for (const family of ["generic", "keyboard", "mouse", "pointer", "touch", "focus", "input"]) {
+      if (snapshots[family] === undefined) throw new Error(`missing ${family} snapshot`);
+      summaries[family] = summarize(snapshots[family]);
+    }
+    const controls = state.guest.evaluate(`({
+      ...controls,
+      innerLate: snapshots.inner.preventDefault(),
+      outerLate: snapshots.mouse.preventDefault(),
+    })`);
+    const defaultPreventedGetter = Object.getOwnPropertyDescriptor(
+      Event.prototype,
+      "defaultPrevented",
+    )?.get;
+    if (defaultPreventedGetter === undefined) {
+      throw new Error("Event.defaultPrevented getter is missing");
+    }
+    const terminal = {
+      mouseDefaultPrevented: Reflect.apply(defaultPreventedGetter, state.mouse, []),
+      nestedDefaultPrevented: Reflect.apply(defaultPreventedGetter, state.nestedMouse, []),
+      poisonReads: state.getPoisonReads(),
+      poisoned: state.poisoned,
+    };
+    state.safeDocument.dispose();
+    state.host.remove();
+    delete globalThis.__arkEventMatrix;
+    return { controls, summaries, terminal };
+  });
+
+  for (const family of Object.keys(EVENT_FIELDS)) {
+    expect(result.summaries[family].keys).toEqual(EVENT_FIELDS[family]);
+    expect(result.summaries[family].deeplyFrozen).toBe(true);
+    expect(result.summaries[family].timeStampFinite).toBe(true);
+    for (const control of ["preventDefault", "stopImmediatePropagation", "stopPropagation"]) {
+      expect(result.summaries[family].data[control]).toEqual({ frozen: true, type: "function" });
+    }
+  }
+  expect(result.terminal.poisonReads).toBe(0);
+  for (const family of ["generic", "keyboard", "mouse", "pointer", "focus", "input"]) {
+    expect(result.terminal.poisoned[family]).toEqual(POISONED_EVENT_FIELDS[family]);
+  }
+  if (setup.touchMode === "constructor") {
+    expect(result.terminal.poisoned.touch).toEqual({
+      event: POISONED_EVENT_FIELDS.touch,
+      point: TOUCH_FIELDS,
+    });
+  } else {
+    expect(result.terminal.poisoned.touch).toBe("trusted-injection-no-pre-dispatch-object");
+  }
+
+  const ownedTarget = { checked: true, id: "event-target", value: "event-value" };
+  const relatedTarget = { checked: false, id: "event-related", value: "related-value" };
+  for (const family of ["generic", "keyboard", "mouse", "pointer", "focus", "input"]) {
+    expect(result.summaries[family].data.target).toEqual(ownedTarget);
+    expect(result.summaries[family].data.currentTarget).toEqual(ownedTarget);
+  }
+  expect(result.summaries.generic.data).toMatchObject({
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    defaultPrevented: false,
+    eventPhase: 2,
+    kind: "generic",
+    type: "scroll",
+  });
+  expect(result.summaries.keyboard.data).toMatchObject({
+    altKey: true,
+    code: "KeyK",
+    ctrlKey: true,
+    isComposing: true,
+    key: "k",
+    kind: "keyboard",
+    location: 1,
+    repeat: true,
+    shiftKey: true,
+    type: "keydown",
+  });
+  expect(result.summaries.mouse.data).toMatchObject({
+    altKey: true,
+    button: 1,
+    buttons: 2,
+    clientX: 20,
+    clientY: 30,
+    ctrlKey: true,
+    kind: "mouse",
+    relatedTarget,
+    screenX: 40,
+    screenY: 50,
+    shiftKey: true,
+    type: "click",
+  });
+  expect(result.summaries.pointer.data).toMatchObject({
+    buttons: 1,
+    clientX: 60,
+    clientY: 70,
+    height: 9,
+    isPrimary: true,
+    kind: "pointer",
+    pointerId: 41,
+    pointerType: "pen",
+    pressure: 0.75,
+    relatedTarget,
+    tangentialPressure: 0.125,
+    twist: 180,
+    type: "pointerdown",
+    width: 12,
+  });
+  expect(result.summaries.focus.data).toMatchObject({
+    kind: "focus",
+    relatedTarget,
+    type: "focus",
+  });
+  expect(result.summaries.input.data).toMatchObject({
+    data: "x",
+    inputType: "insertText",
+    isComposing: true,
+    kind: "input",
+    type: "input",
+  });
+
+  const touch = result.summaries.touch.data;
+  expect(touch).toMatchObject({
+    kind: "touch",
+    target: { id: "touch-target" },
+    currentTarget: { id: "touch-target" },
+    type: "touchstart",
+  });
+  for (const listName of ["touches", "targetTouches", "changedTouches"]) {
+    expect(touch[listName]).toHaveLength(1);
+    expect(Reflect.ownKeys(touch[listName][0]).sort()).toEqual(TOUCH_FIELDS);
+    expect(touch[listName][0].target).toEqual({ id: "touch-target" });
+    for (const field of TOUCH_FIELDS.filter((field) => field !== "target")) {
+      expect(Number.isFinite(touch[listName][0][field])).toBe(true);
+    }
+  }
+  if (setup.touchMode === "constructor") {
+    expect(touch).toMatchObject({ altKey: false, ctrlKey: true, metaKey: false, shiftKey: false });
+    expect(touch.touches[0]).toEqual({
+      clientX: 3,
+      clientY: 4,
+      force: 0.5,
+      identifier: 7,
+      pageX: 5,
+      pageY: 6,
+      radiusX: 7,
+      radiusY: 8,
+      rotationAngle: 9,
+      screenX: 1,
+      screenY: 2,
+      target: { id: "touch-target" },
+    });
+  }
+  expect(result.controls).toEqual({
+    innerDuring: true,
+    innerLate: false,
+    innerLateDuringOuter: false,
+    outerDuring: true,
+    outerLate: false,
+    outerStillLive: true,
+  });
+  expect(result.terminal).toMatchObject({
+    mouseDefaultPrevented: true,
+    nestedDefaultPrevented: true,
   });
   expectNoUnapprovedActivity(browserLedger);
 });

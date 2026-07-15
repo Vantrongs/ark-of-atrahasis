@@ -8,7 +8,10 @@ import { JSDOM } from "jsdom";
 
 lockdown();
 
-const { createSafeDocument } = await import("../dist/index.js");
+const {
+  DEFAULT_SAFE_DOCUMENT_RATES,
+  createSafeDocument,
+} = await import("../dist/index.js");
 
 const options = Object.freeze({ harden });
 
@@ -26,6 +29,46 @@ test("fails closed without a native ShadowRoot capability", () => {
   assert.throws(
     () => createSafeDocument("host", options),
     (error) => error?.code === "INVALID_ROOT" && !Object.hasOwn(error, "stack"),
+  );
+});
+
+test("exports frozen window-rate defaults and enforces rates separately from lifetime quotas", () => {
+  assert.deepEqual(DEFAULT_SAFE_DOCUMENT_RATES, {
+    operations: { limit: 10_000, windowMs: 1_000 },
+    requestAttempts: { limit: 32, windowMs: 1_000 },
+  });
+  assert.equal(Object.isFrozen(DEFAULT_SAFE_DOCUMENT_RATES), true);
+  assert.equal(Object.isFrozen(DEFAULT_SAFE_DOCUMENT_RATES.operations), true);
+  assert.equal(Object.isFrozen(DEFAULT_SAFE_DOCUMENT_RATES.requestAttempts), true);
+
+  const operationRoot = createRoot().root;
+  const operationDocument = createSafeDocument(operationRoot, {
+    harden,
+    quotas: { operations: 10 },
+    rates: { operations: { limit: 1, windowMs: 10_000 } },
+  });
+  const element = operationDocument.createDiv();
+  assert.throws(
+    () => element.getText(),
+    (error) => error?.code === "RATE_LIMIT_EXCEEDED"
+      && error?.operation === "SafeDocument rate exceeded: operations",
+  );
+
+  const requestRoot = createRoot().root;
+  const requestDocument = createSafeDocument(requestRoot, {
+    harden,
+    quotas: { operations: 10, requestAttempts: 10 },
+    rates: {
+      operations: { limit: 10, windowMs: 10_000 },
+      requestAttempts: { limit: 1, windowMs: 10_000 },
+    },
+  });
+  const image = requestDocument.createImage();
+  assert.equal(image.setSrc("https://denied.example/one.png").allowed, false);
+  assert.throws(
+    () => image.setSrc("https://denied.example/two.png"),
+    (error) => error?.code === "RATE_LIMIT_EXCEEDED"
+      && error?.operation === "SafeDocument rate exceeded: requestAttempts",
   );
 });
 

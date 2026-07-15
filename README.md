@@ -20,7 +20,7 @@ The package has one ESM root export and no package subpaths. Its runtime exports
 are exactly:
 
 - the authority-bearing `createSafeDocument` factory;
-- `DEFAULT_SAFE_DOCUMENT_QUOTAS`;
+- `DEFAULT_SAFE_DOCUMENT_QUOTAS` and `DEFAULT_SAFE_DOCUMENT_RATES`;
 - the pure policy helpers `createURLPolicy`, `createStylePolicy`,
   `canonicalizeStyleProperty`, and their frozen ceilings `URL_SINKS` and
   `SAFE_STYLE_PROPERTIES`;
@@ -78,6 +78,10 @@ hostElement.style.contain = "paint";
 const root = hostElement.attachShadow({ mode: "closed" });
 const safeDocument = createSafeDocument(root, {
   harden,
+  rates: {
+    operations: { limit: 10_000, windowMs: 1_000 },
+    requestAttempts: { limit: 32, windowMs: 1_000 },
+  },
   stylePolicy: { allowedProperties: ["color", "display"] },
   urlPolicy: {
     baseURL: "https://app.example/",
@@ -140,7 +144,15 @@ precondition.
   collapse to primitive defaults or frozen `SafeDOMError` records without
   native/custom exceptions, stacks, causes, DOM nodes, globals, or functions.
   Cancellation functions are usable only during the synchronous callback and
-  return `false` afterward.
+  return `false` afterward. Captured listeners stop advertised bubbling events
+  at the strict `ShadowRoot` seam and stop native composed, non-bubbling
+  `focus`/`blur` at each owned target. Host or document bubble-delegated
+  handlers, hotkeys, or action/form gadgets therefore do not run, while
+  target-local `SafeElement` handlers do. This is not generic
+  capture-phase isolation: capture listeners on `document`, the host, or another
+  earlier ancestor have already run before the event reaches the root. Trusted
+  integrations must keep capture handlers capability-safe and filter plugin
+  origins there when capture observation itself matters.
 - **SES pass style:** copied event target/touch records, URL decisions, and
   `SafeDOMError` records are pass-by-copy. A whole `SafeEvent` is deliberately a
   hardened synchronous local control record, not SES pass-by-copy and not an
@@ -157,14 +169,15 @@ precondition.
   field from an externally retained raw node.
 - **Layout and host authority:** required paint containment clips guest paint
   and hit testing to the bounded host even when the host grants fixed,
-  viewport-sized, high-z-index styles. It is not an event, network, credential,
-  or availability sandbox. The host must still control host geometry, raw
-  nodes, endowments, navigation, CSP, and integration lifetime.
+  viewport-sized, high-z-index styles. The event fence is deliberately
+  narrower than an event sandbox and cannot undo earlier capture listeners. The
+  host must still control host geometry, raw nodes, endowments, navigation,
+  CSP, capture handlers, and integration lifetime.
 
-### Quotas
+### Lifetime quotas and window rates
 
-Quotas are per `SafeDocument`. Supplied limits must be non-negative safe
-integers. The defaults are:
+Lifetime quotas are per `SafeDocument`. Supplied limits must be non-negative
+safe integers. The defaults are:
 
 | Quota | Default | Accounting |
 | --- | ---: | --- |
@@ -180,9 +193,29 @@ integers. The defaults are:
 | `identifierReferences` | 8,192 | live logical IDREF occurrences |
 | `identifierBytes` | 256,000 | live UTF-8 logical ID/name bytes |
 
-Resource accounting is released only after terminal cleanup succeeds;
-`operations` and `requestAttempts` are cumulative rate ceilings and are not
-released.
+Resource accounting is released only after terminal cleanup succeeds.
+`operations` and `requestAttempts` are lifetime call ceilings and are not
+released; they are not rates.
+
+`SafeDocumentOptions.rates` independently applies fixed windows to the same two
+call categories. A supplied entry must be an own data record with a
+non-negative safe-integer `limit` and positive safe-integer `windowMs`; missing
+entries use the deeply frozen `DEFAULT_SAFE_DOCUMENT_RATES`:
+
+| Rate | Default | Counted calls |
+| --- | ---: | --- |
+| `operations` | 10,000 per 1,000 ms | calls entering the active context |
+| `requestAttempts` | 32 per 1,000 ms | every URL setter attempt, including malformed and denied input |
+
+The first counted call anchors each independent window. Exactly `limit` calls
+are allowed; the next fails with a frozen `RATE_LIMIT_EXCEEDED` record until
+`windowMs` has elapsed, and a call exactly at the boundary starts a new window.
+Time comes from a captured `Performance.now()` capability in the supplied
+`ShadowRoot` owner realm, never ambient `Date`, an ambient/guest clock, or an
+option callback. Accessor/non-record/non-primitive/invalid configuration fails
+with `INVALID_RATE` before the root is claimed. A throwing, non-finite,
+negative, or backwards owner clock fails closed with the same stable rate error
+and cannot reopen that document's rate window.
 
 ## Availability boundary
 
@@ -205,6 +238,13 @@ workload.
 - Source and output target ES2022 plus standard DOM APIs.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
+- Post-lockdown browser event tests cover generic, keyboard, mouse, pointer,
+  touch, focus, and input snapshots, every public field, hostile getters,
+  cancellation lifetime, and reentrancy in every engine. Chromium and Firefox
+  use full synthetic `Touch`/`TouchEvent` records under touch emulation. WebKit
+  26.5 rejects those constructors, so its explicit substitute uses Playwright
+  trusted touch injection and checks all public touch fields; malicious
+  pre-dispatch touch getters are not claimed for that engine path.
 - Real SES checks use SES 2.2.0, `@endo/pass-style` 1.8.1, and
   `@endo/eventual-send` 1.5.0.
 - Packed declarations are checked with TypeScript 5.0.4 (consumer minimum) and
@@ -225,6 +265,10 @@ scripts:
 npm ci --ignore-scripts --no-audit --no-fund
 npm run check
 ```
+
+On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
+wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with
+the required system libraries. CI and ordinary FHS hosts leave it unset.
 
 | Command | Purpose |
 | --- | --- |

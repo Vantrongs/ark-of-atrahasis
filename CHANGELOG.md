@@ -9,6 +9,17 @@ the tag, npm package, or GitHub release exists.
 
 ### Added
 
+- Added exported fixed-window operation and request-attempt rate defaults,
+  captured owner-realm monotonic timing, exact boundary/reset/property tests,
+  and stable fail-closed rate configuration/runtime errors alongside the
+  existing lifetime quotas.
+- Added a disposable strict event fence at the `ShadowRoot` bubble seam and at
+  owned `focus`/`blur` targets, with three-engine delegated click/hotkey/action/
+  form/focus coverage and an explicit trusted-host capture-phase obligation.
+- Expanded post-lockdown Chromium, Firefox, and WebKit SES coverage to every
+  advertised event family and public snapshot field, cancellation reentrancy,
+  hostile getters, and a documented trusted-touch substitute where WebKit
+  rejects scripted `Touch` construction.
 - Enforced computed paint containment on the `ShadowRoot` host and added
   Chromium, Firefox, and WebKit geometry/hit-test coverage for explicitly
   granted fixed, viewport-sized, high-z-index guest styles.

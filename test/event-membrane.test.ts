@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { test } from "vitest";
 
+import { createContainedRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 import type {
   SafeEvent,
@@ -13,10 +14,7 @@ import type {
 
 function fixture(): { dom: JSDOM; root: ShadowRoot } {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
-  const host = dom.window.document.createElement("div");
-  host.style.contain = "paint";
-  dom.window.document.body.appendChild(host);
-  return { dom, root: host.attachShadow({ mode: "closed" }) };
+  return { dom, root: createContainedRoot(dom.window.document) };
 }
 
 function assertDeeplyFrozenData(value: unknown, seen = new Set<unknown>()): void {
@@ -504,4 +502,124 @@ test("listener finally clears the native event even when the guest callback thro
   assert.equal(retained.preventDefault(), false);
   assert.equal(retained.stopPropagation(), false);
   assertDeeplyFrozenData(retained);
+});
+
+test("the strict event fence blocks host delegation while preserving internal and prior capture handlers", () => {
+  const dom = new JSDOM("<!doctype html><html><body><form id='host-form'></form></body></html>");
+  const hostForm = dom.window.document.querySelector("#host-form");
+  assert.ok(hostForm);
+  const host = dom.window.document.createElement("div");
+  host.style.contain = "paint";
+  host.dataset.action = "host-submit";
+  hostForm.appendChild(host);
+  const root = host.attachShadow({ mode: "closed" });
+
+  const observed = {
+    action: 0,
+    capture: 0,
+    documentBubble: 0,
+    form: 0,
+    hostBubble: 0,
+    internalBlur: 0,
+    internalClick: 0,
+    internalFocus: 0,
+    internalKey: 0,
+    hotkey: 0,
+  };
+  dom.window.document.addEventListener("click", () => { observed.capture += 1; }, true);
+  dom.window.document.addEventListener("blur", () => { observed.capture += 1; }, true);
+  dom.window.document.addEventListener("focus", () => { observed.capture += 1; }, true);
+  dom.window.document.addEventListener("keydown", () => { observed.capture += 1; }, true);
+  host.addEventListener("click", () => { observed.hostBubble += 1; });
+  host.addEventListener("blur", () => { observed.hostBubble += 1; });
+  host.addEventListener("focus", () => { observed.hostBubble += 1; });
+  host.addEventListener("keydown", () => { observed.hostBubble += 1; });
+  dom.window.document.addEventListener("click", (event) => {
+    observed.documentBubble += 1;
+    const origin = event.target;
+    if (origin instanceof dom.window.HTMLElement && origin.dataset.action === "host-submit") {
+      observed.action += 1;
+      hostForm.requestSubmit();
+    }
+  });
+  dom.window.document.addEventListener("keydown", (event) => {
+    observed.documentBubble += 1;
+    if (event.key === "Delete") observed.hotkey += 1;
+  });
+  hostForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    observed.form += 1;
+  });
+
+  const safeDocument = createSafeDocument(root);
+  const button = safeDocument.createButton();
+  button.setData("action", "host-submit");
+  button.onBlur(() => { observed.internalBlur += 1; });
+  button.onClick(() => { observed.internalClick += 1; });
+  button.onFocus(() => { observed.internalFocus += 1; });
+  button.onKeyDown(() => { observed.internalKey += 1; });
+  safeDocument.appendChild(button);
+  const rawButton = root.querySelector("button");
+  assert.ok(rawButton);
+
+  const click = new dom.window.MouseEvent("click", {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  Object.defineProperty(click, "stopPropagation", {
+    configurable: true,
+    value: () => { throw dom.window.document.body; },
+  });
+  rawButton.dispatchEvent(click);
+  rawButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    composed: true,
+    key: "Delete",
+  }));
+  rawButton.dispatchEvent(new dom.window.FocusEvent("focus", {
+    bubbles: false,
+    composed: true,
+  }));
+  rawButton.dispatchEvent(new dom.window.FocusEvent("blur", {
+    bubbles: false,
+    composed: true,
+  }));
+
+  assert.deepEqual(observed, {
+    action: 0,
+    capture: 4,
+    documentBubble: 0,
+    form: 0,
+    hostBubble: 0,
+    internalBlur: 1,
+    internalClick: 1,
+    internalFocus: 1,
+    internalKey: 1,
+    hotkey: 0,
+  });
+
+  safeDocument.dispose();
+  rawButton.dataset.action = "host-submit";
+  root.append(rawButton);
+  rawButton.dispatchEvent(new dom.window.MouseEvent("click", {
+    bubbles: true,
+    composed: true,
+  }));
+  rawButton.dispatchEvent(new dom.window.FocusEvent("focus", {
+    bubbles: false,
+    composed: true,
+  }));
+  assert.deepEqual(observed, {
+    action: 1,
+    capture: 6,
+    documentBubble: 1,
+    form: 1,
+    hostBubble: 2,
+    internalBlur: 1,
+    internalClick: 1,
+    internalFocus: 1,
+    internalKey: 1,
+    hotkey: 0,
+  });
 });

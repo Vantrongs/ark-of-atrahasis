@@ -11,6 +11,7 @@ import {
   type SafeDocument,
   type SafeURLDecision,
 } from "../../src/index.ts";
+import { createContainedRoot as makeRoot } from "../support/contained-root.ts";
 import { createTestSafeDocument } from "../support/create-safe-document.ts";
 import {
   assertStableBoundaryError,
@@ -31,13 +32,6 @@ const SENSITIVE_IDENTIFIERS = [
   "attr",
   "import",
 ] as const;
-
-function makeRoot(documentValue: Document = document): ShadowRoot {
-  const host = documentValue.createElement("div");
-  host.style.contain = "paint";
-  documentValue.body.append(host);
-  return host.attachShadow({ mode: "open" });
-}
 
 function encodedCharacter(character: string): fc.Arbitrary<string> {
   const codePoint = character.codePointAt(0);
