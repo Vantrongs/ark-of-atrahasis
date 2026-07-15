@@ -249,6 +249,18 @@ export type FormattingTag =
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface SafeDocument {
+  /** Mount operations target the claimed ShadowRoot without exposing a root wrapper. */
+  appendChild(child: SafeElement | SafeTextNode): void;
+  insertBefore(
+    newChild: SafeElement | SafeTextNode,
+    reference: SafeElement | SafeTextNode,
+  ): void;
+  removeChild(child: SafeElement | SafeTextNode): void;
+  replaceChild(
+    newChild: SafeElement | SafeTextNode,
+    oldChild: SafeElement | SafeTextNode,
+  ): void;
+
   createDiv(): SafeElement;
   createSpan(): SafeElement;
   createSection(): SafeElement;

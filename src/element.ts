@@ -24,7 +24,7 @@ import type {
   EventHandler,
   EventCleanup,
 } from "./types.ts";
-import { registerPair, unregisterPair, getRealNode } from "./registry.ts";
+import type { DocumentContext } from "./context.ts";
 import { createSafeEvent } from "./event.ts";
 import { createSafeStyle } from "./style.ts";
 import { isUrlSafe, isInputTypeAllowed, isButtonTypeAllowed, isAttrKeySafe } from "./validation.ts";
@@ -37,35 +37,32 @@ function addSafeEvent(realEl: Element, wrapper: SafeElement, eventName: string, 
   return () => realEl.removeEventListener(eventName, nativeHandler);
 }
 
-export function createSafeElement(realEl: Element): SafeElement {
+export function createSafeElement(context: DocumentContext, realEl: Element): SafeElement {
+  const known = context.registry.getWrapper<SafeElement>(realEl);
+  if (known) return known;
   const htmlEl = realEl as HTMLElement;
 
   const wrapper: SafeElement = {
     appendChild(child: SafeElement | SafeTextNode): void {
-      const realChild = getRealNode(child);
-      if (!realChild) return;
+      const realChild = context.registry.requireRealNode(child);
       realEl.appendChild(realChild);
     },
     insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void {
-      const realNew = getRealNode(newChild);
-      const realRef = getRealNode(reference);
-      if (!realNew || !realRef) return;
+      const realNew = context.registry.requireRealNode(newChild);
+      const realRef = context.registry.requireRealNode(reference);
       realEl.insertBefore(realNew, realRef);
     },
     removeChild(child: SafeElement | SafeTextNode): void {
-      const realChild = getRealNode(child);
-      if (!realChild) return;
+      const realChild = context.registry.requireRealNode(child);
       realEl.removeChild(realChild);
     },
     replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void {
-      const realNew = getRealNode(newChild);
-      const realOld = getRealNode(oldChild);
-      if (!realNew || !realOld) return;
+      const realNew = context.registry.requireRealNode(newChild);
+      const realOld = context.registry.requireRealNode(oldChild);
       realEl.replaceChild(realNew, realOld);
     },
     remove(): void {
       realEl.remove();
-      unregisterPair(wrapper, realEl);
     },
 
     setText(value: string): void { htmlEl.textContent = String(value ?? ""); },
@@ -130,12 +127,14 @@ export function createSafeElement(realEl: Element): SafeElement {
     style: createSafeStyle(htmlEl),
   };
 
-  registerPair(wrapper, realEl);
+  context.registry.register(wrapper, realEl);
   return wrapper;
 }
 
-export function createSafeInputElement(realEl: HTMLInputElement): SafeInputElement {
-  const base = createSafeElement(realEl);
+export function createSafeInputElement(context: DocumentContext, realEl: HTMLInputElement): SafeInputElement {
+  const known = context.registry.getWrapper<SafeInputElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setType(type: string): void {
@@ -177,8 +176,10 @@ export function createSafeInputElement(realEl: HTMLInputElement): SafeInputEleme
   }) as SafeInputElement;
 }
 
-export function createSafeTextareaElement(realEl: HTMLTextAreaElement): SafeTextareaElement {
-  const base = createSafeElement(realEl);
+export function createSafeTextareaElement(context: DocumentContext, realEl: HTMLTextAreaElement): SafeTextareaElement {
+  const known = context.registry.getWrapper<SafeTextareaElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.value = String(value); },
@@ -208,8 +209,10 @@ export function createSafeTextareaElement(realEl: HTMLTextAreaElement): SafeText
   }) as SafeTextareaElement;
 }
 
-export function createSafeSelectElement(realEl: HTMLSelectElement): SafeSelectElement {
-  const base = createSafeElement(realEl);
+export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSelectElement): SafeSelectElement {
+  const known = context.registry.getWrapper<SafeSelectElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.value = String(value); },
@@ -231,8 +234,10 @@ export function createSafeSelectElement(realEl: HTMLSelectElement): SafeSelectEl
   }) as SafeSelectElement;
 }
 
-export function createSafeOptionElement(realEl: HTMLOptionElement): SafeOptionElement {
-  const base = createSafeElement(realEl);
+export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOptionElement): SafeOptionElement {
+  const known = context.registry.getWrapper<SafeOptionElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.setAttribute("value", String(value)); },
@@ -245,8 +250,10 @@ export function createSafeOptionElement(realEl: HTMLOptionElement): SafeOptionEl
   }) as SafeOptionElement;
 }
 
-export function createSafeButtonElement(realEl: HTMLButtonElement): SafeButtonElement {
-  const base = createSafeElement(realEl);
+export function createSafeButtonElement(context: DocumentContext, realEl: HTMLButtonElement): SafeButtonElement {
+  const known = context.registry.getWrapper<SafeButtonElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setType(type: string): void {
@@ -261,16 +268,20 @@ export function createSafeButtonElement(realEl: HTMLButtonElement): SafeButtonEl
   }) as SafeButtonElement;
 }
 
-export function createSafeLabelElement(realEl: HTMLLabelElement): SafeLabelElement {
-  const base = createSafeElement(realEl);
+export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLabelElement): SafeLabelElement {
+  const known = context.registry.getWrapper<SafeLabelElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setFor(value: string): void { realEl.setAttribute("for", String(value)); },
   }) as SafeLabelElement;
 }
 
-export function createSafeFieldsetElement(realEl: HTMLFieldSetElement): SafeFieldsetElement {
-  const base = createSafeElement(realEl);
+export function createSafeFieldsetElement(context: DocumentContext, realEl: HTMLFieldSetElement): SafeFieldsetElement {
+  const known = context.registry.getWrapper<SafeFieldsetElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setDisabled(value: boolean): void {
@@ -280,8 +291,10 @@ export function createSafeFieldsetElement(realEl: HTMLFieldSetElement): SafeFiel
   }) as SafeFieldsetElement;
 }
 
-export function createSafeImageElement(realEl: HTMLImageElement): SafeImageElement {
-  const base = createSafeElement(realEl);
+export function createSafeImageElement(context: DocumentContext, realEl: HTMLImageElement): SafeImageElement {
+  const known = context.registry.getWrapper<SafeImageElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setSrc(url: string): void {
@@ -294,8 +307,10 @@ export function createSafeImageElement(realEl: HTMLImageElement): SafeImageEleme
   }) as SafeImageElement;
 }
 
-export function createSafeAnchorElement(realEl: HTMLAnchorElement): SafeAnchorElement {
-  const base = createSafeElement(realEl);
+export function createSafeAnchorElement(context: DocumentContext, realEl: HTMLAnchorElement): SafeAnchorElement {
+  const known = context.registry.getWrapper<SafeAnchorElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setHref(url: string): void {
@@ -304,8 +319,10 @@ export function createSafeAnchorElement(realEl: HTMLAnchorElement): SafeAnchorEl
   }) as SafeAnchorElement;
 }
 
-export function createSafeVideoElement(realEl: HTMLVideoElement): SafeVideoElement {
-  const base = createSafeElement(realEl);
+export function createSafeVideoElement(context: DocumentContext, realEl: HTMLVideoElement): SafeVideoElement {
+  const known = context.registry.getWrapper<SafeVideoElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setSrc(url: string): void {
@@ -335,8 +352,10 @@ export function createSafeVideoElement(realEl: HTMLVideoElement): SafeVideoEleme
   }) as SafeVideoElement;
 }
 
-export function createSafeAudioElement(realEl: HTMLAudioElement): SafeAudioElement {
-  const base = createSafeElement(realEl);
+export function createSafeAudioElement(context: DocumentContext, realEl: HTMLAudioElement): SafeAudioElement {
+  const known = context.registry.getWrapper<SafeAudioElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setSrc(url: string): void {
@@ -361,8 +380,10 @@ export function createSafeAudioElement(realEl: HTMLAudioElement): SafeAudioEleme
   }) as SafeAudioElement;
 }
 
-export function createSafeSourceElement(realEl: HTMLSourceElement): SafeSourceElement {
-  const base = createSafeElement(realEl);
+export function createSafeSourceElement(context: DocumentContext, realEl: HTMLSourceElement): SafeSourceElement {
+  const known = context.registry.getWrapper<SafeSourceElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setSrc(url: string): void {
@@ -372,8 +393,10 @@ export function createSafeSourceElement(realEl: HTMLSourceElement): SafeSourceEl
   }) as SafeSourceElement;
 }
 
-export function createSafeCanvasElement(realEl: HTMLCanvasElement): SafeCanvasElement {
-  const base = createSafeElement(realEl);
+export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCanvasElement): SafeCanvasElement {
+  const known = context.registry.getWrapper<SafeCanvasElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setWidth(value: number): void { realEl.setAttribute("width", String(Number(value) | 0)); },
@@ -381,8 +404,10 @@ export function createSafeCanvasElement(realEl: HTMLCanvasElement): SafeCanvasEl
   }) as SafeCanvasElement;
 }
 
-export function createSafeTableCellElement(realEl: HTMLTableCellElement): SafeTableCellElement {
-  const base = createSafeElement(realEl);
+export function createSafeTableCellElement(context: DocumentContext, realEl: HTMLTableCellElement): SafeTableCellElement {
+  const known = context.registry.getWrapper<SafeTableCellElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setColspan(value: number): void { realEl.setAttribute("colspan", String(Number(value) | 0)); },
@@ -392,8 +417,10 @@ export function createSafeTableCellElement(realEl: HTMLTableCellElement): SafeTa
   }) as SafeTableCellElement;
 }
 
-export function createSafeDetailsElement(realEl: HTMLDetailsElement): SafeDetailsElement {
-  const base = createSafeElement(realEl);
+export function createSafeDetailsElement(context: DocumentContext, realEl: HTMLDetailsElement): SafeDetailsElement {
+  const known = context.registry.getWrapper<SafeDetailsElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setOpen(value: boolean): void {
@@ -403,8 +430,10 @@ export function createSafeDetailsElement(realEl: HTMLDetailsElement): SafeDetail
   }) as SafeDetailsElement;
 }
 
-export function createSafeDialogElement(realEl: HTMLDialogElement): SafeDialogElement {
-  const base = createSafeElement(realEl);
+export function createSafeDialogElement(context: DocumentContext, realEl: HTMLDialogElement): SafeDialogElement {
+  const known = context.registry.getWrapper<SafeDialogElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setOpen(value: boolean): void {
@@ -414,8 +443,10 @@ export function createSafeDialogElement(realEl: HTMLDialogElement): SafeDialogEl
   }) as SafeDialogElement;
 }
 
-export function createSafeProgressElement(realEl: HTMLProgressElement): SafeProgressElement {
-  const base = createSafeElement(realEl);
+export function createSafeProgressElement(context: DocumentContext, realEl: HTMLProgressElement): SafeProgressElement {
+  const known = context.registry.getWrapper<SafeProgressElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setValue(value: number): void { realEl.setAttribute("value", String(Number(value))); },
@@ -423,8 +454,10 @@ export function createSafeProgressElement(realEl: HTMLProgressElement): SafeProg
   }) as SafeProgressElement;
 }
 
-export function createSafeMeterElement(realEl: HTMLMeterElement): SafeMeterElement {
-  const base = createSafeElement(realEl);
+export function createSafeMeterElement(context: DocumentContext, realEl: HTMLMeterElement): SafeMeterElement {
+  const known = context.registry.getWrapper<SafeMeterElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     setValue(value: number): void { realEl.setAttribute("value", String(Number(value))); },
@@ -433,29 +466,33 @@ export function createSafeMeterElement(realEl: HTMLMeterElement): SafeMeterEleme
   }) as SafeMeterElement;
 }
 
-export function createSafeListElement(realEl: HTMLUListElement | HTMLOListElement): SafeListElement {
-  const base = createSafeElement(realEl);
+export function createSafeListElement(context: DocumentContext, realEl: HTMLUListElement | HTMLOListElement): SafeListElement {
+  const known = context.registry.getWrapper<SafeListElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     createItem(): SafeElement {
-      const li = createSafeElement(document.createElement("li"));
+      const li = createSafeElement(context, context.createElement("li"));
       base.appendChild(li);
       return li;
     },
   }) as SafeListElement;
 }
 
-export function createSafeDescriptionListElement(realEl: HTMLDListElement): SafeDescriptionListElement {
-  const base = createSafeElement(realEl);
+export function createSafeDescriptionListElement(context: DocumentContext, realEl: HTMLDListElement): SafeDescriptionListElement {
+  const known = context.registry.getWrapper<SafeDescriptionListElement>(realEl);
+  if (known) return known;
+  const base = createSafeElement(context, realEl);
 
   return Object.assign(base, {
     createTerm(): SafeElement {
-      const dt = createSafeElement(document.createElement("dt"));
+      const dt = createSafeElement(context, context.createElement("dt"));
       base.appendChild(dt);
       return dt;
     },
     createDescription(): SafeElement {
-      const dd = createSafeElement(document.createElement("dd"));
+      const dd = createSafeElement(context, context.createElement("dd"));
       base.appendChild(dd);
       return dd;
     },

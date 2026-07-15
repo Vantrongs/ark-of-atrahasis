@@ -1,38 +1,41 @@
 import type {
-  SafeDocument,
-  SafeElement,
-  SafeTextNode,
-  SafeStyleSheet,
   FormattingTag,
   HeadingLevel,
   ListType,
+  SafeDocument,
+  SafeElement,
+  SafeTextNode,
 } from "./types.ts";
+import type { DocumentContext } from "./context.ts";
+import { createDocumentContext } from "./context.ts";
 import {
-  createSafeElement,
-  createSafeInputElement,
-  createSafeTextareaElement,
-  createSafeSelectElement,
-  createSafeOptionElement,
-  createSafeButtonElement,
-  createSafeLabelElement,
-  createSafeFieldsetElement,
-  createSafeImageElement,
   createSafeAnchorElement,
-  createSafeVideoElement,
   createSafeAudioElement,
-  createSafeSourceElement,
+  createSafeButtonElement,
   createSafeCanvasElement,
-  createSafeTableCellElement,
+  createSafeDescriptionListElement,
   createSafeDetailsElement,
   createSafeDialogElement,
-  createSafeProgressElement,
-  createSafeMeterElement,
+  createSafeElement,
+  createSafeFieldsetElement,
+  createSafeImageElement,
+  createSafeInputElement,
+  createSafeLabelElement,
   createSafeListElement,
-  createSafeDescriptionListElement,
+  createSafeMeterElement,
+  createSafeOptionElement,
+  createSafeProgressElement,
+  createSafeSelectElement,
+  createSafeSourceElement,
+  createSafeTableCellElement,
+  createSafeTextareaElement,
+  createSafeVideoElement,
 } from "./element.ts";
 import { createSafeTextNode } from "./text.ts";
 import { createSafeStyleSheet } from "./stylesheet.ts";
 
+export { SafeDOMError } from "./errors.ts";
+export type { SafeDOMErrorCode } from "./errors.ts";
 export type {
   SafeDocument,
   SafeElement,
@@ -73,112 +76,134 @@ const FORMATTING_TAGS = new Set<string>([
   "sub", "sup", "mark", "abbr", "cite",
 ]);
 
-function simple(tag: string): SafeElement {
-  return createSafeElement(document.createElement(tag));
+function simple(context: DocumentContext, tag: string): SafeElement {
+  return createSafeElement(context, context.createElement(tag));
 }
 
-export function createSafeDocument(pluginRootID: string): SafeDocument {
-  const pluginRoot: HTMLElement | null = document.getElementById(pluginRootID);
-
-  if (!pluginRoot) {
-    throw new Error(`No HTML element with the '${pluginRootID}' id was found`);
-  }
+/**
+ * Create a DOM capability scoped to one host-created ShadowRoot.
+ *
+ * The returned object deliberately exposes mount operations rather than a
+ * wrapper for the ShadowRoot or its host element.
+ */
+export function createSafeDocument(root: ShadowRoot): SafeDocument {
+  const context = createDocumentContext(root);
+  const { registry } = context;
 
   return {
-    createDiv(): SafeElement { return simple("div"); },
-    createSpan(): SafeElement { return simple("span"); },
-    createSection(): SafeElement { return simple("section"); },
-    createArticle(): SafeElement { return simple("article"); },
-    createNav(): SafeElement { return simple("nav"); },
-    createHeader(): SafeElement { return simple("header"); },
-    createFooter(): SafeElement { return simple("footer"); },
-    createMain(): SafeElement { return simple("main"); },
-    createAside(): SafeElement { return simple("aside"); },
-    createFigure(): SafeElement { return simple("figure"); },
-    createFigcaption(): SafeElement { return simple("figcaption"); },
+    appendChild(child): void {
+      context.root.appendChild(registry.requireRealNode(child));
+    },
+    insertBefore(newChild, reference): void {
+      context.root.insertBefore(
+        registry.requireRealNode(newChild),
+        registry.requireRealNode(reference),
+      );
+    },
+    removeChild(child): void {
+      context.root.removeChild(registry.requireRealNode(child));
+    },
+    replaceChild(newChild, oldChild): void {
+      context.root.replaceChild(
+        registry.requireRealNode(newChild),
+        registry.requireRealNode(oldChild),
+      );
+    },
 
-    createText(): SafeElement { return simple("p"); },
+    createDiv(): SafeElement { return simple(context, "div"); },
+    createSpan(): SafeElement { return simple(context, "span"); },
+    createSection(): SafeElement { return simple(context, "section"); },
+    createArticle(): SafeElement { return simple(context, "article"); },
+    createNav(): SafeElement { return simple(context, "nav"); },
+    createHeader(): SafeElement { return simple(context, "header"); },
+    createFooter(): SafeElement { return simple(context, "footer"); },
+    createMain(): SafeElement { return simple(context, "main"); },
+    createAside(): SafeElement { return simple(context, "aside"); },
+    createFigure(): SafeElement { return simple(context, "figure"); },
+    createFigcaption(): SafeElement { return simple(context, "figcaption"); },
+
+    createText(): SafeElement { return simple(context, "p"); },
     createHeading(level: HeadingLevel): SafeElement {
       if (level < 1 || level > 6) throw new Error("Heading level must be 1-6");
-      return simple(`h${level}`);
+      return simple(context, `h${level}`);
     },
     createFormatting(format: FormattingTag): SafeElement {
       if (!FORMATTING_TAGS.has(format)) throw new Error(`Unknown formatting tag: ${format}`);
-      return simple(format);
+      return simple(context, format);
     },
 
-    createBlockquote(): SafeElement { return simple("blockquote"); },
-    createPre(): SafeElement { return simple("pre"); },
+    createBlockquote(): SafeElement { return simple(context, "blockquote"); },
+    createPre(): SafeElement { return simple(context, "pre"); },
 
     createList(type: ListType) {
-      if (type === "unordered") return createSafeListElement(document.createElement("ul") as HTMLUListElement);
-      if (type === "ordered") return createSafeListElement(document.createElement("ol") as HTMLOListElement);
-      if (type === "description") return createSafeDescriptionListElement(document.createElement("dl") as HTMLDListElement);
+      if (type === "unordered") return createSafeListElement(context, context.createElement("ul"));
+      if (type === "ordered") return createSafeListElement(context, context.createElement("ol"));
+      if (type === "description") {
+        return createSafeDescriptionListElement(context, context.createElement("dl"));
+      }
       throw new Error(`Unknown list type: ${type}`);
     },
-    createListItem(): SafeElement { return simple("li"); },
-    createTerm(): SafeElement { return simple("dt"); },
-    createDescription(): SafeElement { return simple("dd"); },
+    createListItem(): SafeElement { return simple(context, "li"); },
+    createTerm(): SafeElement { return simple(context, "dt"); },
+    createDescription(): SafeElement { return simple(context, "dd"); },
 
-    createTable(): SafeElement { return simple("table"); },
-    createThead(): SafeElement { return simple("thead"); },
-    createTbody(): SafeElement { return simple("tbody"); },
-    createTfoot(): SafeElement { return simple("tfoot"); },
-    createTr(): SafeElement { return simple("tr"); },
-    createTh() { return createSafeTableCellElement(document.createElement("th") as HTMLTableCellElement); },
-    createTd() { return createSafeTableCellElement(document.createElement("td") as HTMLTableCellElement); },
-    createCaption(): SafeElement { return simple("caption"); },
-    createColgroup(): SafeElement { return simple("colgroup"); },
-    createCol(): SafeElement { return simple("col"); },
+    createTable(): SafeElement { return simple(context, "table"); },
+    createThead(): SafeElement { return simple(context, "thead"); },
+    createTbody(): SafeElement { return simple(context, "tbody"); },
+    createTfoot(): SafeElement { return simple(context, "tfoot"); },
+    createTr(): SafeElement { return simple(context, "tr"); },
+    createTh() { return createSafeTableCellElement(context, context.createElement("th")); },
+    createTd() { return createSafeTableCellElement(context, context.createElement("td")); },
+    createCaption(): SafeElement { return simple(context, "caption"); },
+    createColgroup(): SafeElement { return simple(context, "colgroup"); },
+    createCol(): SafeElement { return simple(context, "col"); },
 
-    createButton() { return createSafeButtonElement(document.createElement("button") as HTMLButtonElement); },
-    createInput() { return createSafeInputElement(document.createElement("input") as HTMLInputElement); },
-    createSelect() { return createSafeSelectElement(document.createElement("select") as HTMLSelectElement); },
-    createOption() { return createSafeOptionElement(document.createElement("option") as HTMLOptionElement); },
-    createOptgroup(): SafeElement { return simple("optgroup"); },
-    createTextarea() { return createSafeTextareaElement(document.createElement("textarea") as HTMLTextAreaElement); },
-    createLabel() { return createSafeLabelElement(document.createElement("label") as HTMLLabelElement); },
-    createFieldset() { return createSafeFieldsetElement(document.createElement("fieldset") as HTMLFieldSetElement); },
-    createLegend(): SafeElement { return simple("legend"); },
+    createButton() { return createSafeButtonElement(context, context.createElement("button")); },
+    createInput() { return createSafeInputElement(context, context.createElement("input")); },
+    createSelect() { return createSafeSelectElement(context, context.createElement("select")); },
+    createOption() { return createSafeOptionElement(context, context.createElement("option")); },
+    createOptgroup(): SafeElement { return simple(context, "optgroup"); },
+    createTextarea() { return createSafeTextareaElement(context, context.createElement("textarea")); },
+    createLabel() { return createSafeLabelElement(context, context.createElement("label")); },
+    createFieldset() { return createSafeFieldsetElement(context, context.createElement("fieldset")); },
+    createLegend(): SafeElement { return simple(context, "legend"); },
 
-    createImage() { return createSafeImageElement(document.createElement("img") as HTMLImageElement); },
-    createVideo() { return createSafeVideoElement(document.createElement("video") as HTMLVideoElement); },
-    createAudio() { return createSafeAudioElement(document.createElement("audio") as HTMLAudioElement); },
-    createSource() { return createSafeSourceElement(document.createElement("source") as HTMLSourceElement); },
-    createTrack(): SafeElement { return simple("track"); },
-    createPicture(): SafeElement { return simple("picture"); },
-    createCanvas() { return createSafeCanvasElement(document.createElement("canvas") as HTMLCanvasElement); },
+    createImage() { return createSafeImageElement(context, context.createElement("img")); },
+    createVideo() { return createSafeVideoElement(context, context.createElement("video")); },
+    createAudio() { return createSafeAudioElement(context, context.createElement("audio")); },
+    createSource() { return createSafeSourceElement(context, context.createElement("source")); },
+    createTrack(): SafeElement { return simple(context, "track"); },
+    createPicture(): SafeElement { return simple(context, "picture"); },
+    createCanvas() { return createSafeCanvasElement(context, context.createElement("canvas")); },
 
-    createAnchor() { return createSafeAnchorElement(document.createElement("a") as HTMLAnchorElement); },
-    createDetails() { return createSafeDetailsElement(document.createElement("details") as HTMLDetailsElement); },
-    createSummary(): SafeElement { return simple("summary"); },
-    createDialog() { return createSafeDialogElement(document.createElement("dialog") as HTMLDialogElement); },
-    createHr(): SafeElement { return simple("hr"); },
-    createBr(): SafeElement { return simple("br"); },
-    createWbr(): SafeElement { return simple("wbr"); },
-    createProgress() { return createSafeProgressElement(document.createElement("progress") as HTMLProgressElement); },
-    createMeter() { return createSafeMeterElement(document.createElement("meter") as HTMLMeterElement); },
-    createOutput(): SafeElement { return simple("output"); },
-    createTime(): SafeElement { return simple("time"); },
-    createData(): SafeElement { return simple("data"); },
-    createRuby(): SafeElement { return simple("ruby"); },
-    createRt(): SafeElement { return simple("rt"); },
-    createRp(): SafeElement { return simple("rp"); },
+    createAnchor() { return createSafeAnchorElement(context, context.createElement("a")); },
+    createDetails() { return createSafeDetailsElement(context, context.createElement("details")); },
+    createSummary(): SafeElement { return simple(context, "summary"); },
+    createDialog() { return createSafeDialogElement(context, context.createElement("dialog")); },
+    createHr(): SafeElement { return simple(context, "hr"); },
+    createBr(): SafeElement { return simple(context, "br"); },
+    createWbr(): SafeElement { return simple(context, "wbr"); },
+    createProgress() { return createSafeProgressElement(context, context.createElement("progress")); },
+    createMeter() { return createSafeMeterElement(context, context.createElement("meter")); },
+    createOutput(): SafeElement { return simple(context, "output"); },
+    createTime(): SafeElement { return simple(context, "time"); },
+    createData(): SafeElement { return simple(context, "data"); },
+    createRuby(): SafeElement { return simple(context, "ruby"); },
+    createRt(): SafeElement { return simple(context, "rt"); },
+    createRp(): SafeElement { return simple(context, "rp"); },
 
     createRawText(): SafeTextNode {
-      return createSafeTextNode(document.createTextNode(""));
+      return createSafeTextNode(context, context.createTextNode(""));
     },
 
-    createStyle(): SafeStyleSheet {
-      return createSafeStyleSheet(document.createElement("style"));
+    createStyle() {
+      return createSafeStyleSheet(context, context.createElement("style"));
     },
 
     getElement(id: string): SafeElement | null {
-      if (pluginRoot.id === id) return createSafeElement(pluginRoot);
-
-      const realEl = pluginRoot.querySelector(`#${CSS.escape(id)}`);
-      if (!realEl || !(realEl instanceof HTMLElement)) return null;
-      return createSafeElement(realEl);
+      const real = context.root.getElementById(id);
+      if (!real) return null;
+      return registry.getWrapper<SafeElement>(real) ?? null;
     },
   };
 }

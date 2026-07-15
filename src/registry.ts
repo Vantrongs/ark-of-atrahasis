@@ -1,41 +1,70 @@
-import type { SafeElement, SafeTextNode, SafeStyleSheet } from "./types.ts";
+import type { SafeElement, SafeStyleSheet, SafeTextNode } from "./types.ts";
+import { SafeDOMError } from "./errors.ts";
 
-type SafeNode = SafeElement | SafeTextNode | SafeStyleSheet;
-type RealNode = Element | Text;
+export type SafeNode = SafeElement | SafeTextNode | SafeStyleSheet;
+export type SafeChildNode = SafeElement | SafeTextNode;
+export type RealNode = Element | Text;
 
-const wrapperByReal = new WeakMap<RealNode, SafeNode>();
-const realByWrapper = new WeakMap<SafeNode, RealNode>();
-
-export function registerPair(wrapper: SafeNode, real: RealNode): void {
-  wrapperByReal.set(real, wrapper);
-  realByWrapper.set(wrapper, real);
+interface RegistryEntry {
+  readonly owner: object;
+  readonly wrapper: SafeNode;
+  readonly real: RealNode;
 }
 
-export function unregisterPair(wrapper: SafeNode, real: RealNode): void {
-  wrapperByReal.delete(real);
-  realByWrapper.delete(wrapper);
-}
+/** A registry belongs to exactly one SafeDocument capability. */
+export class NodeRegistry {
+  readonly #owner = Object.freeze({});
+  readonly #ownerDocument: Document;
+  readonly #entryByReal = new WeakMap<RealNode, RegistryEntry>();
+  readonly #entryByWrapper = new WeakMap<SafeNode, RegistryEntry>();
 
-export function getRealNode(wrapper: SafeNode): RealNode | undefined {
-  return realByWrapper.get(wrapper);
-}
+  constructor(ownerDocument: Document) {
+    this.#ownerDocument = ownerDocument;
+  }
 
-export function getRealElement(wrapper: SafeNode): Element | undefined {
-  const real = realByWrapper.get(wrapper);
-  if (real instanceof Element) return real;
-  return undefined;
-}
+  register(wrapper: SafeNode, real: RealNode): void {
+    if (real.ownerDocument !== this.#ownerDocument) {
+      throw new SafeDOMError(
+        "OWNER_DOCUMENT_MISMATCH",
+        "A wrapper can only own nodes from its ShadowRoot document",
+      );
+    }
 
-export function getRealText(wrapper: SafeNode): Text | undefined {
-  const real = realByWrapper.get(wrapper);
-  if (real instanceof Text) return real;
-  return undefined;
-}
+    const byReal = this.#entryByReal.get(real);
+    const byWrapper = this.#entryByWrapper.get(wrapper);
+    if (byReal?.wrapper === wrapper && byWrapper?.real === real) return;
+    if (byReal || byWrapper) {
+      throw new SafeDOMError(
+        "DUPLICATE_REGISTRATION",
+        "A DOM node has exactly one canonical wrapper per SafeDocument",
+      );
+    }
 
-export function getWrapper(real: RealNode): SafeNode | undefined {
-  return wrapperByReal.get(real);
-}
+    const entry: RegistryEntry = { owner: this.#owner, wrapper, real };
+    this.#entryByReal.set(real, entry);
+    this.#entryByWrapper.set(wrapper, entry);
+  }
 
-export function isKnownWrapper(wrapper: SafeNode): boolean {
-  return realByWrapper.has(wrapper);
+  getWrapper<T extends SafeNode = SafeNode>(real: RealNode): T | undefined {
+    const entry = this.#entryByReal.get(real);
+    if (!entry || entry.owner !== this.#owner) return undefined;
+    return entry.wrapper as T;
+  }
+
+  getRealNode(wrapper: SafeNode): RealNode | undefined {
+    const entry = this.#entryByWrapper.get(wrapper);
+    if (!entry || entry.owner !== this.#owner) return undefined;
+    return entry.real;
+  }
+
+  requireRealNode(wrapper: SafeNode): RealNode {
+    const real = this.getRealNode(wrapper);
+    if (!real) {
+      throw new SafeDOMError(
+        "CROSS_OWNER",
+        "The supplied wrapper is not owned by this SafeDocument",
+      );
+    }
+    return real;
+  }
 }

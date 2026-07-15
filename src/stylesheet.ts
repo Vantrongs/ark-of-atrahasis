@@ -1,8 +1,14 @@
 import type { SafeStyleSheet } from "./types.ts";
-import { registerPair, unregisterPair } from "./registry.ts";
+import type { DocumentContext } from "./context.ts";
 import { hasCssUrl } from "./validation.ts";
 
-export function createSafeStyleSheet(realStyle: HTMLStyleElement): SafeStyleSheet {
+export function createSafeStyleSheet(
+  context: DocumentContext,
+  realStyle: HTMLStyleElement,
+): SafeStyleSheet {
+  const known = context.registry.getWrapper<SafeStyleSheet>(realStyle);
+  if (known) return known;
+
   const wrapper: SafeStyleSheet = {
     setCSS(value: string): void {
       const css = String(value ?? "");
@@ -14,11 +20,10 @@ export function createSafeStyleSheet(realStyle: HTMLStyleElement): SafeStyleShee
     },
     remove(): void {
       realStyle.remove();
-      unregisterPair(wrapper, realStyle);
     },
   };
 
-  document.head.appendChild(realStyle);
-  registerPair(wrapper, realStyle as unknown as Element);
+  context.root.appendChild(realStyle);
+  context.registry.register(wrapper, realStyle);
   return wrapper;
 }

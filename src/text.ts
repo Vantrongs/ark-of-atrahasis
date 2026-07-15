@@ -1,7 +1,10 @@
 import type { SafeTextNode } from "./types.ts";
-import { registerPair, unregisterPair } from "./registry.ts";
+import type { DocumentContext } from "./context.ts";
 
-export function createSafeTextNode(realText: Text): SafeTextNode {
+export function createSafeTextNode(context: DocumentContext, realText: Text): SafeTextNode {
+  const known = context.registry.getWrapper<SafeTextNode>(realText);
+  if (known) return known;
+
   const wrapper: SafeTextNode = {
     setText(value: string): void {
       realText.textContent = String(value ?? "");
@@ -11,10 +14,9 @@ export function createSafeTextNode(realText: Text): SafeTextNode {
     },
     remove(): void {
       realText.remove();
-      unregisterPair(wrapper, realText);
     },
   };
 
-  registerPair(wrapper, realText);
+  context.registry.register(wrapper, realText);
   return wrapper;
 }
