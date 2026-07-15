@@ -138,8 +138,18 @@ test("style API never coerces hostile properties/values or consults a shadowed s
     },
   };
 
-  assert.equal(element.style.set(hostile as unknown as string, "red"), false);
-  assert.equal(element.style.set("color", hostile as unknown as string), false);
+  assert.throws(
+    () => element.style.set(hostile as unknown as string, "red"),
+    (error: unknown) => isSafeDOMError(error)
+      && error.code === "ERR_INVALID_ARGUMENT"
+      && error.operation === "SafeStyle.set.property",
+  );
+  assert.throws(
+    () => element.style.set("color", hostile as unknown as string),
+    (error: unknown) => isSafeDOMError(error)
+      && error.code === "ERR_INVALID_ARGUMENT"
+      && error.operation === "SafeStyle.set.value",
+  );
   assert.equal(element.style.set("cssText", "color: red"), false);
   assert.equal(element.style.set("constructor", "red"), false);
   assert.equal(element.style.set("--request", "url(https://attacker.test)"), false);

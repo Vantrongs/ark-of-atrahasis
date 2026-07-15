@@ -2,6 +2,7 @@ import type { SafeStyle } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
 import { canonicalizeStyleProperty } from "./style-policy.ts";
 import { scanCSSNetworkRisk } from "./validation.ts";
+import { requireString } from "./attribute-contract.ts";
 
 type PlatformFunction = (...arguments_: unknown[]) => unknown;
 
@@ -81,21 +82,23 @@ export function createSafeStyle(
   };
 
   const get = (property: string): string | undefined => {
+    const primitiveProperty = requireString(property, "SafeStyle.get.property");
     return context.nodeOperation(realEl, () => {
-      const canonical = canonicalizeStyleProperty(property);
+      const canonical = canonicalizeStyleProperty(primitiveProperty);
       if (canonical === undefined || !policy.allows(canonical)) return undefined;
       return readCanonical(canonical);
     });
   };
 
   const set = (property: string, value: string): boolean => {
-    const canonical = canonicalizeStyleProperty(property);
+    const primitiveProperty = requireString(property, "SafeStyle.set.property");
+    const primitiveValue = requireString(value, "SafeStyle.set.value");
+    const canonical = canonicalizeStyleProperty(primitiveProperty);
     if (
       canonical === undefined ||
       !policy.allows(canonical) ||
-      typeof value !== "string" ||
-      value.length === 0 ||
-      scanCSSNetworkRisk(value).risky ||
+      primitiveValue.length === 0 ||
+      scanCSSNetworkRisk(primitiveValue).risky ||
       declaration === undefined ||
       getPropertyValue === undefined ||
       setProperty === undefined ||
@@ -104,7 +107,7 @@ export function createSafeStyle(
       return context.nodeOperation(realEl, () => false);
     }
 
-    return context.setStyle(realEl, canonical, value, () => {
+    return context.setStyle(realEl, canonical, primitiveValue, () => {
       const previous = readCanonical(canonical);
       let previousPriority = "";
       if (getPropertyPriority !== undefined) {
@@ -117,7 +120,7 @@ export function createSafeStyle(
       }
 
       try {
-        apply(setProperty, declaration, [canonical, value, ""]);
+        apply(setProperty, declaration, [canonical, primitiveValue, ""]);
         const serialized = readCanonical(canonical);
         if (serialized !== undefined && serialized.length > 0) return true;
       } catch {
@@ -140,7 +143,8 @@ export function createSafeStyle(
   };
 
   const remove = (property: string): boolean => {
-    const canonical = canonicalizeStyleProperty(property);
+    const primitiveProperty = requireString(property, "SafeStyle.remove.property");
+    const canonical = canonicalizeStyleProperty(primitiveProperty);
     if (
       canonical === undefined ||
       !policy.allows(canonical) ||
