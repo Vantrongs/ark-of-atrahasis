@@ -163,7 +163,7 @@ export interface SafeDocumentQuotas {
   readonly styleBytes: number;
   /** Aggregate live URL-bearing request/navigation attribute slots. */
   readonly requests: number;
-  /** Approved request/navigation sink writes attempted over the document lifetime. */
+  /** All request/navigation setter calls attempted over the document lifetime. */
   readonly requestAttempts: number;
 }
 

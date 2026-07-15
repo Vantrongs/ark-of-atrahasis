@@ -8,8 +8,18 @@ import {
   type SafeNode,
 } from "./registry.ts";
 import type { SafeDocumentOptions, SafeDocumentQuotas } from "./types.ts";
-import { createStylePolicy, type StylePolicyEngine } from "./style-policy.ts";
-import { createURLPolicy, type URLPolicyEngine } from "./url-policy.ts";
+import {
+  createStylePolicy,
+  type SafeStylePolicy,
+  type StylePolicyEngine,
+} from "./style-policy.ts";
+import {
+  createURLPolicy,
+  type SafeURLPolicy,
+  type SafeURLDecision,
+  type URLPolicyEngine,
+} from "./url-policy.ts";
+import { createPlatformOps, type PlatformOps } from "./platform.ts";
 
 const claimedRoots = new WeakSet<object>();
 const objectIsPrototypeOf = Function.call.bind(Object.prototype.isPrototypeOf) as (
@@ -41,6 +51,63 @@ const RESOURCE_QUOTA: Record<AccountedResource, ResourceQuota> = {
   request: "requests",
 };
 
+const QUOTA_NAMES = [
+  "nodes",
+  "listeners",
+  "operations",
+  "textBytes",
+  "attributeBytes",
+  "styleBytes",
+  "requests",
+  "requestAttempts",
+] as const;
+
+interface NormalizedOptions {
+  readonly quotas?: Partial<SafeDocumentQuotas>;
+  readonly urlPolicy?: SafeURLPolicy;
+  readonly stylePolicy?: SafeStylePolicy;
+}
+
+function readOwnDataProperty<Value>(
+  record: object,
+  property: PropertyKey,
+  error: () => SafeDOMError,
+): Value | undefined {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(record, property);
+    if (descriptor === undefined) return undefined;
+    if (!("value" in descriptor)) throw error();
+    return descriptor.value;
+  } catch {
+    throw error();
+  }
+}
+
+function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedOptions {
+  if (options === undefined) return {};
+  if (options === null || typeof options !== "object") {
+    throw new SafeDOMError("ERR_INVALID_ARGUMENT", "createSafeDocument.options");
+  }
+
+  return {
+    quotas: readOwnDataProperty(
+      options,
+      "quotas",
+      () => new SafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas"),
+    ),
+    urlPolicy: readOwnDataProperty(
+      options,
+      "urlPolicy",
+      () => new SafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.urlPolicy"),
+    ),
+    stylePolicy: readOwnDataProperty(
+      options,
+      "stylePolicy",
+      () => new SafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.stylePolicy"),
+    ),
+  };
+}
+
 function utf8ByteLength(value: string): number {
   let length = 0;
   for (const character of value) {
@@ -53,10 +120,24 @@ function utf8ByteLength(value: string): number {
   return length;
 }
 
-function resolveQuotas(options: SafeDocumentOptions | undefined): SafeDocumentQuotas {
-  const supplied = options?.quotas;
-  const resolved = { ...DEFAULT_SAFE_DOCUMENT_QUOTAS, ...supplied };
-  for (const [name, value] of Object.entries(resolved)) {
+function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeDocumentQuotas {
+  if (supplied !== undefined && (supplied === null || typeof supplied !== "object")) {
+    throw new SafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas");
+  }
+
+  const resolved: QuotaUsage = { ...DEFAULT_SAFE_DOCUMENT_QUOTAS };
+  if (supplied !== undefined) {
+    for (const name of QUOTA_NAMES) {
+      const value = readOwnDataProperty<number>(
+        supplied,
+        name,
+        () => new SafeDOMError("INVALID_QUOTA", `createSafeDocument.options.quotas.${name}`),
+      );
+      if (value !== undefined) resolved[name] = value;
+    }
+  }
+  for (const name of QUOTA_NAMES) {
+    const value = resolved[name];
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new SafeDOMError(
         "INVALID_QUOTA",
@@ -70,10 +151,12 @@ function resolveQuotas(options: SafeDocumentOptions | undefined): SafeDocumentQu
 export interface DocumentContext {
   readonly root: ShadowRoot;
   readonly ownerDocument: Document;
+  readonly ownerRealm: Window & typeof globalThis;
   readonly registry: NodeRegistry;
   readonly urlPolicy: URLPolicyEngine;
   readonly stylePolicy: StylePolicyEngine;
   readonly eventSnapshotter: EventSnapshotter;
+  readonly platform: PlatformOps;
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
@@ -86,8 +169,12 @@ export interface DocumentContext {
     real: Element,
     name: string,
     value: string | null | undefined,
-    request: boolean,
   ): void;
+  setURLAttribute(
+    real: Element,
+    name: string,
+    decide: () => SafeURLDecision,
+  ): SafeURLDecision;
   setStyle(real: Element, property: string, value: string, action: () => boolean): boolean;
   addEventListener(
     real: Element,
@@ -103,32 +190,39 @@ export interface DocumentContext {
 function getNativeRoot(value: unknown): {
   root: ShadowRoot;
   ownerDocument: Document;
+  view: Window & typeof globalThis;
 } {
-  if ((typeof value !== "object" && typeof value !== "function") || value === null) {
-    throw new SafeDOMError("INVALID_ROOT", "createSafeDocument requires a ShadowRoot capability");
-  }
+  try {
+    if ((typeof value !== "object" && typeof value !== "function") || value === null) {
+      throw new SafeDOMError("INVALID_ROOT", "createSafeDocument.root");
+    }
 
-  // Initialisation is a host operation. Resolve the constructor from the
-  // supplied root's realm instead of using ambient globals.
-  const candidate = value as Partial<ShadowRoot>;
-  const ownerDocument = candidate.ownerDocument;
-  const view = ownerDocument?.defaultView;
-  const ShadowRootConstructor = view?.ShadowRoot;
-  if (
-    !ownerDocument
-    || !ShadowRootConstructor
-    || !objectIsPrototypeOf(ShadowRootConstructor.prototype, value)
-  ) {
+    // Initialisation is a host operation. Resolve the constructor from the
+    // supplied root's realm instead of using ambient globals.
+    const candidate = value as Partial<ShadowRoot>;
+    const ownerDocument = candidate.ownerDocument;
+    const view = ownerDocument?.defaultView;
+    const ShadowRootConstructor = view?.ShadowRoot;
+    if (
+      !ownerDocument
+      || !ShadowRootConstructor
+      || !objectIsPrototypeOf(ShadowRootConstructor.prototype, value)
+    ) {
+      throw new SafeDOMError("INVALID_ROOT", "createSafeDocument.root");
+    }
+
+    return { root: value as ShadowRoot, ownerDocument, view };
+  } catch {
     throw new SafeDOMError("INVALID_ROOT", "createSafeDocument requires a native ShadowRoot");
   }
-
-  return { root: value as ShadowRoot, ownerDocument };
 }
 
 class DocumentContextImplementation implements DocumentContext {
   readonly root: ShadowRoot;
   readonly ownerDocument: Document;
+  readonly ownerRealm: Window & typeof globalThis;
   readonly registry: NodeRegistry;
+  readonly platform: PlatformOps;
   readonly urlPolicy: URLPolicyEngine;
   readonly stylePolicy: StylePolicyEngine;
   readonly eventSnapshotter: EventSnapshotter;
@@ -143,36 +237,35 @@ class DocumentContextImplementation implements DocumentContext {
     requests: 0,
     requestAttempts: 0,
   };
-  readonly #createElement: Document["createElement"];
-  readonly #createTextNode: Document["createTextNode"];
-  readonly #AbortController: typeof AbortController;
-  readonly #Element: typeof Element;
   #disposed = false;
+  #disposalComplete = false;
 
-  constructor(root: ShadowRoot, ownerDocument: Document, options?: SafeDocumentOptions) {
+  constructor(
+    root: ShadowRoot,
+    ownerDocument: Document,
+    view: Window & typeof globalThis,
+    options?: SafeDocumentOptions,
+  ) {
+    const normalizedOptions = normalizeOptions(options);
     this.root = root;
     this.ownerDocument = ownerDocument;
-    this.registry = new NodeRegistry(ownerDocument);
-    this.#quotas = resolveQuotas(options);
-    const view = ownerDocument.defaultView;
-    if (!view) throw new SafeDOMError("INVALID_ROOT", "createSafeDocument.rootRealm");
-    this.urlPolicy = createURLPolicy(options?.urlPolicy, view.URL);
-    this.stylePolicy = createStylePolicy(options?.stylePolicy);
+    this.ownerRealm = view;
+    this.#quotas = resolveQuotas(normalizedOptions.quotas);
+    this.platform = createPlatformOps(ownerDocument, view);
+    this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
+    this.urlPolicy = createURLPolicy(normalizedOptions.urlPolicy, this.platform.URL);
+    this.stylePolicy = createStylePolicy(normalizedOptions.stylePolicy);
     this.eventSnapshotter = createEventSnapshotter(view);
-    this.#createElement = ownerDocument.createElement.bind(ownerDocument);
-    this.#createTextNode = ownerDocument.createTextNode.bind(ownerDocument);
-    this.#AbortController = view.AbortController;
-    this.#Element = view.Element;
   }
 
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
   createElement(tag: string): HTMLElement {
-    return this.documentOperation(() => this.#createElement(tag));
+    return this.documentOperation(() => this.platform.createElement(tag));
   }
 
   createTextNode(value: string): Text {
-    return this.documentOperation(() => this.#createTextNode(value));
+    return this.documentOperation(() => this.platform.createTextNode(value));
   }
 
   register(wrapper: SafeNode, real: RealNode): void {
@@ -225,28 +318,43 @@ class DocumentContextImplementation implements DocumentContext {
     real: Element,
     name: string,
     value: string | null | undefined,
-    request: boolean,
   ): void {
     this.nodeOperation(real, () => {
       if (value === undefined) return;
       const entry = this.#requireEntryByReal(real);
-      if (request && value !== null) this.#reserve("requestAttempts", 1);
       const changes: ResourceChange[] = [{
         resource: "attribute",
         slot: name,
         amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }];
-      if (request) {
-        changes.push({
-          resource: "request",
-          slot: name,
-          amount: value === null ? 0 : 1,
-        });
-      }
       this.#updateResources(entry, changes, () => {
-        if (value === null) real.removeAttribute(name);
-        else real.setAttribute(name, value);
+        if (value === null) this.platform.removeAttribute(real, name);
+        else this.platform.setAttribute(real, name, value);
       });
+    });
+  }
+
+  setURLAttribute(
+    real: Element,
+    name: string,
+    decide: () => SafeURLDecision,
+  ): SafeURLDecision {
+    return this.nodeOperation(real, () => {
+      this.#reserve("requestAttempts", 1);
+      const decision = decide();
+      if (!decision.allowed) return decision;
+
+      const entry = this.#requireEntryByReal(real);
+      const value = decision.url;
+      this.#updateResources(entry, [
+        {
+          resource: "attribute",
+          slot: name,
+          amount: utf8ByteLength(name) + utf8ByteLength(value),
+        },
+        { resource: "request", slot: name, amount: 1 },
+      ], () => this.platform.setAttribute(real, name, value));
+      return decision;
     });
   }
 
@@ -269,8 +377,9 @@ class DocumentContextImplementation implements DocumentContext {
       let committed: boolean;
       try {
         committed = action();
-      } catch {
+      } catch (error) {
         this.#usage.styleBytes -= delta;
+        if (error instanceof SafeDOMError) throw error;
         throw new SafeDOMError(
           "DOM_OPERATION_FAILED",
           "The DOM mutation could not be completed",
@@ -294,26 +403,27 @@ class DocumentContextImplementation implements DocumentContext {
   ): () => void {
     return this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
+      const controller = this.platform.createAbortController();
       this.#reserve("listeners", 1);
-      const controller = new this.#AbortController();
       let active = true;
       const cleanup = (): void => {
         if (!active) return;
+        this.platform.abort(controller);
         active = false;
         entry.listeners.delete(cleanup);
         this.#usage.listeners -= 1;
-        try {
-          controller.abort();
-        } catch {
-          // Cleanup/revocation must remain available and must not disclose a
-          // native exception even if the host platform is faulty.
-        }
       };
       entry.listeners.add(cleanup);
       try {
-        real.addEventListener(eventName, listener, { signal: controller.signal });
-      } catch {
+        this.platform.addEventListener(
+          real,
+          eventName,
+          listener,
+          this.platform.getAbortSignal(controller),
+        );
+      } catch (error) {
         cleanup();
+        if (error instanceof SafeDOMError) throw error;
         throw new SafeDOMError(
           "DOM_OPERATION_FAILED",
           "The event listener could not be installed",
@@ -332,37 +442,53 @@ class DocumentContextImplementation implements DocumentContext {
   }
 
   detachNode(real: RealNode): void {
-    this.nodeOperation(real, () => real.remove());
+    this.nodeOperation(real, () => this.platform.detach(real));
   }
 
   disposeNode(real: RealNode): void {
     const entry = this.#requireEntryByReal(real);
-    if (this.#disposed || entry.state !== "active") return;
+    if (this.#disposed) return;
+    if (entry.state === "disposed") {
+      this.#finalizeTerminalSubtree(entry, "disposed", "always");
+      return;
+    }
+    if (entry.state === "revoked") {
+      this.#finalizeTerminalSubtree(entry, "revoked", "none");
+      return;
+    }
     const compromised = this.#auditPlacements();
     if (compromised.has(entry) || entry.state !== "active") return;
 
     const subtree = this.registry.entries().filter((candidate) => (
       candidate.state === "active" && this.#isWithin(candidate.real, real)
     ));
-    for (const candidate of subtree) this.#clearOwnedResources(candidate);
-    for (const candidate of subtree) this.#finalizeEntry(candidate, "disposed");
-    real.remove();
+    for (const candidate of subtree) candidate.state = "disposed";
+    this.#finalizeTerminalSubtree(entry, "disposed", "always");
   }
 
   disposeDocument(): void {
-    if (this.#disposed) return;
-    this.#auditPlacements();
-    const activeEntries = this.registry.entries().filter((entry) => entry.state === "active");
+    if (this.#disposalComplete) return;
+    if (!this.#disposed) this.#auditPlacements();
+    const trackedEntries = this.registry.entries();
     this.#disposed = true;
-
-    for (const entry of activeEntries) this.#clearOwnedResources(entry);
-    for (const entry of activeEntries) this.#finalizeEntry(entry, "disposed");
-
-    // Only remove nodes that are still directly mounted in the claimed root.
-    // Raw host nodes in the same ShadowRoot are never part of this set.
-    for (const entry of activeEntries) {
-      if (entry.real.parentNode === this.root) entry.real.remove();
+    for (const entry of trackedEntries) {
+      if (entry.state === "active") entry.state = "disposed";
     }
+
+    let firstFailure: SafeDOMError | undefined;
+    for (const entry of trackedEntries) {
+      try {
+        const state = entry.state === "revoked" ? "revoked" : "disposed";
+        this.#finalizeEntry(entry, state, "from-root");
+      } catch (error) {
+        firstFailure ??= error instanceof SafeDOMError
+          ? error
+          : new SafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose");
+      }
+    }
+
+    this.#disposalComplete = this.registry.entries().length === 0;
+    if (firstFailure !== undefined) throw firstFailure;
   }
 
   #assertDocumentActive(): void {
@@ -401,15 +527,26 @@ class DocumentContextImplementation implements DocumentContext {
     for (const entry of this.registry.entries()) {
       if (entry.state === "active" && !this.#hasSafePlacement(entry)) compromised.add(entry);
     }
-    for (const entry of compromised) this.#finalizeEntry(entry, "revoked");
+    for (const entry of compromised) entry.state = "revoked";
+    let firstFailure: SafeDOMError | undefined;
+    for (const entry of compromised) {
+      try {
+        this.#finalizeEntry(entry, "revoked");
+      } catch (error) {
+        firstFailure ??= error instanceof SafeDOMError
+          ? error
+          : new SafeDOMError("DOM_OPERATION_FAILED", "SafeElement.revoke");
+      }
+    }
+    if (firstFailure !== undefined) throw firstFailure;
     return compromised;
   }
 
   #hasSafePlacement(entry: RegistryEntry): boolean {
-    if (entry.real.ownerDocument !== this.ownerDocument) return false;
+    if (this.platform.ownerDocument(entry.real) !== this.ownerDocument) return false;
     let current: Node = entry.real;
     for (;;) {
-      const parent = current.parentNode;
+      const parent = this.platform.parentNode(current);
       if (parent === null || parent === this.root) return true;
       const parentEntry = this.registry.getEntryByReal(parent as RealNode);
       if (parentEntry?.state !== "active") return false;
@@ -421,29 +558,77 @@ class DocumentContextImplementation implements DocumentContext {
     let current: Node | null = candidate;
     while (current !== null) {
       if (current === ancestor) return true;
-      current = current.parentNode;
+      current = this.platform.parentNode(current);
     }
     return false;
   }
 
   #clearOwnedResources(entry: RegistryEntry): void {
-    if (!(entry.real instanceof this.#Element)) return;
-    for (const name of entry.resources.request.keys()) entry.real.removeAttribute(name);
+    if (!this.platform.isElement(entry.real)) return;
+    for (const name of entry.resources.request.keys()) {
+      this.platform.removeAttribute(entry.real, name);
+    }
     if (entry.resources.style.size > 0) {
-      entry.real.removeAttribute("style");
+      this.platform.removeAttribute(entry.real, "style");
     }
   }
 
-  #finalizeEntry(entry: RegistryEntry, state: "disposed" | "revoked"): void {
-    if (entry.state !== "active") return;
-    entry.state = state;
+  #finalizeTerminalSubtree(
+    rootEntry: RegistryEntry,
+    state: "disposed" | "revoked",
+    rootDetach: "none" | "always",
+  ): void {
+    const pendingDescendants = this.registry.entries().filter((candidate) => (
+      candidate !== rootEntry
+      && candidate.state === state
+      && this.#isWithin(candidate.real, rootEntry.real)
+    ));
+    let firstFailure: SafeDOMError | undefined;
+    for (const candidate of pendingDescendants) {
+      try {
+        this.#finalizeEntry(candidate, state);
+      } catch (error) {
+        firstFailure ??= error instanceof SafeDOMError
+          ? error
+          : new SafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.descendant`);
+      }
+    }
+    try {
+      this.#finalizeEntry(rootEntry, state, rootDetach);
+    } catch (error) {
+      firstFailure ??= error instanceof SafeDOMError
+        ? error
+        : new SafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}`);
+    }
+    if (firstFailure !== undefined) throw firstFailure;
+  }
+
+  #finalizeEntry(
+    entry: RegistryEntry,
+    state: "disposed" | "revoked",
+    detach: "none" | "always" | "from-root" = "none",
+  ): void {
+    if (entry.accountingReleased) return;
+    if (entry.state === "active") entry.state = state;
+    else if (entry.state !== state) return;
+
+    // Capability revocation happens before cleanup, but live accounting is
+    // retained until every request/style/listener effect is physically gone.
+    this.#clearOwnedResources(entry);
     for (const cleanup of [...entry.listeners]) cleanup();
+    if (detach !== "none") {
+      const parent = this.platform.parentNode(entry.real);
+      if (parent !== null && (detach === "always" || parent === this.root)) {
+        this.platform.removeChild(parent, entry.real, "Node.remove");
+      }
+    }
     for (const resource of Object.keys(entry.resources) as AccountedResource[]) {
       const quota = RESOURCE_QUOTA[resource];
       for (const amount of entry.resources[resource].values()) this.#usage[quota] -= amount;
       entry.resources[resource].clear();
     }
     this.#usage.nodes -= 1;
+    entry.accountingReleased = true;
     this.registry.stopTracking(entry);
   }
 
@@ -468,8 +653,9 @@ class DocumentContextImplementation implements DocumentContext {
 
     try {
       action();
-    } catch {
+    } catch (error) {
       for (const [quota, delta] of deltas) this.#usage[quota] -= delta;
+      if (error instanceof SafeDOMError) throw error;
       throw new SafeDOMError(
         "DOM_OPERATION_FAILED",
         "The DOM mutation could not be completed",
@@ -493,7 +679,7 @@ export function createDocumentContext(
   rootCapability: unknown,
   options?: SafeDocumentOptions,
 ): DocumentContext {
-  const { root, ownerDocument } = getNativeRoot(rootCapability);
+  const { root, ownerDocument, view } = getNativeRoot(rootCapability);
   if (claimedRoots.has(root)) {
     throw new SafeDOMError(
       "ROOT_ALREADY_CLAIMED",
@@ -502,7 +688,7 @@ export function createDocumentContext(
   }
 
   // Invalid options do not consume the root capability.
-  const context = new DocumentContextImplementation(root, ownerDocument, options);
+  const context = new DocumentContextImplementation(root, ownerDocument, view, options);
   claimedRoots.add(root);
   return context;
 }

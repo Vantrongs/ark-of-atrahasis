@@ -51,12 +51,7 @@ export function createSafeStyle(
   realEl: HTMLElement,
 ): SafeStyle {
   const { stylePolicy: policy } = context;
-  let realm: unknown;
-  try {
-    realm = realEl.ownerDocument?.defaultView;
-  } catch {
-    realm = undefined;
-  }
+  const realm: unknown = context.ownerRealm;
 
   const htmlElementPrototype = getRealmConstructorPrototype(realm, "HTMLElement");
   const declarationPrototype = getRealmConstructorPrototype(realm, "CSSStyleDeclaration");
