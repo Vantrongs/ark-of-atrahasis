@@ -32,8 +32,14 @@ function fixture() {
 
 test("real SES completes capabilities for two mutually distrusting compartments", () => {
   const { dom, outside, firstRoot, secondRoot } = fixture();
-  const firstDocument = createSafeDocument(firstRoot, { harden });
-  const secondDocument = createSafeDocument(secondRoot, { harden });
+  const firstDocument = createSafeDocument(firstRoot, {
+    harden,
+    stylePolicy: { allowedProperties: ["color"] },
+  });
+  const secondDocument = createSafeDocument(secondRoot, {
+    harden,
+    stylePolicy: { allowedProperties: ["color"] },
+  });
   const firstGuest = new Compartment({ safeDocument: firstDocument });
   const secondGuest = new Compartment({ safeDocument: secondDocument });
 
@@ -46,7 +52,13 @@ test("real SES completes capabilities for two mutually distrusting compartments"
     globalThis.input = safeDocument.createInput();
     input.setId("first-input");
     input.setValue("first-value");
+    input.style.set("color", "red");
     safeDocument.appendChild(input);
+    globalThis.image = safeDocument.createImage();
+    globalThis.deniedDecision = image.setSrc("https://denied.example.test/first.png");
+    safeDocument.appendChild(image);
+    image.detach();
+    safeDocument.appendChild(image);
     globalThis.cleanup = input.onClick(event => {
       globalThis.snapshot = event;
       event.preventDefault();
@@ -67,6 +79,9 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   assert.equal(Object.isFrozen(firstInput.style.set), true);
   assert.equal(Object.isFrozen(cleanup), true);
   assert.equal(firstDocument.getElement("first-input"), firstInput);
+  assert.equal(firstGuest.evaluate('input.style.get("color")'), "red");
+  assert.equal(firstGuest.evaluate("safeDocument.getElement('first-input') === input"), true);
+  assert.equal(firstGuest.evaluate("deniedDecision.allowed"), false);
   assert.deepEqual(firstPoisonAttempts, {
     document: false,
     style: false,
@@ -77,10 +92,23 @@ test("real SES completes capabilities for two mutually distrusting compartments"
     globalThis.div = safeDocument.createDiv();
     div.setId("first-input");
     div.setText("second-value");
+    div.style.set("color", "blue");
     safeDocument.appendChild(div);
+    globalThis.image = safeDocument.createImage();
+    globalThis.deniedDecision = image.setSrc("https://denied.example.test/second.png");
+    safeDocument.appendChild(image);
+    image.detach();
+    safeDocument.appendChild(image);
+    globalThis.clicks = 0;
+    globalThis.cleanup = div.onClick(event => {
+      globalThis.snapshot = event;
+      globalThis.clicks += 1;
+    });
   `);
   assert.equal(secondGuest.evaluate("div.getText()"), "second-value");
   assert.equal(secondGuest.evaluate('safeDocument.getElement("first-input") === div'), true);
+  assert.equal(secondGuest.evaluate('div.style.get("color")'), "blue");
+  assert.equal(secondGuest.evaluate("deniedDecision.allowed"), false);
   assert.equal(secondGuest.evaluate("'poison' in safeDocument || 'poison' in div.style"), false);
   assert.equal(secondGuest.evaluate(`
     Reflect.ownKeys(safeDocument).some(key =>
@@ -107,11 +135,27 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   assert.match(nativeSecond.id, /^aoa-i-[0-9a-f]{48}$/);
   assert.notEqual(nativeInput.id, nativeSecond.id);
   nativeInput.dispatchEvent(new dom.window.MouseEvent("click", { cancelable: true }));
+  nativeSecond.dispatchEvent(new dom.window.MouseEvent("click", { cancelable: true }));
   const snapshot = firstGuest.evaluate("snapshot");
+  const secondSnapshot = secondGuest.evaluate("snapshot");
   assert.equal(Object.isFrozen(snapshot), true);
   assert.equal(Object.isFrozen(snapshot.target), true);
   assert.equal(Object.isFrozen(snapshot.preventDefault), true);
   assert.equal(snapshot.preventDefault(), false, "event control closes after dispatch");
+  assert.equal(secondGuest.evaluate("clicks"), 1);
+  assert.throws(() => passStyleOf(snapshot), "the time-bounded event control is local-only");
+  assert.throws(() => passStyleOf(secondSnapshot), "the time-bounded event control is local-only");
+  assert.equal(passStyleOf(snapshot.target), "copyRecord");
+  assert.equal(passStyleOf(snapshot.currentTarget), "copyRecord");
+  assert.equal(passStyleOf(secondSnapshot.target), "copyRecord");
+  assert.equal(passStyleOf(secondSnapshot.currentTarget), "copyRecord");
+  for (const decision of [
+    firstGuest.evaluate("deniedDecision"),
+    secondGuest.evaluate("deniedDecision"),
+  ]) {
+    assert.equal(passStyleOf(decision), "copyRecord");
+    assert.equal(passStyleOf(decision.error), "copyRecord");
+  }
   assert.equal(outside.textContent, "host-owned");
   assert.equal(secondRoot.textContent, "second-value");
 
@@ -127,6 +171,19 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   assert.equal(isSafeDOMError(disposedError), true);
   assert.equal(disposedError.code, "DOCUMENT_DISPOSED");
   assert.equal(passStyleOf(disposedError), "copyRecord");
+
+  secondDocument.dispose();
+  const secondDisposedError = secondGuest.evaluate(`
+    try {
+      div.getText();
+      undefined;
+    } catch (error) {
+      error;
+    }
+  `);
+  assert.equal(isSafeDOMError(secondDisposedError), true);
+  assert.equal(secondDisposedError.code, "DOCUMENT_DISPOSED");
+  assert.equal(passStyleOf(secondDisposedError), "copyRecord");
 });
 
 test("primitive-only errors and URL decisions are pass-by-copy data", () => {

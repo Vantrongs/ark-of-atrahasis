@@ -273,11 +273,12 @@ try {
     packedManifest.devDependencies?.typescript !== "6.0.3" ||
     packedManifest.devDependencies?.["typescript-current"] !== "npm:typescript@7.0.2" ||
     packedManifest.devDependencies?.["typescript-min"] !== "npm:typescript@5.0.4" ||
+    packedManifest.devDependencies?.["fast-check"] !== "4.9.0" ||
     packedManifest.devDependencies?.ses !== "2.2.0" ||
     packedManifest.devDependencies?.["@endo/pass-style"] !== "1.8.1" ||
     packedManifest.devDependencies?.["@endo/eventual-send"] !== "1.5.0"
   ) {
-    throw new Error("packed manifest must pin TypeScript and the SES verification toolchain");
+    throw new Error("packed manifest must pin TypeScript, fast-check, and the SES verification toolchain");
   }
 
   const packedLock = JSON.parse(

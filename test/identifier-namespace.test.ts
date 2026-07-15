@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ARIA_IDREF_LIST_NAMES, ARIA_IDREF_NAMES } from "../src/index.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
+import {
+  assertStableBoundaryError,
+  captureThrown,
+  propertyParameters,
+} from "./support/property-config.ts";
 
 function makeRoot(): ShadowRoot {
   const host = document.createElement("div");
@@ -569,5 +575,129 @@ describe("identifier namespace", () => {
       }),
     );
     expect(() => target.setTitle("last metered operation")).not.toThrow();
+  });
+});
+
+describe("generated logical identifier and IDREF contracts", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const adversarialIdentifiers = [
+    "__proto__",
+    "constructor",
+    "#host>[name=value]",
+    "\u0000",
+    "\u202eopaque",
+    "astral-\u{1f680}",
+    `long-${"x".repeat(1_024)}`,
+  ] as const;
+  const logicalIdentifier = fc.oneof(
+    fc.constantFrom(...adversarialIdentifiers),
+    fc.string({ unit: "binary", minLength: 1, maxLength: 96 })
+      .filter((value) => !/[\t\n\f\r ]/u.test(value)),
+  );
+
+  it("keeps generated forward/backward IDREFs opaque, canonical, ordered, and rebindable", () => {
+    fc.assert(fc.property(
+      logicalIdentifier,
+      logicalIdentifier,
+      (logicalId, secondLogicalId) => {
+        fc.pre(logicalId !== secondLogicalId);
+        const root = makeRoot();
+        const safeDocument = createSafeDocument(root);
+        const label = safeDocument.createLabel();
+        const cell = safeDocument.createTh();
+        const described = safeDocument.createDiv();
+        label.setFor(logicalId);
+        cell.setHeaders(`${logicalId} ${secondLogicalId} ${logicalId}`);
+        described.setAria("controls", `${secondLogicalId} ${logicalId}`);
+        safeDocument.appendChild(label);
+        safeDocument.appendChild(cell);
+        safeDocument.appendChild(described);
+
+        const rawLabel = requireElement(root.querySelector("label"));
+        const rawCell = requireElement(root.querySelector("th"));
+        const rawDescribed = requireElement(root.querySelector("div"));
+        const firstToken = rawLabel.getAttribute("for");
+        const headerTokens = rawCell.getAttribute("headers")?.split(" ") ?? [];
+        const ariaTokens = rawDescribed.getAttribute("aria-controls")?.split(" ") ?? [];
+        expect(firstToken).toMatch(/^aoa-i-[0-9a-f]{48}$/u);
+        expect(headerTokens).toHaveLength(3);
+        expect(headerTokens[0]).toBe(firstToken);
+        expect(headerTokens[2]).toBe(firstToken);
+        expect(headerTokens[1]).toMatch(/^aoa-i-[0-9a-f]{48}$/u);
+        expect(ariaTokens).toEqual([headerTokens[1], firstToken]);
+        for (const physical of [firstToken, ...headerTokens, ...ariaTokens]) {
+          expect(physical).toMatch(/^aoa-i-[0-9a-f]{48}$/u);
+          expect(physical).not.toBe(logicalId);
+          expect(physical).not.toBe(secondLogicalId);
+        }
+
+        const target = safeDocument.createInput();
+        const secondTarget = safeDocument.createSpan();
+        target.setId(logicalId);
+        secondTarget.setId(secondLogicalId);
+        safeDocument.appendChild(target);
+        safeDocument.appendChild(secondTarget);
+        const rawTarget = requireElement(root.querySelector("input"));
+        expect(rawTarget.id).toBe(firstToken);
+        expect(target.getId()).toBe(logicalId);
+        expect(label.getFor()).toBe(logicalId);
+        expect(cell.getHeaders()).toBe(`${logicalId} ${secondLogicalId} ${logicalId}`);
+        expect(described.getAria("controls")).toBe(`${secondLogicalId} ${logicalId}`);
+        expect(safeDocument.getElement(logicalId)).toBe(target);
+
+        const hostCollision = document.createElement("input");
+        hostCollision.id = logicalId;
+        document.body.prepend(hostCollision);
+        expect(safeDocument.getElement(logicalId)).toBe(target);
+
+        const duplicate = safeDocument.createDiv();
+        const duplicateError = captureThrown(() => duplicate.setId(logicalId));
+        assertStableBoundaryError(duplicateError, "DUPLICATE_IDENTIFIER");
+        expect(duplicate.getId()).toBe("");
+        expect(rawTarget.id).toBe(firstToken);
+
+        target.dispose();
+        const replacement = safeDocument.createInput();
+        replacement.setId(logicalId);
+        safeDocument.appendChild(replacement);
+        const rawReplacement = [...root.querySelectorAll("input")].find((value) => value.id === firstToken);
+        expect(rawReplacement?.id).toBe(firstToken);
+        expect(safeDocument.getElement(logicalId)).toBe(replacement);
+      },
+    ), propertyParameters(300));
+  });
+
+  it("keeps empty/invalid behavior stable and never coerces identifier objects", () => {
+    const invalid = fc.oneof(
+      fc.constantFrom(" ", "a b", "a\tb", "a\nb", "a\rb", "a\fb"),
+      fc.tuple(
+        fc.string({ unit: "binary", maxLength: 24 }),
+        fc.constantFrom(" ", "\t", "\n", "\r", "\f"),
+        fc.string({ unit: "binary", maxLength: 24 }),
+      ).map(([left, separator, right]) => `${left}${separator}${right}`),
+    );
+    fc.assert(fc.property(invalid, (value) => {
+      const wrapper = createSafeDocument(makeRoot()).createDiv();
+      wrapper.setId("active");
+      const error = captureThrown(() => wrapper.setId(value));
+      assertStableBoundaryError(error, "ERR_INVALID_ARGUMENT");
+      expect(wrapper.getId()).toBe("active");
+      wrapper.setId("");
+      expect(wrapper.getId()).toBe("");
+
+      let traps = 0;
+      const hostile = new Proxy({}, {
+        get() {
+          traps += 1;
+          throw new Error("coercion trap executed");
+        },
+      });
+      const hostileError = captureThrown(() => Reflect.apply(wrapper.setId, wrapper, [hostile]));
+      assertStableBoundaryError(hostileError, "ERR_INVALID_ARGUMENT");
+      expect(traps).toBe(0);
+    }), propertyParameters(300));
   });
 });

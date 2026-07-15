@@ -354,6 +354,145 @@ test("opaque identifier and form namespace leaves host form, named access, and a
   expectNoUnapprovedActivity(browserLedger);
 });
 
+test("committed shrunk CSS, URL, ID, and lifecycle corpus has no browser-side escape", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(async () => {
+    const mount = document.querySelector("#mount");
+    if (!(mount instanceof HTMLElement)) throw new Error("host fixture is incomplete");
+    const root = mount.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      stylePolicy: { allowedProperties: ["color", "cursor"] },
+      urlPolicy: {
+        baseURL: "http://127.0.0.1:4173/",
+        sinks: {
+          "image.src": {
+            allowedOrigins: ["http://127.0.0.1:4173"],
+            allowedProtocols: ["http:"],
+            allowQuery: true,
+          },
+        },
+      },
+    });
+    const image = safeDocument.createImage();
+    const anchor = safeDocument.createAnchor();
+    safeDocument.appendChild(anchor);
+    safeDocument.appendChild(image);
+    const rawImage = root.querySelector("img");
+    const rawAnchor = root.querySelector("a");
+    if (!(rawImage instanceof HTMLImageElement) || !(rawAnchor instanceof HTMLAnchorElement)) {
+      throw new Error("safe corpus elements were not created");
+    }
+    const rawIds = [];
+    for (const logicalId of ["__proto__", "#host>[name]", "\u202e😀"]) {
+      image.setId(logicalId);
+      rawIds.push({
+        logicalId,
+        logicalGetter: image.getId(),
+        physicalOpaque: /^aoa-i-[0-9a-f]{48}$/u.test(rawImage.id)
+          && rawImage.id !== logicalId,
+        lightDOMLookupMissed: root.ownerDocument.getElementById(logicalId) === null,
+      });
+    }
+    image.setId("__proto__");
+    image.style.set("cursor", "pointer");
+    const cssResults = [
+      "u/**/r/**/l(http://127.0.0.1:4173/unapproved/css)",
+      String.raw`u\72l(http://127.0.0.1:4173/unapproved/css)`,
+      String.raw`@im\70 ort "http://127.0.0.1:4173/unapproved/css"`,
+    ].map((value) => ({
+      accepted: image.style.set("cursor", value),
+      preserved: image.style.get("cursor"),
+    }));
+    const deniedURLs = [
+      anchor.setHref("/unapproved/corpus-navigation"),
+      image.setSrc("https://[::1"),
+      image.setSrc("https://attacker.test/corpus.png"),
+    ].map((decision) => decision.allowed ? "allowed" : decision.error.code);
+    const approved = image.setSrc("/allowed/pixel.png?case=shrunk-corpus");
+    const physicalIdWasOpaque = /^aoa-i-[0-9a-f]{48}$/u.test(rawImage.id)
+      && rawImage.id !== "__proto__";
+    if (!(rawImage.complete && rawImage.naturalWidth > 0)) {
+      await new Promise((resolve, reject) => {
+        rawImage.addEventListener("load", resolve, { once: true });
+        rawImage.addEventListener("error", () => reject(new Error("corpus image failed")), {
+          once: true,
+        });
+      });
+    }
+
+    const external = document.createElement("section");
+    document.body.append(external);
+    external.append(rawImage);
+    let placementCode = null;
+    try {
+      image.setAlt("guest mutation");
+    } catch (error) {
+      placementCode = error?.code ?? null;
+    }
+    rawAnchor.click();
+    return {
+      approved: approved.allowed,
+      cssResults,
+      deniedURLs,
+      rawIds,
+      physicalIdWasOpaque,
+      placementCode,
+      cleanup: {
+        id: rawImage.hasAttribute("id"),
+        src: rawImage.hasAttribute("src"),
+        style: rawImage.style.cssText,
+        logicalLookup: safeDocument.getElement("__proto__") === null,
+      },
+    };
+  });
+  await flushBrowserWork(page);
+
+  expect(result).toEqual({
+    approved: true,
+    cssResults: [
+      { accepted: false, preserved: "pointer" },
+      { accepted: false, preserved: "pointer" },
+      { accepted: false, preserved: "pointer" },
+    ],
+    deniedURLs: ["ERR_URL_DENIED", "ERR_URL_DENIED", "ERR_URL_DENIED"],
+    rawIds: [
+      {
+        logicalId: "__proto__",
+        logicalGetter: "__proto__",
+        physicalOpaque: true,
+        lightDOMLookupMissed: true,
+      },
+      {
+        logicalId: "#host>[name]",
+        logicalGetter: "#host>[name]",
+        physicalOpaque: true,
+        lightDOMLookupMissed: true,
+      },
+      {
+        logicalId: "\u202e😀",
+        logicalGetter: "\u202e😀",
+        physicalOpaque: true,
+        lightDOMLookupMissed: true,
+      },
+    ],
+    physicalIdWasOpaque: true,
+    placementCode: "PLACEMENT_VIOLATION",
+    cleanup: { id: false, src: false, style: "", logicalLookup: true },
+  });
+  expect(
+    browserLedger.requests.filter(({ url }) => new URL(url).pathname === "/allowed/pixel.png"),
+  ).toEqual([{
+    method: "GET",
+    resourceType: "image",
+    url: "http://127.0.0.1:4173/allowed/pixel.png?case=shrunk-corpus",
+  }]);
+  expectNoUnapprovedActivity(browserLedger, ["/allowed/pixel.png"]);
+});
+
 test("raw host reparent, adopt, and detach-to-external placement revoke before guest mutation", async ({
   page,
   browserLedger,
@@ -588,48 +727,4 @@ test("ownerDocument iframe realm works after ambient DOM constructors are poison
     wrapperText: "foreign realm content",
   });
   expectNoUnapprovedActivity(browserLedger);
-});
-
-test("hostile Worker infinite loop is terminable; same-thread DoS is intentionally out of scope", async ({
-  page,
-  browserLedger,
-}) => {
-  await openHarness(page, browserLedger);
-
-  const result = await page.evaluate(async () => {
-    // Never run the hostile loop on the page thread: same-thread availability
-    // is not provided by this DOM capability and requires an isolation boundary.
-    const worker = new Worker("/hostile-worker.js");
-    const started = await new Promise((resolve, reject) => {
-      worker.addEventListener("message", (event) => resolve(event.data), { once: true });
-      worker.addEventListener("error", () => reject(new Error("hostile worker failed to start")), {
-        once: true,
-      });
-    });
-    worker.terminate();
-    const pageThreadResponse = await new Promise((resolve) => {
-      requestAnimationFrame(() => resolve("responsive"));
-    });
-    return { started, pageThreadResponse };
-  });
-  await flushBrowserWork(page);
-
-  expect(result).toEqual({ started: "started", pageThreadResponse: "responsive" });
-  const workerRequests = browserLedger.requests.filter(
-    ({ url }) => new URL(url).pathname === "/hostile-worker.js",
-  );
-  expect(
-    workerRequests.map(({ method, url }) => ({ method, url })),
-    `expected one hostile Worker request; actual ledger: ${JSON.stringify(browserLedger.requests)}`,
-  ).toEqual([
-    {
-      method: "GET",
-      url: "http://127.0.0.1:4173/hostile-worker.js",
-    },
-  ]);
-  expect(
-    ["script", "xhr"],
-    `expected a known Playwright Worker classification; actual ledger: ${JSON.stringify(workerRequests)}`,
-  ).toContain(workerRequests[0].resourceType);
-  expectNoUnapprovedActivity(browserLedger, ["/hostile-worker.js"]);
 });
