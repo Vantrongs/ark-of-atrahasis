@@ -1,5 +1,7 @@
 import type {
+  SafeContainerElement,
   SafeElement,
+  SafeVoidElement,
   SafeTextNode,
   SafeInputElement,
   SafeTextareaElement,
@@ -139,8 +141,20 @@ function applyURLDecision(
   return context.setURLAttribute(realEl, name, decide);
 }
 
-export function createSafeElement(context: DocumentContext, realEl: Element): SafeElement {
-  const known = context.registry.getWrapper<SafeElement>(realEl);
+export function createSafeContainerElement(
+  context: DocumentContext,
+  realEl: Element,
+): SafeContainerElement {
+  const known = context.registry.getWrapper<SafeContainerElement>(realEl);
+  if (known) return known;
+  return context.complete(buildSafeContainerElement(context, realEl), realEl);
+}
+
+export function createSafeVoidElement(
+  context: DocumentContext,
+  realEl: Element,
+): SafeVoidElement {
+  const known = context.registry.getWrapper<SafeVoidElement>(realEl);
   if (known) return known;
   return context.complete(buildSafeElement(context, realEl), realEl);
 }
@@ -149,47 +163,9 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
   const htmlEl = realEl as HTMLElement;
 
   const wrapper: SafeElement = {
-    appendChild(child: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => {
-        context.platform.appendChild(realEl, context.requireRealNode(child));
-      });
-    },
-    insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => {
-        context.platform.insertBefore(
-          realEl,
-          context.requireRealNode(newChild),
-          context.requireRealNode(reference),
-        );
-      });
-    },
-    removeChild(child: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => {
-        context.platform.removeChild(realEl, context.requireRealNode(child));
-      });
-    },
-    replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => {
-        context.platform.replaceChild(
-          realEl,
-          context.requireRealNode(newChild),
-          context.requireRealNode(oldChild),
-        );
-      });
-    },
     detach(): void { context.detachNode(realEl); },
     remove(): void { context.detachNode(realEl); },
     dispose(): void { context.disposeNode(realEl); },
-
-    setText(value: string): void {
-      const text = requireString(value, "SafeElement.setText.value");
-      context.setText(realEl, "textContent", text, () => {
-        context.platform.setTextContent(htmlEl, text);
-      });
-    },
-    getText(): string {
-      return context.nodeOperation(realEl, () => context.platform.getTextContent(htmlEl) ?? "");
-    },
 
     setClass(value: string): void {
       attribute(context, realEl, "class", requireString(value, "SafeElement.setClass.value"));
@@ -310,6 +286,54 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
   };
 
   return wrapper;
+}
+
+function buildSafeContainerElement(
+  context: DocumentContext,
+  realEl: Element,
+): SafeContainerElement {
+  const base = buildSafeElement(context, realEl);
+  const htmlEl = realEl as HTMLElement;
+
+  return Object.assign(base, {
+    appendChild(child: SafeElement | SafeTextNode): void {
+      context.nodeOperation(realEl, () => {
+        context.platform.appendChild(realEl, context.requireRealNode(child));
+      });
+    },
+    insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void {
+      context.nodeOperation(realEl, () => {
+        context.platform.insertBefore(
+          realEl,
+          context.requireRealNode(newChild),
+          context.requireRealNode(reference),
+        );
+      });
+    },
+    removeChild(child: SafeElement | SafeTextNode): void {
+      context.nodeOperation(realEl, () => {
+        context.platform.removeChild(realEl, context.requireRealNode(child));
+      });
+    },
+    replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void {
+      context.nodeOperation(realEl, () => {
+        context.platform.replaceChild(
+          realEl,
+          context.requireRealNode(newChild),
+          context.requireRealNode(oldChild),
+        );
+      });
+    },
+    setText(value: string): void {
+      const text = requireString(value, "SafeElement.setText.value");
+      context.setText(realEl, "textContent", text, () => {
+        context.platform.setTextContent(htmlEl, text);
+      });
+    },
+    getText(): string {
+      return context.nodeOperation(realEl, () => context.platform.getTextContent(htmlEl) ?? "");
+    },
+  });
 }
 
 export function createSafeInputElement(
@@ -506,11 +530,11 @@ export function createSafeInputElement(
     },
   }) as SafeInputElement;
   if (initializeNonForm) {
-    return context.completeInitialized(wrapper, realEl, [
+    return context.completeInitialized(wrapper, realEl, "input", [
       { name: "autocomplete", value: "off" },
     ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
   }
-  return context.complete(wrapper, realEl);
+  return context.complete(wrapper, realEl, "input");
 }
 
 export function createSafeTextareaElement(
@@ -520,7 +544,7 @@ export function createSafeTextareaElement(
 ): SafeTextareaElement {
   const known = context.registry.getWrapper<SafeTextareaElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   const wrapper = Object.assign(base, {
     setValue(value: string): void {
@@ -593,11 +617,11 @@ export function createSafeTextareaElement(
     },
   }) as SafeTextareaElement;
   if (initializeNonForm) {
-    return context.completeInitialized(wrapper, realEl, [
+    return context.completeInitialized(wrapper, realEl, "textarea", [
       { name: "autocomplete", value: "off" },
     ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
   }
-  return context.complete(wrapper, realEl);
+  return context.complete(wrapper, realEl, "textarea");
 }
 
 export function createSafeSelectElement(
@@ -607,7 +631,7 @@ export function createSafeSelectElement(
 ): SafeSelectElement {
   const known = context.registry.getWrapper<SafeSelectElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   const wrapper = Object.assign(base, {
     setValue(value: string): void {
@@ -636,17 +660,17 @@ export function createSafeSelectElement(
     },
   }) as SafeSelectElement;
   if (initializeNonForm) {
-    return context.completeInitialized(wrapper, realEl, [
+    return context.completeInitialized(wrapper, realEl, "select", [
       { name: "autocomplete", value: "off" },
     ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
   }
-  return context.complete(wrapper, realEl);
+  return context.complete(wrapper, realEl, "select");
 }
 
 export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOptionElement): SafeOptionElement {
   const known = context.registry.getWrapper<SafeOptionElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setValue(value: string): void {
@@ -664,7 +688,7 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
     setLabel(value: string): void {
       attribute(context, realEl, "label", requireString(value, "SafeOptionElement.setLabel.value"));
     },
-  }) as SafeOptionElement, realEl);
+  }) as SafeOptionElement, realEl, "option");
 }
 
 export function createSafeButtonElement(
@@ -674,7 +698,7 @@ export function createSafeButtonElement(
 ): SafeButtonElement {
   const known = context.registry.getWrapper<SafeButtonElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   const wrapper = Object.assign(base, {
     setType(type: string): void {
@@ -694,17 +718,17 @@ export function createSafeButtonElement(
     },
   }) as SafeButtonElement;
   if (initializeNonForm) {
-    return context.completeInitialized(wrapper, realEl, [
+    return context.completeInitialized(wrapper, realEl, "button", [
       { name: "type", value: "button" },
     ], () => context.platform.setButtonType(realEl, "button"));
   }
-  return context.complete(wrapper, realEl);
+  return context.complete(wrapper, realEl, "button");
 }
 
 export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLabelElement): SafeLabelElement {
   const known = context.registry.getWrapper<SafeLabelElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setFor(value: string): void {
@@ -718,19 +742,19 @@ export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLab
     getFor(): string {
       return context.getLocalIdReference(realEl, "for") ?? "";
     },
-  }) as SafeLabelElement, realEl);
+  }) as SafeLabelElement, realEl, "label");
 }
 
 export function createSafeFieldsetElement(context: DocumentContext, realEl: HTMLFieldSetElement): SafeFieldsetElement {
   const known = context.registry.getWrapper<SafeFieldsetElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setDisabled(value: boolean): void {
       booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeFieldsetElement.setDisabled.value"));
     },
-  }) as SafeFieldsetElement, realEl);
+  }) as SafeFieldsetElement, realEl, "fieldset");
 }
 
 export function createSafeImageElement(
@@ -768,7 +792,7 @@ export function createSafeImageElement(
     setLoading(value: string): void {
       attribute(context, realEl, "loading", requireAsciiKeyword(value, IMAGE_LOADING_VALUES, "SafeImageElement.setLoading.value"));
     },
-  }) as SafeImageElement, realEl);
+  }) as SafeImageElement, realEl, "image");
 }
 
 export function createSafeAnchorElement(
@@ -777,7 +801,7 @@ export function createSafeAnchorElement(
 ): SafeAnchorElement {
   const known = context.registry.getWrapper<SafeAnchorElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setHref(url: string): SafeURLDecision {
@@ -788,7 +812,7 @@ export function createSafeAnchorElement(
         () => context.urlPolicy.decide("anchor.href", url),
       );
     },
-  }) as SafeAnchorElement, realEl);
+  }) as SafeAnchorElement, realEl, "anchor");
 }
 
 export function createSafeVideoElement(
@@ -797,7 +821,7 @@ export function createSafeVideoElement(
 ): SafeVideoElement {
   const known = context.registry.getWrapper<SafeVideoElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -850,7 +874,7 @@ export function createSafeVideoElement(
         () => context.urlPolicy.decide("video.poster", url),
       );
     },
-  }) as SafeVideoElement, realEl);
+  }) as SafeVideoElement, realEl, "video");
 }
 
 export function createSafeAudioElement(
@@ -859,7 +883,7 @@ export function createSafeAudioElement(
 ): SafeAudioElement {
   const known = context.registry.getWrapper<SafeAudioElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -892,7 +916,7 @@ export function createSafeAudioElement(
       const primitive = requireBoolean(value, "SafeAudioElement.setMuted.value");
       context.nodeOperation(realEl, () => context.platform.setMediaMuted(realEl, primitive));
     },
-  }) as SafeAudioElement, realEl);
+  }) as SafeAudioElement, realEl, "audio");
 }
 
 export function createSafeSourceElement(
@@ -915,13 +939,13 @@ export function createSafeSourceElement(
     setType(value: string): void {
       attribute(context, realEl, "type", requireMimeType(value, "SafeSourceElement.setType.value"));
     },
-  }) as SafeSourceElement, realEl);
+  }) as SafeSourceElement, realEl, "source");
 }
 
 export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCanvasElement): SafeCanvasElement {
   const known = context.registry.getWrapper<SafeCanvasElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setWidth(value: number): void {
@@ -942,13 +966,17 @@ export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCa
         context.platform.setCanvasHeight(realEl, height);
       });
     },
-  }) as SafeCanvasElement, realEl);
+  }) as SafeCanvasElement, realEl, "canvas");
 }
 
-export function createSafeTableCellElement(context: DocumentContext, realEl: HTMLTableCellElement): SafeTableCellElement {
+export function createSafeTableCellElement(
+  context: DocumentContext,
+  realEl: HTMLTableCellElement,
+  specializedKind: "th" | "td",
+): SafeTableCellElement {
   const known = context.registry.getWrapper<SafeTableCellElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setColspan(value: number): void {
@@ -977,13 +1005,13 @@ export function createSafeTableCellElement(context: DocumentContext, realEl: HTM
     getHeaders(): string {
       return context.getLocalIdReference(realEl, "headers") ?? "";
     },
-  }) as SafeTableCellElement, realEl);
+  }) as SafeTableCellElement, realEl, specializedKind);
 }
 
 export function createSafeDetailsElement(context: DocumentContext, realEl: HTMLDetailsElement): SafeDetailsElement {
   const known = context.registry.getWrapper<SafeDetailsElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setOpen(value: boolean): void {
@@ -992,13 +1020,13 @@ export function createSafeDetailsElement(context: DocumentContext, realEl: HTMLD
         context.platform.setDetailsOpen(realEl, primitive);
       });
     },
-  }) as SafeDetailsElement, realEl);
+  }) as SafeDetailsElement, realEl, "details");
 }
 
 export function createSafeDialogElement(context: DocumentContext, realEl: HTMLDialogElement): SafeDialogElement {
   const known = context.registry.getWrapper<SafeDialogElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setOpen(value: boolean): void {
@@ -1007,13 +1035,13 @@ export function createSafeDialogElement(context: DocumentContext, realEl: HTMLDi
         context.platform.setDialogOpen(realEl, primitive);
       });
     },
-  }) as SafeDialogElement, realEl);
+  }) as SafeDialogElement, realEl, "dialog");
 }
 
 export function createSafeProgressElement(context: DocumentContext, realEl: HTMLProgressElement): SafeProgressElement {
   const known = context.registry.getWrapper<SafeProgressElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setValue(value: number): void {
@@ -1035,13 +1063,13 @@ export function createSafeProgressElement(context: DocumentContext, realEl: HTML
         context.platform.setProgressMax(realEl, candidate);
       });
     },
-  }) as SafeProgressElement, realEl);
+  }) as SafeProgressElement, realEl, "progress");
 }
 
 export function createSafeMeterElement(context: DocumentContext, realEl: HTMLMeterElement): SafeMeterElement {
   const known = context.registry.getWrapper<SafeMeterElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
     setValue(value: number): void {
@@ -1077,17 +1105,17 @@ export function createSafeMeterElement(context: DocumentContext, realEl: HTMLMet
         context.platform.setMeterMax(realEl, candidate);
       });
     },
-  }) as SafeMeterElement, realEl);
+  }) as SafeMeterElement, realEl, "meter");
 }
 
 export function createSafeListElement(context: DocumentContext, realEl: HTMLUListElement | HTMLOListElement): SafeListElement {
   const known = context.registry.getWrapper<SafeListElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    createItem(): SafeElement {
-      const li = createSafeElement(context, context.createElement("li"));
+    createItem(): SafeContainerElement {
+      const li = createSafeContainerElement(context, context.createElement("li"));
       try {
         base.appendChild(li);
         return li;
@@ -1096,17 +1124,17 @@ export function createSafeListElement(context: DocumentContext, realEl: HTMLULis
         throw error;
       }
     },
-  }) as SafeListElement, realEl);
+  }) as SafeListElement, realEl, "list");
 }
 
 export function createSafeDescriptionListElement(context: DocumentContext, realEl: HTMLDListElement): SafeDescriptionListElement {
   const known = context.registry.getWrapper<SafeDescriptionListElement>(realEl);
   if (known) return known;
-  const base = buildSafeElement(context, realEl);
+  const base = buildSafeContainerElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    createTerm(): SafeElement {
-      const dt = createSafeElement(context, context.createElement("dt"));
+    createTerm(): SafeContainerElement {
+      const dt = createSafeContainerElement(context, context.createElement("dt"));
       try {
         base.appendChild(dt);
         return dt;
@@ -1115,8 +1143,8 @@ export function createSafeDescriptionListElement(context: DocumentContext, realE
         throw error;
       }
     },
-    createDescription(): SafeElement {
-      const dd = createSafeElement(context, context.createElement("dd"));
+    createDescription(): SafeContainerElement {
+      const dd = createSafeContainerElement(context, context.createElement("dd"));
       try {
         base.appendChild(dd);
         return dd;
@@ -1125,5 +1153,5 @@ export function createSafeDescriptionListElement(context: DocumentContext, realE
         throw error;
       }
     },
-  }) as SafeDescriptionListElement, realEl);
+  }) as SafeDescriptionListElement, realEl, "description-list");
 }

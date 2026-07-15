@@ -39,7 +39,7 @@ export type SafeURLDecision =
   | Readonly<{ allowed: false; error: SafeDOMError }>;
 
 export interface URLPolicyEngine {
-  decide(sink: URLSink, input: unknown): SafeURLDecision;
+  readonly decide: (sink: URLSink, input: unknown) => SafeURLDecision;
 }
 
 interface CompiledSinkPolicy {

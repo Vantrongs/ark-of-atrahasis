@@ -283,9 +283,9 @@ describe("placement enforcement", () => {
     const foreignDocument = document.implementation.createHTMLDocument("foreign");
     foreignDocument.adoptNode(raw);
 
-    expectCode(() => wrapper.setText("cross-realm"), "PLACEMENT_VIOLATION");
+    expectCode(() => wrapper.setClass("cross-realm"), "PLACEMENT_VIOLATION");
     expect(raw.ownerDocument).toBe(foreignDocument);
-    expect(raw.textContent).toBe("");
+    expect(raw.hasAttribute("class")).toBe(false);
     expect(raw.parentNode).toBe(null);
     expect(raw.hasAttribute("id")).toBe(false);
     expect(raw.hasAttribute("name")).toBe(false);

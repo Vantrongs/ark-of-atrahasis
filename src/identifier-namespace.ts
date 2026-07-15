@@ -2,6 +2,7 @@ import { createSafeDOMError, isSafeDOMError } from "./errors.ts";
 import type { PlatformOps } from "./platform.ts";
 import type { NodeRegistry, RegistryEntry } from "./registry.ts";
 import type { SafeElement } from "./types.ts";
+import type { SpecializedElementKind } from "./vocabularies.ts";
 
 export type IdentifierReferenceKind = "single" | "list";
 
@@ -44,7 +45,7 @@ export interface IdentifierNamespace {
     kind: IdentifierReferenceKind,
   ): PreparedNamespaceMutation;
   readReference(entry: RegistryEntry, attributeName: string): string | undefined;
-  lookup(localId: string): SafeElement | null;
+  lookup(localId: string, specializedKind?: SpecializedElementKind): SafeElement | null;
   resolveEventTarget(value: unknown): EventTargetResolution;
   recordFailedMutation(entry: RegistryEntry, prepared: PreparedNamespaceMutation): void;
   clearPhysicalEffects(entry: RegistryEntry): void;
@@ -346,12 +347,13 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     return this.#referenceSlotsByEntry.get(entry)?.get(attributeName)?.localValue;
   }
 
-  lookup(localId: string): SafeElement | null {
+  lookup(localId: string, specializedKind?: SpecializedElementKind): SafeElement | null {
     if (localId === "" || ASCII_WHITESPACE.test(localId)) return null;
     const record = this.#idByLocal.get(localId);
     if (record === undefined) return null;
     const target = record.target;
     if (target === null || target.state !== "active") return null;
+    if (specializedKind !== undefined && target.specializedKind !== specializedKind) return null;
     const found = this.#platform.getElementById(this.#root, record.physical);
     if (found !== target.real) return null;
     const wrapper = this.#registry.getWrapper<SafeElement>(found);

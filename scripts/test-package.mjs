@@ -375,44 +375,16 @@ if (!resolved.includes("/node_modules/ark-of-atrahasis/dist/index.js")) {
     env: offlineConsumerEnvironment,
   });
 
-  writeFileSync(
-    join(consumerDirectory, "declarations-smoke.ts"),
-    `import {
-  createSafeDocument,
-  type Hardener,
-  type SafeDocument,
-  type SafeElement,
-} from "ark-of-atrahasis";
-
-const factory: (root: ShadowRoot, options: { harden: Hardener }) => SafeDocument = createSafeDocument;
-declare const hostHarden: Hardener;
-declare const safeDocument: SafeDocument;
-const element: SafeElement = safeDocument.createDiv();
-element.setText("declaration smoke");
-void factory;
-void hostHarden;
-void element;
-`,
+  const installedTypeFixtureDirectory = join(
+    consumerDirectory,
+    "node_modules",
+    "ark-of-atrahasis",
+    "test",
+    "types",
   );
-  writeFileSync(
-    join(consumerDirectory, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          lib: ["ES2022", "DOM"],
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          noEmit: true,
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
-        },
-        files: ["declarations-smoke.ts"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  for (const fixture of ["positive.ts", "negative.ts", "tsconfig.json"]) {
+    copyFileSync(join(installedTypeFixtureDirectory, fixture), join(consumerDirectory, fixture));
+  }
 
   const compilers = [
     { directory: "typescript-min", label: "minimum", version: "5.0.4" },

@@ -27,6 +27,7 @@ import {
   type URLPolicyEngine,
 } from "./url-policy.ts";
 import { createPlatformOps, type PlatformOps } from "./platform.ts";
+import type { SpecializedElementKind } from "./vocabularies.ts";
 
 const claimedRoots = new WeakSet<object>();
 const objectIsPrototypeOf = Function.call.bind(Object.prototype.isPrototypeOf) as (
@@ -215,10 +216,15 @@ export interface DocumentContext {
   readonly eventSnapshotter: EventSnapshotter;
   readonly platform: PlatformOps;
   complete<Value>(value: Value): Value;
-  complete<Node extends SafeNode>(value: Node, real: RealNode): Node;
+  complete<Node extends SafeNode>(
+    value: Node,
+    real: RealNode,
+    specializedKind?: SpecializedElementKind,
+  ): Node;
   completeInitialized<Node extends SafeElement>(
     value: Node,
     real: Element,
+    specializedKind: SpecializedElementKind,
     attributes: readonly InitialAttribute[],
     initialize: () => void,
   ): Node;
@@ -249,7 +255,7 @@ export interface DocumentContext {
     kind: IdentifierReferenceKind,
   ): void;
   getLocalIdReference(real: Element, attributeName: string): string | undefined;
-  lookupLocalId(local: string): SafeElement | null;
+  lookupLocalId(local: string, specializedKind?: SpecializedElementKind): SafeElement | null;
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
   setURLAttribute(
     real: Element,
@@ -357,21 +363,26 @@ class DocumentContextImplementation implements DocumentContext {
   }
 
   complete<Value>(value: Value): Value;
-  complete<Node extends SafeNode>(value: Node, real: RealNode): Node;
-  complete<Value>(value: Value, real?: RealNode): Value {
+  complete<Node extends SafeNode>(
+    value: Node,
+    real: RealNode,
+    specializedKind?: SpecializedElementKind,
+  ): Node;
+  complete<Value>(value: Value, real?: RealNode, specializedKind?: SpecializedElementKind): Value {
     const completed = completeWithHardener(this.#harden, value);
-    if (real !== undefined) this.#register(completed as SafeNode, real);
+    if (real !== undefined) this.#register(completed as SafeNode, real, specializedKind);
     return completed;
   }
 
   completeInitialized<Node extends SafeElement>(
     value: Node,
     real: Element,
+    specializedKind: SpecializedElementKind,
     attributes: readonly InitialAttribute[],
     initialize: () => void,
   ): Node {
     const completed = completeWithHardener(this.#harden, value);
-    this.#registerInitialized(completed, real, attributes, initialize);
+    this.#registerInitialized(completed, real, specializedKind, attributes, initialize);
     return completed;
   }
 
@@ -385,11 +396,11 @@ class DocumentContextImplementation implements DocumentContext {
     return this.documentOperation(() => this.platform.createTextNode(value));
   }
 
-  #register(wrapper: SafeNode, real: RealNode): void {
+  #register(wrapper: SafeNode, real: RealNode, specializedKind?: SpecializedElementKind): void {
     this.#assertDocumentActive();
     this.#reserve("nodes", 1);
     try {
-      this.registry.register(wrapper, real);
+      this.registry.register(wrapper, real, specializedKind);
     } catch (error) {
       this.#usage.nodes -= 1;
       throw error;
@@ -399,6 +410,7 @@ class DocumentContextImplementation implements DocumentContext {
   #registerInitialized(
     wrapper: SafeNode,
     real: Element,
+    specializedKind: SpecializedElementKind,
     attributes: readonly InitialAttribute[],
     initialize: () => void,
   ): void {
@@ -418,7 +430,7 @@ class DocumentContextImplementation implements DocumentContext {
       this.#reserve("attributeBytes", attributeBytes);
       attributesReserved = true;
       initialize();
-      const entry = this.registry.register(wrapper, real);
+      const entry = this.registry.register(wrapper, real, specializedKind);
       for (const [name, amount] of resources) entry.resources.attribute.set(name, amount);
     } catch (error) {
       if (attributesReserved) this.#usage.attributeBytes -= attributeBytes;
@@ -554,8 +566,8 @@ class DocumentContextImplementation implements DocumentContext {
     });
   }
 
-  lookupLocalId(local: string): SafeElement | null {
-    return this.documentOperation(() => this.#identifierNamespace.lookup(local));
+  lookupLocalId(local: string, specializedKind?: SpecializedElementKind): SafeElement | null {
+    return this.documentOperation(() => this.#identifierNamespace.lookup(local, specializedKind));
   }
 
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void {

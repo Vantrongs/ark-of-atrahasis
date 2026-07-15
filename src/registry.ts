@@ -1,4 +1,5 @@
 import type { SafeElement, SafeTextNode } from "./types.ts";
+import type { SpecializedElementKind } from "./vocabularies.ts";
 import { createSafeDOMError } from "./errors.ts";
 
 export type SafeNode = SafeElement | SafeTextNode;
@@ -11,6 +12,7 @@ export interface RegistryEntry {
   readonly owner: object;
   readonly wrapper: SafeNode;
   readonly real: RealNode;
+  readonly specializedKind?: SpecializedElementKind;
   state: NodeState;
   accountingReleased: boolean;
   readonly listeners: Set<() => void>;
@@ -34,7 +36,11 @@ export class NodeRegistry {
     this.#ownerDocumentOf = ownerDocumentOf;
   }
 
-  register(wrapper: SafeNode, real: RealNode): RegistryEntry {
+  register(
+    wrapper: SafeNode,
+    real: RealNode,
+    specializedKind?: SpecializedElementKind,
+  ): RegistryEntry {
     if (this.#ownerDocumentOf(real) !== this.#ownerDocument) {
       throw createSafeDOMError(
         "OWNER_DOCUMENT_MISMATCH",
@@ -66,6 +72,12 @@ export class NodeRegistry {
         request: new Map(),
       },
     };
+    Object.defineProperty(entry, "specializedKind", {
+      configurable: false,
+      enumerable: true,
+      value: specializedKind,
+      writable: false,
+    });
     this.#entryByReal.set(real, entry);
     this.#entryByWrapper.set(wrapper, entry);
     this.#entries.add(entry);
