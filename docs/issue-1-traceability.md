@@ -26,7 +26,7 @@ expose only declared operations and no raw node. There is no selector/document
 initializer, arbitrary tag factory, root/host/raw-node wrapper or getter,
 `createStyle`, raw stylesheet text, or raw CSS rule API.
 
-The other runtime exports are frozen defaults/vocabularies, pure policy
+The other runtime exports are frozen quota/rate defaults and vocabularies, pure policy
 compilers and validators, and the `isSafeDOMError` record guard; they carry no
 DOM capability. `src/types.ts`, `src/vocabularies.ts`, and the emitted
 declarations define the complete type surface. `test/types/positive.ts` and
@@ -41,18 +41,26 @@ with TypeScript 5.0.4 and 7.0.2 during the package gate.
 - `src/context.ts` validates a native `ShadowRoot` through its owner realm,
   requires effective paint containment on a host with a principal box, claims
   the root once, owns per-document policies/quotas/registry/namespace, audits
-  every placement, and implements wrapper/document disposal.
+  every placement, implements fixed owner-clock operation/request-attempt
+  windows in addition to lifetime quotas, fences bubbling events at the root
+  and composed non-bubbling `focus`/`blur` at owned targets, and implements
+  wrapper/document disposal.
 - `src/registry.ts` gives each document a private owner brand, one wrapper per
   real node, stable active/disposed/revoked states, and cross-owner rejection.
 - `src/platform.ts` captures root-owner-realm DOM/Web IDL and CSSOM methods and
-  accessors; containment checks and platform or attacker-thrown values are
-  normalized before crossing the API.
+  accessors, `Performance.now()`, and `Event.stopPropagation()`; containment,
+  rate-clock, event-fence, and platform/attacker-thrown values are normalized
+  before crossing the API.
 - `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`,
   `test/platform-boundary.test.ts`, and
   `test/property/lifecycle-model.test.ts` cover root guessing, aliases,
   cross-owner resources, iframe/second-realm behavior, raw reparent/adopt/
   detach-to-external revocation, cleanup ordering, stable terminal behavior,
   and exact accounting release/reacquisition.
+- `test/rate-limits.test.ts` and `test/property/rate-limits.test.ts` cover exact
+  `N`/`N+1`/boundary reset, independent request-attempt windows, hostile rate
+  records, captured owner-realm clocks, clock rollback/failure, and generated
+  fixed-window traces.
 
 `detach()` is reversible. Disposal is irreversible and idempotent: it aborts
 wrapper-owned listeners, removes tracked request/style/identifier effects,
@@ -79,6 +87,9 @@ field; that stricter interpretation is an open scope/contract risk.
   validate primitive/vocabulary/state relations before reflected IDL mutation.
 - `src/event.ts` snapshots captured standard getters into frozen discriminated
   primitive records and closes cancellation cells in handler `finally` blocks.
+  `src/context.ts` installs an abortable root bubble fence plus owned-target
+  `focus`/`blur` fences so internal target handlers run while later host/
+  document delegation is stopped.
   `src/errors.ts` exposes only frozen four-field `SafeDOMError` copy records.
 - `test/url-policy.test.ts`, `test/style-membrane.test.ts`,
   `test/form-isolation.test.ts`, `test/identifier-namespace.test.ts`,
@@ -87,6 +98,13 @@ field; that stricter interpretation is an open scope/contract risk.
   `test/property/security-inputs.test.ts` directly cover those contracts,
   hostile getters/coercion, native/custom exception replacement, exact numeric
   relations, and generated malformed inputs.
+
+The event fence does not claim generic capture-phase isolation. Earlier
+document/host capture listeners run before dispatch reaches the `ShadowRoot`;
+the trusted host must keep those listeners safe and filter plugin-origin events
+when capture observation matters. Unit and three-engine browser tests assert
+both sides of that contract, including deterministic fence cleanup on document
+disposal.
 
 A whole `SafeEvent` is deliberately a hardened synchronous local control
 record, not an SES pass-by-copy value and not an eventual-send value, because it
@@ -99,16 +117,22 @@ is made.
 
 - `test/browser/boundary.spec.mjs` runs a committed CSS/URL/ID/lifecycle corpus,
   request/navigation interception, opaque identifier/form isolation, raw-host
-  placement cases, one explicitly approved image request, and owner-realm
-  iframe behavior in Chromium, Firefox, and WebKit.
+  placement cases, one explicitly approved image request, fenced delegated
+  click/hotkey/action/form/focus gadgets, and owner-realm iframe behavior in
+  Chromium, Firefox, and WebKit.
 - `test/browser/containment.spec.mjs` grants fixed, viewport-sized, high-z-index,
   pointer-active styles and proves geometry clipping and outside hit testing at
   a bounded paint-contained host in all three engines.
 - `test/browser/ses.spec.mjs` runs after SES 2.2.0 lockdown in a real Compartment
-  in all three engines. Its matrix covers absent raw/global authority, hostile
-  event snapshots and normalized errors, URL/style policy with a zero-activity
-  ledger, form/password rejection, cross-owner failure, placement cleanup and
-  terminal state, finite numeric rejection, and exact quota failure/release.
+  in all three engines. Its matrix covers absent raw/global authority, exact
+  operation/request-attempt windows, every generic/keyboard/mouse/pointer/touch/
+  focus/input field, hostile getters, cancellation lifetime/reentrancy,
+  normalized errors, URL/style policy with a zero-activity ledger,
+  form/password rejection, cross-owner failure, placement cleanup and terminal
+  state, finite numeric rejection, and exact quota failure/release. Chromium
+  and Firefox use full constructed touch records; WebKit's rejected constructors
+  select an explicit trusted-touch injection substitute that still checks every
+  public field without claiming pre-dispatch malicious touch getters.
 - `test/ses.node.mjs` runs two mutually distrusting compartments with independent
   roots and checks copied records with `@endo/pass-style` 1.8.1.
 - `test/browser/worker-termination.spec.mjs` proves host termination of a
@@ -131,15 +155,15 @@ Same-thread SES denial of service remains an explicit non-goal.
 | 1 | **Satisfied** | `src/index.ts` accepts only a native `ShadowRoot` and returns mount operations without root/host access; `src/context.ts` claims it once and requires computed paint containment on a host with a principal box. Capability, built-package, containment, and SES tests reject string IDs/uncontained roots and show the guest has no factory/root/document/window endowment. | The trusted host still owns the outer host and must maintain containment and controlled bounds for the capability lifetime; immutability is from the guest boundary. |
 | 2 | **Satisfied** | `DocumentContextImplementation.#auditPlacements()` revokes before each operation and `#clearOwnedResources()` removes tracked effects. `test/lifecycle-placement.test.ts` and `test/browser/boundary.spec.mjs` cover raw reparent, adopt, and detach-to-external cases without later guest mutation of external DOM. | Ordinary inert DOM state may remain on a raw node already retained externally; see disposal ambiguity above. |
 | 3 | **Satisfied for the documented boundary values** | `src/platform.ts`, `src/event.ts`, and `src/errors.ts` replace platform exceptions and event graphs with frozen primitive records. `test/platform-boundary.test.ts`, `test/event-membrane.test.ts`, `test/completion-boundary.test.ts`, and `test/ses.node.mjs` check no DOM/global/function/native exception escapes and copied nested data has the documented pass style. | A whole `SafeEvent` is a local hardened control record, deliberately not pass-by-copy/eventual-send. |
-| 4 | **Satisfied** | `src/event.ts` uses captured branded accessors, primitive defaults, deep completion, independent native-event cells, and dispatch-scoped cancellation. `test/event-membrane.test.ts` covers malicious value/type/modifier getters, all event families, reentrancy, callback throws, and closed controls. | Cancellation is synchronous only by design. |
+| 4 | **Satisfied** | `src/event.ts` uses captured branded accessors, primitive defaults, deep completion, independent native-event cells, and dispatch-scoped cancellation. Unit and post-lockdown three-engine tests cover malicious value/type/modifier/family getters, every public event field, reentrancy, callback throws, and closed controls. | Cancellation is synchronous only by design. WebKit touch construction is replaced by an explicit trusted-injection path, so pre-dispatch malicious touch getters are not claimed there. |
 | 5 | **Satisfied for all public URL sinks** | `src/url-policy.ts` is default-deny and per-sink; element URL setters apply only an allowed canonical string. `test/browser/boundary.spec.mjs` intercepts request/navigation/form activity and observes exactly one explicitly approved image request in the grant case and none for denied sinks/actions. | The host remains responsible for policy selection and defense-in-depth CSP/navigation controls. |
 | 6 | **Satisfied for the non-credential strict surface** | `src/identifier-namespace.ts` isolates physical names/IDs; form factories force safe defaults and `INPUT_TYPES` excludes `password`. Unit, type, built-package, three-engine form/namespace, and browser SES cases prove password rejection plus unchanged host submission, named access, radio grouping, labels, IDREFs, and structural autocomplete state. | `autocomplete="off"` is not credential confidentiality. Credential-bearing deployments require a separately trusted origin/iframe or process boundary and deployment-specific autofill testing. |
 | 7 | **Satisfied under the documented disposal contract** | `src/registry.ts` enforces canonical owner identity; `src/context.ts` implements idempotent terminal states and effect cleanup. `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and browser SES tests cover cross-owner failure, cleanup, accounting release, repeated dispose, and stable post-dispose errors. | Disposal removes wrapper-owned capabilities/tracked effects, not every ordinary attribute/text/IDL field on externally retained raw nodes. Issue wording may require owner clarification. |
 | 8 | **Satisfied** | `src/context.ts` resolves the supplied root's `ownerDocument/defaultView`; `src/platform.ts` captures that realm without ambient `instanceof`, including native host and computed-style access. Platform tests poison ambient constructors, root getters, and computed-style operations while proving owner-realm operation or normalized failure; the browser iframe case covers a second realm. | No claim is made for non-standard DOM implementations outside the checked contracts. |
 | 9 | **Satisfied** | `src/attribute-contract.ts`, `src/input-state-contract.ts`, `src/primitives.ts`, `src/platform.ts`, and `src/errors.ts` enforce primitive, finite/integer/range/relation rules and one stable error-record policy. Numeric/input/platform/property tests cover hostile inputs, atomic failures, media IDL, and native exception replacement. | The stable rejection value is a record, not an `Error` subclass. |
 | 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. Runtime and package fixtures require `createParagraph()`/`createTextNode()`, uniformly detached list helpers, reusable descendants after `setText()`, and password rejection; package tests compile fixtures with TypeScript 5.0.4 and 7.0.2. | Source/property-model typecheck itself runs TypeScript 6.0.3 and 7.0.2; the minimum compiler check is on packed declarations. |
-| 11 | **Satisfied with platform-specific termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven limits; property/lifecycle tests exercise exact 0–8 limits, release, shrinking, and replay. Browser Worker tests prove scheduled Worker termination in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser preemption claim; bundled Chromium failed the tested unyielding variants. `operations` and `requestAttempts` are cumulative rather than released. |
-| 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm behavior; the real-Compartment SES matrix exercises browser-relevant criteria 1–12; the Worker suite covers the documented browser termination scope. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | This is the documented layered matrix rather than a browser repetition of compiler, Node Worker, or tarball tooling. Arbitrary same-agent browser preemption remains excluded by criterion 11. |
+| 11 | **Satisfied with platform-specific termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven lifetime limits. `DEFAULT_SAFE_DOCUMENT_RATES` adds real fixed owner-clock windows for operations and request attempts; unit/property/API/three-engine SES tests exercise exact `N`/`N+1`/reset, hostile configuration/clock failure, generated traces, lifetime separation, and stable errors. Browser Worker tests prove scheduled Worker termination in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser preemption claim; bundled Chromium failed the tested unyielding variants. Lifetime `operations`/`requestAttempts` ceilings remain cumulative while their independent rate windows reset. |
+| 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm and delegated-event behavior; the real-Compartment SES matrix covers every advertised event family/field plus rates and browser-relevant criteria 1–12; the Worker suite covers the documented browser termination scope. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | WebKit uses the documented trusted-touch substitute because scripted `Touch` construction is rejected. This is the layered matrix rather than a browser repetition of compiler, Node Worker, or tarball tooling. Arbitrary same-agent browser preemption remains excluded by criterion 11. |
 | 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, frozen-installs, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, rebuilds packed `dist` from included source/lock, and emits the tested tarball/SBOM/checksums. `scripts/release-recovery.mjs`, `test/release.test.mjs`, and `.github/workflows/release.yml` execute first-run, interrupted upload (including an exact empty `starter`), exact-rerun, npm provenance identity, conflict, and no-duplicate-publication behavior while preserving the exact artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
 
 The repository strict runtime/type/browser contract in criteria 1–12 is covered
@@ -156,7 +180,10 @@ release is externally complete.
   cases each across CSS grammar, URL dimensions/normalization, hostile
   non-coercion, numeric relations, UTF-8 accounting, and thrown-value
   normalization.
-- `test/property/lifecycle-model.test.ts` has seven topology/quota/replay tests:
+- `test/property/rate-limits.test.ts` has two 160-run fixed-window properties
+  for operation and denied request-attempt traces, including zero limits,
+  repeated timestamps, exact rejection, and monotonic reset sequences.
+- `test/property/lifecycle-model.test.ts` has eight topology/quota/replay tests:
   a 100-run topology profile up to 40 commands, a 150-run exact-quota profile
   with limits 0–8 and up to 24 commands, deterministic command-family traces,
   and runner/command replay paths.

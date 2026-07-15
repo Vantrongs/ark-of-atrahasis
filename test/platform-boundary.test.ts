@@ -2,14 +2,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { isSafeDOMError } from "../src/index.ts";
+import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
-
-function makeRoot(documentValue: Document = document): ShadowRoot {
-  const host = documentValue.createElement("div");
-  host.style.contain = "paint";
-  documentValue.body.appendChild(host);
-  return host.attachShadow({ mode: "open" });
-}
 
 describe("owner-realm platform boundary", () => {
   beforeEach(() => {

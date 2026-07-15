@@ -186,7 +186,7 @@ export type EventCleanup = () => void;
 /** Host-supplied SES-compatible recursive object graph finalizer. */
 export type Hardener = <Value>(value: Value) => Value;
 
-/** Per-document hard limits. Values are aggregate live usage, except operations. */
+/** Per-document lifetime hard limits. Values are aggregate live usage, except calls. */
 export interface SafeDocumentQuotas {
   readonly nodes: number;
   readonly listeners: number;
@@ -210,6 +210,20 @@ export interface SafeDocumentQuotas {
   readonly identifierBytes: number;
 }
 
+/** One fixed monotonic time window. The first counted call anchors the window. */
+export interface SafeDocumentRateLimit {
+  /** Maximum counted calls allowed during one window. */
+  readonly limit: number;
+  /** Positive window duration in owner-realm monotonic milliseconds. */
+  readonly windowMs: number;
+}
+
+/** Per-document call rates that supplement, rather than replace, lifetime quotas. */
+export interface SafeDocumentRates {
+  readonly operations: SafeDocumentRateLimit;
+  readonly requestAttempts: SafeDocumentRateLimit;
+}
+
 export interface SafeDocumentOptions {
   /**
    * The host must call SES lockdown before importing this package and pass its
@@ -217,6 +231,8 @@ export interface SafeDocumentOptions {
    */
   readonly harden: Hardener;
   readonly quotas?: Partial<SafeDocumentQuotas>;
+  /** Missing entries use DEFAULT_SAFE_DOCUMENT_RATES. */
+  readonly rates?: Partial<SafeDocumentRates>;
   /** Missing policy means every URL-bearing sink is denied. */
   readonly urlPolicy?: SafeURLPolicy;
   /** Missing policy means every inline style property is denied. */

@@ -22,6 +22,8 @@ import type {
 	SafeDialogElement,
 	SafeDocument,
 	SafeDocumentOptions,
+	SafeDocumentRateLimit,
+	SafeDocumentRates,
 	SafeElement,
 	SafeEventBase,
 	SafeFieldsetElement,
@@ -263,6 +265,11 @@ input.setType({});
 // @ts-expect-error symbols cannot be input keyword values
 input.setType(Symbol("text"));
 
+// @ts-expect-error rate limits require primitive numeric thresholds
+const invalidRatePrimitive: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: "1", windowMs: 1_000 } } };
+// @ts-expect-error supplied rate entries require a complete window contract
+const incompleteRate: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: 1 } } };
+
 declare const textNode: SafeTextNode;
 declare const element: SafeElement;
 declare const containerElement: SafeContainerElement;
@@ -289,6 +296,8 @@ declare const event: SafeEventBase<"generic">;
 declare const urlPolicyEngine: URLPolicyEngine;
 declare const stylePolicyEngine: StylePolicyEngine;
 declare const documentOptions: SafeDocumentOptions;
+declare const rateLimit: SafeDocumentRateLimit;
+declare const documentRates: SafeDocumentRates;
 declare const replacementDocument: SafeDocument;
 declare const replacementTextNode: SafeTextNode;
 declare const replacementElement: SafeElement;
@@ -324,6 +333,10 @@ declare const replacementDocumentOptions: SafeDocumentOptions;
 safeDocument.createDiv = replacementDocument.createDiv;
 // @ts-expect-error document option function capabilities are readonly
 documentOptions.harden = replacementDocumentOptions.harden;
+// @ts-expect-error rate-limit fields are readonly
+rateLimit.limit = 2;
+// @ts-expect-error rate-map entries are readonly
+documentRates.operations = rateLimit;
 // @ts-expect-error text-node functions are readonly
 textNode.setText = replacementTextNode.setText;
 // @ts-expect-error common-element functions are readonly
@@ -421,3 +434,5 @@ void invalidAriaIdRef;
 void invalidAriaIdRefList;
 void invalidAriaRole;
 void invalidSpecializedKind;
+void invalidRatePrimitive;
+void incompleteRate;

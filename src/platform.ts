@@ -87,6 +87,8 @@ type NumberSetter<ElementType extends Element> = (this: ElementType, value: numb
 type CryptoGetter = (this: Window) => Crypto;
 type GetRandomValues = (this: Crypto, array: Uint8Array) => Uint8Array;
 type ShadowHostGetter = (this: ShadowRoot) => Element;
+type PerformanceGetter = (this: Window) => Performance;
+type PerformanceNow = (this: Performance) => number;
 
 const EFFECTIVE_PAINT_CONTAINMENT_DISPLAYS: ReadonlySet<string> = new Set([
   "block",
@@ -129,6 +131,7 @@ function prototypeOwns(prototype: object, value: object): boolean {
 export interface PlatformOps {
   readonly URL: typeof URL;
   assertPaintContainedRoot(root: ShadowRoot): void;
+  monotonicNow(): number;
   randomHex(byteLength: number): string;
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
@@ -154,6 +157,7 @@ export interface PlatformOps {
     listener: EventListener,
     signal: AbortSignal,
   ): void;
+  stopEventPropagation(event: Event): void;
   abort(controller: AbortController): void;
   setTabIndex(element: HTMLElement, value: number): void;
   getInputValue(element: HTMLInputElement): string;
@@ -218,6 +222,8 @@ class OwnerRealmPlatformOps implements PlatformOps {
   readonly #shadowHostGetter: ShadowHostGetter;
   readonly #getComputedStyle: Window["getComputedStyle"];
   readonly #getStylePropertyValue: CSSStyleDeclaration["getPropertyValue"];
+  readonly #performance: Performance;
+  readonly #performanceNow: PerformanceNow;
   readonly #crypto: Crypto;
   readonly #getRandomValues: GetRandomValues;
   readonly #Uint8Array: typeof Uint8Array;
@@ -239,6 +245,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
   readonly #AbortController: typeof AbortController;
   readonly #abortSignalGetter: AbortSignalGetter;
   readonly #addEventListener: EventTarget["addEventListener"];
+  readonly #stopEventPropagation: Event["stopPropagation"];
   readonly #abort: AbortController["abort"];
   readonly #tabIndexSetter: NumberSetter<HTMLElement>;
   readonly #inputValueGetter: StringGetter<HTMLInputElement>;
@@ -313,6 +320,22 @@ class OwnerRealmPlatformOps implements PlatformOps {
       "getPropertyValue",
       "CSSStyleDeclaration.getPropertyValue.capture",
     );
+    const performanceGetter = captureAccessor<PerformanceGetter>(
+      view,
+      "performance",
+      "get",
+      "Window.performance.capture",
+    );
+    try {
+      this.#performance = Reflect.apply(performanceGetter, view, []);
+      this.#performanceNow = captureMethod(
+        Object.getPrototypeOf(this.#performance),
+        "now",
+        "Performance.now.capture",
+      );
+    } catch {
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "Performance.now.capture");
+    }
     const cryptoGetter = captureAccessor<CryptoGetter>(
       view,
       "crypto",
@@ -390,6 +413,11 @@ class OwnerRealmPlatformOps implements PlatformOps {
       view.EventTarget.prototype,
       "addEventListener",
       "EventTarget.addEventListener.capture",
+    );
+    this.#stopEventPropagation = captureMethod(
+      view.Event.prototype,
+      "stopPropagation",
+      "Event.stopPropagation.capture",
     );
     this.#abort = captureMethod(
       view.AbortController.prototype,
@@ -625,6 +653,14 @@ class OwnerRealmPlatformOps implements PlatformOps {
     }
   }
 
+  monotonicNow(): number {
+    const value = this.#invoke("Performance.now", this.#performanceNow, this.#performance, []);
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "Performance.now");
+    }
+    return value;
+  }
+
   getAbortSignal(controller: AbortController): AbortSignal {
     return this.#invoke("AbortController.signal", this.#abortSignalGetter, controller, []);
   }
@@ -641,6 +677,10 @@ class OwnerRealmPlatformOps implements PlatformOps {
       target,
       [eventName, listener, { signal }],
     );
+  }
+
+  stopEventPropagation(event: Event): void {
+    this.#invoke("Event.stopPropagation", this.#stopEventPropagation, event, []);
   }
 
   abort(controller: AbortController): void {

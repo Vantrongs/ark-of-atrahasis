@@ -6,6 +6,122 @@ import {
   test,
 } from "./fixtures.mjs";
 
+test("strict-root event fence blocks delegated click, hotkey, form, focus, and blur gadgets", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(() => {
+    const host = document.querySelector("#mount");
+    const hostForm = document.querySelector("#host-form");
+    if (!(host instanceof HTMLElement) || !(hostForm instanceof HTMLFormElement)) {
+      throw new Error("host fixture is incomplete");
+    }
+    host.dataset.action = "host-submit";
+    const observed = {
+      action: 0,
+      capture: 0,
+      documentBubble: 0,
+      form: 0,
+      hostBubble: 0,
+      hotkey: 0,
+      internalClick: 0,
+      internalBlur: 0,
+      internalFocus: 0,
+      internalKey: 0,
+    };
+    document.addEventListener("click", () => { observed.capture += 1; }, true);
+    document.addEventListener("blur", () => { observed.capture += 1; }, true);
+    document.addEventListener("focus", () => { observed.capture += 1; }, true);
+    document.addEventListener("keydown", () => { observed.capture += 1; }, true);
+    host.addEventListener("click", () => { observed.hostBubble += 1; });
+    host.addEventListener("blur", () => { observed.hostBubble += 1; });
+    host.addEventListener("focus", () => { observed.hostBubble += 1; });
+    host.addEventListener("keydown", () => { observed.hostBubble += 1; });
+    document.addEventListener("click", (event) => {
+      observed.documentBubble += 1;
+      if (event.target instanceof HTMLElement && event.target.dataset.action === "host-submit") {
+        observed.action += 1;
+        hostForm.requestSubmit();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      observed.documentBubble += 1;
+      if (event.key === "Delete") observed.hotkey += 1;
+    });
+    hostForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      observed.form += 1;
+    });
+
+    const root = host.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const button = safeDocument.createButton();
+    button.onBlur(() => { observed.internalBlur += 1; });
+    button.onClick(() => { observed.internalClick += 1; });
+    button.onFocus(() => { observed.internalFocus += 1; });
+    button.onKeyDown(() => { observed.internalKey += 1; });
+    safeDocument.appendChild(button);
+    const rawButton = root.querySelector("button");
+    if (!(rawButton instanceof HTMLButtonElement)) throw new Error("safe button is missing");
+
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    Object.defineProperty(click, "stopPropagation", {
+      configurable: true,
+      value: () => { throw document.body; },
+    });
+    rawButton.dispatchEvent(click);
+    rawButton.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      composed: true,
+      key: "Delete",
+    }));
+    rawButton.dispatchEvent(new FocusEvent("focus", { bubbles: false, composed: true }));
+    rawButton.dispatchEvent(new FocusEvent("blur", { bubbles: false, composed: true }));
+    const fenced = { ...observed };
+
+    safeDocument.dispose();
+    root.append(rawButton);
+    rawButton.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    rawButton.dispatchEvent(new FocusEvent("focus", { bubbles: false, composed: true }));
+    const afterDispose = { ...observed };
+    return { afterDispose, fenced };
+  });
+
+  expect(result).toEqual({
+    fenced: {
+      action: 0,
+      capture: 4,
+      documentBubble: 0,
+      form: 0,
+      hostBubble: 0,
+      hotkey: 0,
+      internalClick: 1,
+      internalBlur: 1,
+      internalFocus: 1,
+      internalKey: 1,
+    },
+    afterDispose: {
+      action: 1,
+      capture: 6,
+      documentBubble: 1,
+      form: 1,
+      hostBubble: 2,
+      hotkey: 0,
+      internalClick: 1,
+      internalBlur: 1,
+      internalFocus: 1,
+      internalKey: 1,
+    },
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
 test("denied image, link, media, and form actions leave the host and browser ledger unchanged", async ({
   page,
   browserLedger,

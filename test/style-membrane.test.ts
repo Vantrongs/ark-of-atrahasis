@@ -3,15 +3,13 @@ import { JSDOM } from "jsdom";
 import { test } from "vitest";
 
 import { isSafeDOMError } from "../src/errors.ts";
-import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 import { createStylePolicy, type SafeStylePolicy } from "../src/style-policy.ts";
+import { createContainedRoot } from "./support/contained-root.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 function fixture(): { dom: JSDOM; root: ShadowRoot } {
   const dom = new JSDOM("<!doctype html><html><head><meta name=sentinel></head><body></body></html>");
-  const host = dom.window.document.createElement("div");
-  host.style.contain = "paint";
-  dom.window.document.body.appendChild(host);
-  return { dom, root: host.attachShadow({ mode: "closed" }) };
+  return { dom, root: createContainedRoot(dom.window.document) };
 }
 
 test("strict document exposes no raw stylesheet authority and style is default-deny", () => {
