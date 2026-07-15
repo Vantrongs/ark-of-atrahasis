@@ -14,24 +14,30 @@
     }
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
+    "npm-shrinkwrap.json",
+    "scripts",
     "src",
+    "test",
     "tsconfig.json",
     "tsup.config.ts",
     "RELEASING.md"
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && node node_modules/typescript-current/bin/tsc --noEmit -p tsconfig.json",
     "lint": "biome lint src test scripts tsup.config.ts",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --exclude test/release.test.mjs",
     "test:api": "npm run build && node --test test/api.node.mjs",
-    "test": "npm run test:unit && npm run test:api",
+    "test:release": "node --test test/release.test.mjs",
+    "test": "npm run test:unit && npm run test:api && npm run test:release",
     "test:package": "node scripts/test-package.mjs",
     "pack:verified": "node scripts/test-package.mjs --output .artifacts",
-    "check": "npm run lint && npm run typecheck && npm test && npm run test:package",
+    "audit": "npm audit --audit-level=low",
+    "check": "npm run lint && npm run typecheck && npm test && npm run audit && npm run test:package",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "node scripts/reject-direct-publish.mjs"
   },
   "keywords": [
     "sandbox",
@@ -58,14 +64,21 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "npm@11.9.0",
+  "packageManager": "npm@11.18.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
     "@types/jsdom": "21.1.7",
     "jsdom": "26.1.0",
     "tsup": "8.5.1",
     "typescript": "6.0.3",
-    "vitest": "3.2.4"
+    "typescript-current": "npm:typescript@7.0.2",
+    "typescript-min": "npm:typescript@5.0.4",
+    "vitest": "3.2.7"
   },
   "overrides": {
     "esbuild": "0.27.2"

@@ -15,23 +15,35 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out the release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.x
+          node-version: 22.22.2
           cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
 
-      - name: Use the pinned npm version
-        run: npm install --global npm@11.9.0
+      - name: Install the pinned npm CLI without replacing the runner npm
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-cli"
+          npm install --prefix "$RUNNER_TEMP/npm-cli" npm@11.18.0 \
+            --ignore-scripts --no-audit --no-fund --no-package-lock
+          echo "NPM_CLI=$RUNNER_TEMP/npm-cli/node_modules/npm/bin/npm-cli.js" >> "$GITHUB_ENV"
+
+      - name: Verify toolchain versions
+        run: |
+          test "$(node --version)" = "v22.22.2"
+          test "$(node "$NPM_CLI" --version)" = "11.18.0"
 
       - name: Install frozen dependencies
-        run: npm ci
+        run: node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund
 
       - name: Run the complete gate
-        run: npm run check
+        run: node "$NPM_CLI" run check
