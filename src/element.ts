@@ -1135,14 +1135,7 @@ export function createSafeListElement(context: DocumentContext, realEl: HTMLULis
 
   return context.complete(Object.assign(base, {
     createItem(): SafeContainerElement {
-      const li = createSafeContainerElement(context, context.createElement("li"));
-      try {
-        base.appendChild(li);
-        return li;
-      } catch (error) {
-        li.dispose();
-        throw error;
-      }
+      return createSafeContainerElement(context, context.createElement("li"));
     },
   }) as SafeListElement, realEl, "list");
 }
@@ -1154,24 +1147,10 @@ export function createSafeDescriptionListElement(context: DocumentContext, realE
 
   return context.complete(Object.assign(base, {
     createTerm(): SafeContainerElement {
-      const dt = createSafeContainerElement(context, context.createElement("dt"));
-      try {
-        base.appendChild(dt);
-        return dt;
-      } catch (error) {
-        dt.dispose();
-        throw error;
-      }
+      return createSafeContainerElement(context, context.createElement("dt"));
     },
     createDescription(): SafeContainerElement {
-      const dd = createSafeContainerElement(context, context.createElement("dd"));
-      try {
-        base.appendChild(dd);
-        return dd;
-      } catch (error) {
-        dd.dispose();
-        throw error;
-      }
+      return createSafeContainerElement(context, context.createElement("dd"));
     },
   }) as SafeDescriptionListElement, realEl, "description-list");
 }

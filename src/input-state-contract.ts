@@ -7,7 +7,7 @@ const RANGE_INPUT_TYPES = Object.freeze([
   "date", "month", "week", "time", "datetime-local", "number", "range",
 ] as const);
 const TEXT_INPUT_TYPES = Object.freeze([
-  "text", "search", "tel", "url", "email", "password",
+  "text", "search", "tel", "url", "email",
 ] as const);
 const READONLY_INPUT_TYPES = Object.freeze([
   ...TEXT_INPUT_TYPES, "date", "month", "week", "time", "datetime-local", "number",

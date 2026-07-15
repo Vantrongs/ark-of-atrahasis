@@ -171,6 +171,10 @@ function voidElement(context: DocumentContext, tag: string): SafeVoidElement {
 /**
  * Create a DOM capability scoped to one host-created ShadowRoot.
  *
+ * The root host must already have effective computed paint containment and a
+ * compatible display box. The host must maintain both containment and
+ * controlled geometry for the lifetime of the returned capability.
+ *
  * The returned object deliberately exposes mount operations rather than a
  * wrapper for the ShadowRoot or its host element.
  */
@@ -263,7 +267,7 @@ export function createSafeDocument(
     createFigure(): SafeContainerElement { return container(context, "figure"); },
     createFigcaption(): SafeContainerElement { return container(context, "figcaption"); },
 
-    createText(): SafeContainerElement { return container(context, "p"); },
+    createParagraph(): SafeContainerElement { return container(context, "p"); },
     createHeading(level: HeadingLevel): SafeContainerElement {
       const numericLevel = requireIntegerInRange(level, 1, 6, "SafeDocument.createHeading.level");
       return container(context, `h${numericLevel}`);
@@ -347,7 +351,7 @@ export function createSafeDocument(
     createRt(): SafeContainerElement { return container(context, "rt"); },
     createRp(): SafeContainerElement { return container(context, "rp"); },
 
-    createRawText(): SafeTextNode {
+    createTextNode(): SafeTextNode {
       return createSafeTextNode(context, context.createTextNode(""));
     },
 

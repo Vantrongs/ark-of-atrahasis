@@ -23,6 +23,31 @@ function captureMethod<Method extends PlatformMethod>(
   throw createSafeDOMError("DOM_OPERATION_FAILED", operation);
 }
 
+function captureCallableProperty<Method extends PlatformMethod>(
+  receiver: object,
+  property: PropertyKey,
+  operation: string,
+): Method {
+  try {
+    let current: object | null = receiver;
+    while (current !== null) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, property);
+      if (descriptor !== undefined) {
+        if (typeof descriptor.value === "function") return descriptor.value;
+        if (typeof descriptor.get === "function") {
+          const value: unknown = Reflect.apply(descriptor.get, receiver, []);
+          if (typeof value === "function") return value as Method;
+        }
+        break;
+      }
+      current = Object.getPrototypeOf(current);
+    }
+  } catch {
+    // The thrown platform value is deliberately discarded below.
+  }
+  throw createSafeDOMError("DOM_OPERATION_FAILED", operation);
+}
+
 function captureAccessor<Accessor extends PlatformMethod>(
   prototype: object,
   property: PropertyKey,
@@ -61,6 +86,32 @@ type NumberGetter<ElementType extends Element> = (this: ElementType) => number;
 type NumberSetter<ElementType extends Element> = (this: ElementType, value: number) => void;
 type CryptoGetter = (this: Window) => Crypto;
 type GetRandomValues = (this: Crypto, array: Uint8Array) => Uint8Array;
+type ShadowHostGetter = (this: ShadowRoot) => Element;
+
+const EFFECTIVE_PAINT_CONTAINMENT_DISPLAYS: ReadonlySet<string> = new Set([
+  "block",
+  "flow-root",
+  "flex",
+  "grid",
+  "inline-block",
+  "inline-flex",
+  "inline-grid",
+  "inline-table",
+  "list-item",
+  "table",
+  "table-cell",
+]);
+
+function hasEffectivePaintContainment(containment: string, display: string): boolean {
+  // Paint containment is ineffective for absent principal boxes, non-atomic
+  // inline boxes, internal ruby boxes, and internal table boxes other than
+  // cells. Fail closed for every unknown display serialization as well.
+  if (!EFFECTIVE_PAINT_CONTAINMENT_DISPLAYS.has(display)) return false;
+  if (containment === "paint" || containment === "content" || containment === "strict") {
+    return true;
+  }
+  return containment.split(/[\t\n\f\r ]+/u).includes("paint");
+}
 
 export interface InputMutationPreview {
   readonly value: string;
@@ -77,6 +128,7 @@ function prototypeOwns(prototype: object, value: object): boolean {
 
 export interface PlatformOps {
   readonly URL: typeof URL;
+  assertPaintContainedRoot(root: ShadowRoot): void;
   randomHex(byteLength: number): string;
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
@@ -162,6 +214,10 @@ export interface PlatformOps {
 class OwnerRealmPlatformOps implements PlatformOps {
   readonly URL: typeof URL;
   readonly #ownerDocument: Document;
+  readonly #view: Window & typeof globalThis;
+  readonly #shadowHostGetter: ShadowHostGetter;
+  readonly #getComputedStyle: Window["getComputedStyle"];
+  readonly #getStylePropertyValue: CSSStyleDeclaration["getPropertyValue"];
   readonly #crypto: Crypto;
   readonly #getRandomValues: GetRandomValues;
   readonly #Uint8Array: typeof Uint8Array;
@@ -239,7 +295,24 @@ class OwnerRealmPlatformOps implements PlatformOps {
 
   constructor(ownerDocument: Document, view: Window & typeof globalThis) {
     this.#ownerDocument = ownerDocument;
+    this.#view = view;
     this.URL = view.URL;
+    this.#shadowHostGetter = captureAccessor(
+      view.ShadowRoot.prototype,
+      "host",
+      "get",
+      "ShadowRoot.host.capture",
+    );
+    this.#getComputedStyle = captureCallableProperty(
+      view,
+      "getComputedStyle",
+      "Window.getComputedStyle.capture",
+    );
+    this.#getStylePropertyValue = captureMethod(
+      view.CSSStyleDeclaration.prototype,
+      "getPropertyValue",
+      "CSSStyleDeclaration.getPropertyValue.capture",
+    );
     const cryptoGetter = captureAccessor<CryptoGetter>(
       view,
       "crypto",
@@ -415,6 +488,31 @@ class OwnerRealmPlatformOps implements PlatformOps {
     this.#meterMinSetter = captureAccessor(meterPrototype, "min", "set", "HTMLMeterElement.min.set.capture");
     this.#meterMaxGetter = captureAccessor(meterPrototype, "max", "get", "HTMLMeterElement.max.get.capture");
     this.#meterMaxSetter = captureAccessor(meterPrototype, "max", "set", "HTMLMeterElement.max.set.capture");
+  }
+
+  assertPaintContainedRoot(root: ShadowRoot): void {
+    const host = this.#invoke("ShadowRoot.host", this.#shadowHostGetter, root, []);
+    const computed = this.#invoke(
+      "Window.getComputedStyle",
+      this.#getComputedStyle,
+      this.#view,
+      [host],
+    );
+    const containment = this.#invoke(
+      "CSSStyleDeclaration.getPropertyValue.contain",
+      this.#getStylePropertyValue,
+      computed,
+      ["contain"],
+    );
+    const display = this.#invoke(
+      "CSSStyleDeclaration.getPropertyValue.display",
+      this.#getStylePropertyValue,
+      computed,
+      ["display"],
+    );
+    if (!hasEffectivePaintContainment(containment, display)) {
+      throw createSafeDOMError("INVALID_ROOT", "createSafeDocument.root.containment");
+    }
   }
 
   createElement(tag: string): HTMLElement {

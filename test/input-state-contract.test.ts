@@ -6,6 +6,7 @@ import { createTestSafeDocument as createSafeDocument } from "./support/create-s
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
+  host.style.contain = "paint";
   documentValue.body.append(host);
   return host.attachShadow({ mode: "open" });
 }
@@ -152,7 +153,7 @@ describe("strict input state contracts", () => {
     input.setValue("abc");
     input.setType("checkbox");
 
-    const releasedText = safeDocument.createRawText();
+    const releasedText = safeDocument.createTextNode();
     expect(() => releasedText.setText("abc")).not.toThrow();
     releasedText.dispose();
     expect(() => input.setType("text")).not.toThrow();
@@ -170,7 +171,7 @@ describe("strict input state contracts", () => {
       value: "abc",
       valueAttribute: "abc",
     });
-    expect(() => safeDocument.createRawText().setText("x")).toThrowError(expect.objectContaining({
+    expect(() => safeDocument.createTextNode().setText("x")).toThrowError(expect.objectContaining({
       code: "QUOTA_EXCEEDED",
       operation: "SafeDocument quota exceeded: textBytes",
     }));
@@ -200,7 +201,7 @@ describe("strict input state contracts", () => {
     });
   });
 
-  test.each(["hidden", "file", "submit", "image", "reset", "button"])(
+  test.each(["hidden", "file", "password", "submit", "image", "reset", "button"])(
     "raw host-forced forbidden type $type makes setType fail closed",
     (type) => {
       const { input, physical } = appendInput();

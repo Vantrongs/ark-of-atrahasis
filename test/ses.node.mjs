@@ -22,6 +22,8 @@ function fixture() {
   );
   const firstHost = dom.window.document.querySelector("#first");
   const secondHost = dom.window.document.querySelector("#second");
+  firstHost.style.contain = "paint";
+  secondHost.style.contain = "paint";
   return {
     dom,
     outside: dom.window.document.querySelector("#outside"),

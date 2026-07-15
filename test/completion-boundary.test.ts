@@ -6,6 +6,7 @@ import { testHarden } from "./support/harden.ts";
 
 function makeRoot(): ShadowRoot {
   const host = document.createElement("div");
+  host.style.contain = "paint";
   document.body.appendChild(host);
   return host.attachShadow({ mode: "open" });
 }

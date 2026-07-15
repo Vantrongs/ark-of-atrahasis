@@ -3,10 +3,11 @@
 `ark-of-atrahasis` is an ESM-only, capability-oriented DOM wrapper for
 host-controlled Secure ECMAScript (SES) integrations. The repository is at the
 `0.4.0` release-candidate source state: it requires a host-created `ShadowRoot`
-and a host-supplied SES `harden`, exposes fixed wrapper operations rather than
-raw DOM nodes, denies URL and inline-style authority unless the host grants it,
-and deterministically revokes owned wrappers and tracked effects. Repository
-documentation does not assert the candidate's current publication status.
+whose host has effective CSS paint containment, plus a host-supplied SES
+`harden`. It exposes fixed wrapper operations rather than raw DOM nodes, denies
+URL and inline-style authority unless the host grants it, and deterministically
+revokes owned wrappers and tracked effects. Repository documentation does not
+assert the candidate's current publication status.
 
 A live observation on 2026-07-15 found npm `latest` at `0.3.1`. That version has
 the retired string-ID/light-DOM API and does **not** implement the strict
@@ -48,6 +49,13 @@ completed `SafeDocument` or selected wrappers. From that boundary it cannot
 remove, rename, style, or clear the outer host because no reference or wrapper
 for the root or host is exposed; the trusted host itself retains that authority.
 
+All public `create*` factories return detached wrappers, including
+`list.createItem()` and the description-list `createTerm()`/
+`createDescription()` conveniences. `createParagraph()` creates `<p>`, while
+`createTextNode()` creates a text node. `setText()` replaces a container's DOM
+children; wrappers for those detached descendants remain active and may be
+explicitly reattached until they are disposed or revoked.
+
 The emitted declarations enumerate the complete `SafeDocument`, specialized
 wrapper, event, policy, error, vocabulary, and readonly/container-versus-void
 type surface. `test/types/positive.ts` and `test/types/negative.ts` check that
@@ -66,6 +74,7 @@ lockdown();
 
 const { createSafeDocument } = await import("ark-of-atrahasis");
 const hostElement = document.querySelector("#plugin-a-root");
+hostElement.style.contain = "paint";
 const root = hostElement.attachShadow({ mode: "closed" });
 const safeDocument = createSafeDocument(root, {
   harden,
@@ -83,6 +92,16 @@ const safeDocument = createSafeDocument(root, {
 
 const compartment = new Compartment({ safeDocument });
 ```
+
+Initialization reads the host's computed `contain` and `display` values through
+captured APIs from the `ShadowRoot` owner realm. It rejects a missing paint
+containment component and display boxes on which paint containment is
+ineffective: absent boxes (`none`/`contents`), non-atomic inline boxes, internal
+ruby boxes, and internal table boxes other than cells. The `paint`, `content`,
+and `strict` containment forms are accepted on supported block, atomic-inline,
+table-cell, flex, grid, list-item, flow-root, and table boxes. The host must
+establish containment before calling `createSafeDocument()` and maintain it,
+together with controlled host bounds, for the lifetime of the `SafeDocument`.
 
 Omitting `urlPolicy` denies all six URL sinks. An omitted sink is denied;
 enabled sinks separately constrain canonical origin (including port), protocol,
@@ -109,7 +128,13 @@ precondition.
 - **Identifiers and forms:** logical IDs, names, IDREFs, and IDREF lists map to
   per-document opaque physical tokens. Created form controls start with safe
   non-form defaults (`button` type, control type, autocomplete, and autofocus
-  constraints); submit/reset/file-like states are not guest vocabularies.
+  constraints); password, submit/reset, and file-like states are not guest
+  vocabularies. `autocomplete="off"`, opaque names, and Shadow DOM are structural
+  isolation measures, not a promise about every browser extension or password
+  manager. If an integration handles credentials or requires autofill
+  confidentiality, place it behind a separately trusted origin and iframe or a
+  separate process/RPC boundary, then test the deployed credential agent and
+  browser policy directly.
 - **Events and errors:** handlers receive deeply frozen primitive snapshots made
   through captured standard accessors. Malicious getters and platform failures
   collapse to primitive defaults or frozen `SafeDOMError` records without
@@ -130,9 +155,11 @@ precondition.
   may remain after revocation/disposal. The contract is removal of wrapper-owned
   capabilities and tracked effects, not a promise to erase every ordinary DOM
   field from an externally retained raw node.
-- **Layout and host authority:** Shadow DOM is a tree/style boundary, not a
-  layout, event, network, or availability sandbox. The host must still control
-  raw nodes, endowments, navigation, CSP, and integration lifetime.
+- **Layout and host authority:** required paint containment clips guest paint
+  and hit testing to the bounded host even when the host grants fixed,
+  viewport-sized, high-z-index styles. It is not an event, network, credential,
+  or availability sandbox. The host must still control host geometry, raw
+  nodes, endowments, navigation, CSP, and integration lifetime.
 
 ### Quotas
 

@@ -12,6 +12,7 @@ const page = `<!doctype html>
     <meta charset="utf-8">
     <title>Ark browser acceptance harness</title>
     <link rel="icon" href="data:,">
+    <style>#mount { contain: paint; }</style>
   </head>
   <body>
     <form id="host-form" action="/unapproved/form-submit" method="get">
@@ -38,7 +39,7 @@ const page = `<!doctype html>
 
 const iframePage = `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Foreign realm</title></head>
+  <head><meta charset="utf-8"><title>Foreign realm</title><style>#foreign-mount { contain: paint; }</style></head>
   <body><div id="foreign-mount"></div></body>
 </html>`;
 

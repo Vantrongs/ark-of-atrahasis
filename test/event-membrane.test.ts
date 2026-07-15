@@ -14,6 +14,7 @@ import type {
 function fixture(): { dom: JSDOM; root: ShadowRoot } {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   const host = dom.window.document.createElement("div");
+  host.style.contain = "paint";
   dom.window.document.body.appendChild(host);
   return { dom, root: host.attachShadow({ mode: "closed" }) };
 }

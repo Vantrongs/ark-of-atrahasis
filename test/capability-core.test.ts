@@ -6,6 +6,8 @@ import { createTestSafeDocument as createSafeDocument } from "./support/create-s
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
+  host.style.contain = "paint";
+  host.style.display = "block";
   documentValue.body.appendChild(host);
   return host.attachShadow({ mode: "open" });
 }
@@ -25,6 +27,57 @@ describe("strict ShadowRoot capability core", () => {
     );
     expect(host.childNodes).toHaveLength(0);
   });
+
+  it("requires effective paint containment for the host display box", () => {
+    const missing = document.createElement("div");
+    document.body.appendChild(missing);
+    expect(() => createSafeDocument(missing.attachShadow({ mode: "open" }))).toThrowError(
+      expect.objectContaining({
+        code: "INVALID_ROOT",
+        operation: "createSafeDocument.root.containment",
+      }),
+    );
+
+    for (const display of [
+      "none",
+      "contents",
+      "inline",
+      "ruby",
+      "ruby-base",
+      "ruby-base-container",
+      "ruby-text",
+      "ruby-text-container",
+      "table-caption",
+      "table-column",
+      "table-column-group",
+      "table-footer-group",
+      "table-header-group",
+      "table-row",
+      "table-row-group",
+    ] as const) {
+      const hidden = document.createElement("div");
+      hidden.style.contain = "paint";
+      hidden.style.display = display;
+      document.body.appendChild(hidden);
+      expect(() => createSafeDocument(hidden.attachShadow({ mode: "open" }))).toThrowError(
+        expect.objectContaining({
+          code: "INVALID_ROOT",
+          operation: "createSafeDocument.root.containment",
+        }),
+      );
+    }
+  });
+
+  it.each(["paint", "content", "strict", "layout paint style"])(
+    "accepts the computed %s containment form",
+    (containment) => {
+      const host = document.createElement("div");
+      host.style.contain = containment;
+      host.style.display = "block";
+      document.body.appendChild(host);
+      expect(() => createSafeDocument(host.attachShadow({ mode: "open" }))).not.toThrow();
+    },
+  );
 
   it("uses the supplied root ownerDocument realm", () => {
     const iframe = document.createElement("iframe");
@@ -81,7 +134,8 @@ describe("strict ShadowRoot capability core", () => {
 
     expect("root" in safeDocument).toBe(false);
     expect("host" in safeDocument).toBe(false);
-    expect(host.hasAttributes()).toBe(false);
+    expect(host.getAttributeNames()).toEqual(["style"]);
+    expect(host.style.contain).toBe("paint");
     expect(root.firstElementChild?.localName).toBe("span");
   });
 

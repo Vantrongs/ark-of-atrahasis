@@ -1,4 +1,5 @@
 import { createSafeDOMError, isSafeDOMError } from "./errors.ts";
+import { utf8ByteLength } from "./utf8.ts";
 import type { PlatformOps } from "./platform.ts";
 import type { NodeRegistry, RegistryEntry } from "./registry.ts";
 import type { SafeElement } from "./types.ts";
@@ -79,18 +80,6 @@ const TOKEN_ATTEMPTS = 8;
 export const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
 const ASCII_WHITESPACE_RUN = /[\t\n\f\r ]+/;
-
-function utf8ByteLength(value: string): number {
-  let length = 0;
-  for (const character of value) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint <= 0x7f) length += 1;
-    else if (codePoint <= 0x7ff) length += 2;
-    else if (codePoint <= 0xffff) length += 3;
-    else length += 4;
-  }
-  return length;
-}
 
 function quotaDeltas(
   mappings: number,
