@@ -265,8 +265,13 @@ release is externally complete.
   current CycloneDX 1.7 JSON envelope, removes UUID/time nondeterminism, binds
   the root component to the exact tarball SHA-256, and requires two consecutive
   outputs to match byte-for-byte. The final serialized bytes must pass the
-  pinned `@cyclonedx/cyclonedx-library` 10.1.0 strict JSON validator with its
-  pinned Ajv peers before artifact handoff. Components describe the shipped
+  official schema bundle shipped by pinned `@cyclonedx/cyclonedx-library`
+  10.1.0 using pinned Ajv 8.20.0 and `ajv-formats` 3.0.1 before artifact
+  handoff. The local `idn-email` adapter removes the abandoned
+  `ajv-formats-draft2019` peer while preserving its RFC 5321 parser semantics,
+  including quoted and UTF-8 local parts. Complete CI/release and local package
+  gates promote Node deprecations to failures, while release tests reject every
+  lock-marked deprecated package. Components describe the shipped
   shrinkwrap/source build closure rather than a per-file tarball inventory; the
   package has zero runtime dependencies. An exact inventory gate compares each
   non-root, non-link packed-shrinkwrap installed alias/version (deduplicated by

@@ -45,9 +45,23 @@ const releaseWorkflow = readFileSync(
   new URL("../.github/workflows/release.yml", import.meta.url),
   "utf8",
 );
+const checkWorkflow = readFileSync(
+  new URL("../.github/workflows/check.yml", import.meta.url),
+  "utf8",
+);
 const releaseRecoverySource = readFileSync(
   new URL("../scripts/release-recovery.mjs", import.meta.url),
   "utf8",
+);
+const packageGateSource = readFileSync(
+  new URL("../scripts/test-package.mjs", import.meta.url),
+  "utf8",
+);
+const sourceManifest = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+const sourceShrinkwrap = JSON.parse(
+  readFileSync(new URL("../npm-shrinkwrap.json", import.meta.url), "utf8"),
 );
 
 test("release SBOM normalization is reproducible, current, and bound to the tarball", () => {
@@ -144,6 +158,75 @@ test("release SBOM strict validation rejects invalid CycloneDX 1.7 bytes", async
     validateReleaseSbomContents(invalid),
     /CycloneDX 1\.7 validation failed/u,
   );
+});
+
+test("release SBOM strict validation retains IDN email checks without deprecated plugins", async () => {
+  const withEmail = (email) => JSON.stringify({
+    bomFormat: "CycloneDX",
+    metadata: { authors: [{ email }] },
+    specVersion: CYCLONEDX_SPEC_VERSION,
+  });
+
+  // Covers the JSON Schema draft 2019-09 email/idn-email string corpus plus
+  // the published ajv-formats-draft2019 and smtp-address-parser witnesses.
+  const validEmails = [
+    "joe.bloggs@example.com",
+    "te~st@example.com",
+    "~test@example.com",
+    "test~@example.com",
+    "te.s.t@example.com",
+    "실례@실례.테스트",
+    "квіточка@пошта.укр",
+    "Dörte@Sörensen.example.com",
+    "我買@屋企.香港",
+    '"John Doe"@example.com',
+    '"john..doe"@example.org',
+    '"john\\"doe"@example.org',
+    "simple@[127.0.0.1]",
+  ];
+  const invalidEmails = [
+    "2962",
+    ".test@example.com",
+    "test.@example.com",
+    "te..st@example.com",
+    "",
+    "johndoe",
+    "valid@example.com?query",
+    "foo bar@example.com",
+    "A@b@c@example.com",
+    "admin@mailserver1",
+    'just"not"right@example.com',
+  ];
+
+  for (const email of validEmails) {
+    await assert.doesNotReject(validateReleaseSbomContents(withEmail(email)), email);
+  }
+  for (const email of invalidEmails) {
+    await assert.rejects(
+      validateReleaseSbomContents(withEmail(email)),
+      /CycloneDX 1\.7 validation failed/u,
+      email,
+    );
+  }
+});
+
+test("release dependency tree excludes deprecated CI modules and lock-marked packages", () => {
+  const deprecatedPackages = Object.entries(sourceShrinkwrap.packages)
+    .filter(([, entry]) => typeof entry?.deprecated === "string" && entry.deprecated.length > 0)
+    .map(([path, entry]) => ({ deprecated: entry.deprecated, path }));
+
+  assert.deepEqual(deprecatedPackages, []);
+  assert.equal(sourceManifest.devDependencies?.["ajv-formats-draft2019"], undefined);
+  assert.equal(sourceShrinkwrap.packages["node_modules/ajv-formats-draft2019"], undefined);
+  assert.equal(sourceShrinkwrap.packages["node_modules/whatwg-encoding"], undefined);
+});
+
+test("CI, release, and package gates fail on Node runtime deprecations", () => {
+  assert.match(sourceManifest.scripts["test:package"], /node --throw-deprecation/u);
+  assert.match(sourceManifest.scripts["pack:verified"], /node --throw-deprecation/u);
+  assert.equal((checkWorkflow.match(/NODE_OPTIONS: --throw-deprecation/gu) ?? []).length, 1);
+  assert.equal((releaseWorkflow.match(/NODE_OPTIONS: --throw-deprecation/gu) ?? []).length, 2);
+  assert.match(packageGateSource, /NODE_OPTIONS: "--throw-deprecation"/u);
 });
 
 test("release SBOM inventory rejects an internally closed but truncated shrinkwrap graph", () => {

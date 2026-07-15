@@ -50,4 +50,6 @@ jobs:
         run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
 
       - name: Run the complete gate
+        env:
+          NODE_OPTIONS: --throw-deprecation
         run: node "$NPM_CLI" run check

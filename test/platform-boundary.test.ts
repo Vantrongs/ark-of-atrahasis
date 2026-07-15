@@ -260,6 +260,16 @@ describe("owner-realm platform boundary", () => {
       throw new Error("expected an iframe document and window");
     }
     const root = makeRoot(foreignDocument);
+    root.host.style.display = "block";
+    const computedStyle = root.host.style;
+    const getComputedStyleDescriptor = Object.getOwnPropertyDescriptor(
+      foreignWindow,
+      "getComputedStyle",
+    );
+    Object.defineProperty(foreignWindow, "getComputedStyle", {
+      configurable: true,
+      value: () => computedStyle,
+    });
     let reads = 0;
     Object.defineProperty(foreignDocument, "defaultView", {
       configurable: true,
@@ -270,11 +280,19 @@ describe("owner-realm platform boundary", () => {
       },
     });
 
-    const safeDocument = createSafeDocument(root);
-    const wrapper = safeDocument.createDiv();
-    expect(() => safeDocument.appendChild(wrapper)).not.toThrow();
-    expect(reads).toBe(1);
-    expect(() => safeDocument.dispose()).not.toThrow();
+    try {
+      const safeDocument = createSafeDocument(root);
+      const wrapper = safeDocument.createDiv();
+      expect(() => safeDocument.appendChild(wrapper)).not.toThrow();
+      expect(reads).toBe(1);
+      expect(() => safeDocument.dispose()).not.toThrow();
+    } finally {
+      if (getComputedStyleDescriptor) {
+        Object.defineProperty(foreignWindow, "getComputedStyle", getComputedStyleDescriptor);
+      } else {
+        delete (foreignWindow as Partial<Window>).getComputedStyle;
+      }
+    }
   });
 
   it("uses the iframe owner realm for representative reflected IDL families", () => {

@@ -55,8 +55,15 @@ assets. The SBOM starts from npm 11.18.0's frozen-lock dependency graph, removes
 random UUID and timestamp fields, records its deterministic transform, and
 binds the root component to the exact tested tarball's SHA-256. Two consecutive
 generations must be byte-identical. The pinned
-`@cyclonedx/cyclonedx-library` 10.1.0 strict JSON validator and its pinned Ajv
-peers validate the final bytes against the CycloneDX 1.7 schema before output.
+`@cyclonedx/cyclonedx-library` 10.1.0 schema bundle and pinned Ajv 8.20.0 plus
+`ajv-formats` 3.0.1 validate the final bytes against the CycloneDX 1.7 schema
+before output. The local format adapter removes the unmaintained
+`ajv-formats-draft2019` plugin but retains its direct RFC 5321
+`smtp-address-parser` grammar, including quoted and UTF-8 local parts;
+the already annotation-only `iri-reference` format does not gain a false
+validation claim. The complete CI and release gates, including the local
+package/artifact commands, promote Node deprecations to failures; the shrinkwrap
+gate separately rejects every dependency carrying npm deprecation metadata.
 Its components describe the shipped shrinkwrap/source build closure, not a
 per-file tarball inventory: this package has zero runtime dependencies, while
 the included source, tests, scripts, and lockfile retain the reproducible build
