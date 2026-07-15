@@ -12,6 +12,7 @@ import type {
   InputModeValue,
   InputType,
   ListType,
+  SpecializedElementKind,
   TableScopeValue,
   TextareaWrapValue,
 } from "./vocabularies.ts";
@@ -223,313 +224,361 @@ export interface SafeDocumentOptions {
 }
 
 export interface SafeTextNode {
-  setText(value: string): void;
-  getText(): string;
+  readonly setText: (value: string) => void;
+  readonly getText: () => string;
   /** Reversible DOM detach; the wrapper remains usable. */
-  detach(): void;
+  readonly detach: () => void;
   /** @deprecated Use detach(). */
-  remove(): void;
+  readonly remove: () => void;
   /** Irreversible and idempotent wrapper/resource revocation. */
-  dispose(): void;
+  readonly dispose: () => void;
 }
 
 export interface SafeElement {
-  appendChild(child: SafeElement | SafeTextNode): void;
-  insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void;
-  removeChild(child: SafeElement | SafeTextNode): void;
-  replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void;
   /** Reversible DOM detach; the wrapper and its subtree remain usable. */
-  detach(): void;
+  readonly detach: () => void;
   /** @deprecated Use detach(). */
-  remove(): void;
+  readonly remove: () => void;
   /** Irreversible and idempotent disposal of this wrapper and its owned subtree. */
-  dispose(): void;
+  readonly dispose: () => void;
 
-  setText(value: string): void;
-  getText(): string;
+  readonly setClass: (value: string) => void;
+  readonly getClass: () => string;
+  readonly setId: (value: string) => void;
+  readonly getId: () => string;
+  readonly setTitle: (value: string) => void;
+  readonly setRole: (value: AriaRole) => void;
+  readonly setTabIndex: (value: number) => void;
+  readonly setHidden: (value: boolean) => void;
+  readonly setLang: (value: string) => void;
+  readonly setDir: (value: DirValue) => void;
+  readonly setSpellcheck: (value: boolean) => void;
 
-  setClass(value: string): void;
-  getClass(): string;
-  setId(value: string): void;
-  getId(): string;
-  setTitle(value: string): void;
-  setRole(value: AriaRole): void;
-  setTabIndex(value: number): void;
-  setHidden(value: boolean): void;
-  setLang(value: string): void;
-  setDir(value: DirValue): void;
-  setSpellcheck(value: boolean): void;
+  readonly setData: (key: string, value: string) => void;
+  readonly getData: (key: string) => string | undefined;
+  readonly setAria: (key: string, value: string) => void;
+  readonly getAria: (key: string) => string | undefined;
 
-  setData(key: string, value: string): void;
-  getData(key: string): string | undefined;
-  setAria(key: string, value: string): void;
-  getAria(key: string): string | undefined;
+  readonly onClick: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onDblClick: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onMouseDown: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onMouseUp: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onMouseEnter: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onMouseLeave: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onMouseMove: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
+  readonly onPointerDown: (handler: EventHandler<SafePointerEvent>) => EventCleanup;
+  readonly onPointerUp: (handler: EventHandler<SafePointerEvent>) => EventCleanup;
+  readonly onPointerMove: (handler: EventHandler<SafePointerEvent>) => EventCleanup;
+  readonly onContextMenu: (handler: EventHandler<SafeMouseEvent>) => EventCleanup;
 
-  onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup;
-  onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup;
-  onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup;
-  onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup;
-  onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  readonly onKeyDown: (handler: EventHandler<SafeKeyboardEvent>) => EventCleanup;
+  readonly onKeyUp: (handler: EventHandler<SafeKeyboardEvent>) => EventCleanup;
 
-  onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup;
-  onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup;
+  readonly onFocus: (handler: EventHandler<SafeFocusEvent>) => EventCleanup;
+  readonly onBlur: (handler: EventHandler<SafeFocusEvent>) => EventCleanup;
 
-  onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup;
-  onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup;
+  readonly onTouchStart: (handler: EventHandler<SafeTouchEvent>) => EventCleanup;
+  readonly onTouchEnd: (handler: EventHandler<SafeTouchEvent>) => EventCleanup;
+  readonly onTouchMove: (handler: EventHandler<SafeTouchEvent>) => EventCleanup;
 
-  onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup;
-  onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup;
-  onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup;
+  readonly onScroll: (handler: EventHandler<SafeGenericEvent>) => EventCleanup;
 
-  onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup;
-
-  style: SafeStyle;
+  readonly style: SafeStyle;
 }
 
-export interface SafeInputElement extends SafeElement {
-  setType(type: InputType): void;
-  setValue(value: string): void;
-  getValue(): string;
-  setPlaceholder(value: string): void;
-  setDisabled(value: boolean): void;
-  setReadonly(value: boolean): void;
-  setRequired(value: boolean): void;
-  setChecked(value: boolean): void;
-  getChecked(): boolean;
-  setMin(value: string): void;
-  setMax(value: string): void;
-  setStep(value: string): void;
-  setMinLength(value: number): void;
-  setMaxLength(value: number): void;
-  setPattern(value: string): void;
-  setAutocomplete(value: AutocompleteValue): void;
-  setAutofocus(value: false): void;
-  setName(value: string): void;
-  setInputMode(value: InputModeValue): void;
-  setEnterKeyHint(value: EnterKeyHintValue): void;
-  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
-  onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
+export interface SafeContainerElement extends SafeElement {
+  readonly appendChild: (child: SafeElement | SafeTextNode) => void;
+  readonly insertBefore: (
+    newChild: SafeElement | SafeTextNode,
+    reference: SafeElement | SafeTextNode,
+  ) => void;
+  readonly removeChild: (child: SafeElement | SafeTextNode) => void;
+  readonly replaceChild: (
+    newChild: SafeElement | SafeTextNode,
+    oldChild: SafeElement | SafeTextNode,
+  ) => void;
+  readonly setText: (value: string) => void;
+  readonly getText: () => string;
 }
 
-export interface SafeTextareaElement extends SafeElement {
-  setValue(value: string): void;
-  getValue(): string;
-  setPlaceholder(value: string): void;
-  setDisabled(value: boolean): void;
-  setReadonly(value: boolean): void;
-  setRequired(value: boolean): void;
-  setMinLength(value: number): void;
-  setMaxLength(value: number): void;
-  setRows(value: number): void;
-  setCols(value: number): void;
-  setWrap(value: TextareaWrapValue): void;
-  setName(value: string): void;
-  setAutocomplete(value: AutocompleteValue): void;
-  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
-  onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
+export interface SafeVoidElement extends SafeElement {}
+
+export interface SafeInputElement extends SafeVoidElement {
+  readonly setType: (type: InputType) => void;
+  readonly setValue: (value: string) => void;
+  readonly getValue: () => string;
+  readonly setPlaceholder: (value: string) => void;
+  readonly setDisabled: (value: boolean) => void;
+  readonly setReadonly: (value: boolean) => void;
+  readonly setRequired: (value: boolean) => void;
+  readonly setChecked: (value: boolean) => void;
+  readonly getChecked: () => boolean;
+  readonly setMin: (value: string) => void;
+  readonly setMax: (value: string) => void;
+  readonly setStep: (value: string) => void;
+  readonly setMinLength: (value: number) => void;
+  readonly setMaxLength: (value: number) => void;
+  readonly setPattern: (value: string) => void;
+  readonly setAutocomplete: (value: AutocompleteValue) => void;
+  readonly setAutofocus: (value: false) => void;
+  readonly setName: (value: string) => void;
+  readonly setInputMode: (value: InputModeValue) => void;
+  readonly setEnterKeyHint: (value: EnterKeyHintValue) => void;
+  readonly onChange: (handler: EventHandler<SafeInputEvent>) => EventCleanup;
+  readonly onInput: (handler: EventHandler<SafeInputEvent>) => EventCleanup;
 }
 
-export interface SafeSelectElement extends SafeElement {
-  setValue(value: string): void;
-  getValue(): string;
-  setDisabled(value: boolean): void;
-  setRequired(value: boolean): void;
-  setMultiple(value: boolean): void;
-  setName(value: string): void;
-  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
+export interface SafeTextareaElement extends SafeContainerElement {
+  readonly setValue: (value: string) => void;
+  readonly getValue: () => string;
+  readonly setPlaceholder: (value: string) => void;
+  readonly setDisabled: (value: boolean) => void;
+  readonly setReadonly: (value: boolean) => void;
+  readonly setRequired: (value: boolean) => void;
+  readonly setMinLength: (value: number) => void;
+  readonly setMaxLength: (value: number) => void;
+  readonly setRows: (value: number) => void;
+  readonly setCols: (value: number) => void;
+  readonly setWrap: (value: TextareaWrapValue) => void;
+  readonly setName: (value: string) => void;
+  readonly setAutocomplete: (value: AutocompleteValue) => void;
+  readonly onChange: (handler: EventHandler<SafeInputEvent>) => EventCleanup;
+  readonly onInput: (handler: EventHandler<SafeInputEvent>) => EventCleanup;
 }
 
-export interface SafeOptionElement extends SafeElement {
-  setValue(value: string): void;
-  setSelected(value: boolean): void;
-  setDisabled(value: boolean): void;
-  setLabel(value: string): void;
+export interface SafeSelectElement extends SafeContainerElement {
+  readonly setValue: (value: string) => void;
+  readonly getValue: () => string;
+  readonly setDisabled: (value: boolean) => void;
+  readonly setRequired: (value: boolean) => void;
+  readonly setMultiple: (value: boolean) => void;
+  readonly setName: (value: string) => void;
+  readonly onChange: (handler: EventHandler<SafeInputEvent>) => EventCleanup;
 }
 
-export interface SafeButtonElement extends SafeElement {
-  setType(type: ButtonType): void;
-  setDisabled(value: boolean): void;
-  setName(value: string): void;
-  setValue(value: string): void;
+export interface SafeOptionElement extends SafeContainerElement {
+  readonly setValue: (value: string) => void;
+  readonly setSelected: (value: boolean) => void;
+  readonly setDisabled: (value: boolean) => void;
+  readonly setLabel: (value: string) => void;
 }
 
-export interface SafeLabelElement extends SafeElement {
-  setFor(value: string): void;
-  getFor(): string;
+export interface SafeButtonElement extends SafeContainerElement {
+  readonly setType: (type: ButtonType) => void;
+  readonly setDisabled: (value: boolean) => void;
+  readonly setName: (value: string) => void;
+  readonly setValue: (value: string) => void;
 }
 
-export interface SafeFieldsetElement extends SafeElement {
-  setDisabled(value: boolean): void;
+export interface SafeLabelElement extends SafeContainerElement {
+  readonly setFor: (value: string) => void;
+  readonly getFor: () => string;
 }
 
-export interface SafeImageElement extends SafeElement {
-  setSrc(url: string): SafeURLDecision;
-  setAlt(value: string): void;
-  setWidth(value: number): void;
-  setHeight(value: number): void;
-  setLoading(value: ImageLoadingValue): void;
+export interface SafeFieldsetElement extends SafeContainerElement {
+  readonly setDisabled: (value: boolean) => void;
 }
 
-export interface SafeAnchorElement extends SafeElement {
-  setHref(url: string): SafeURLDecision;
+export interface SafeImageElement extends SafeVoidElement {
+  readonly setSrc: (url: string) => SafeURLDecision;
+  readonly setAlt: (value: string) => void;
+  readonly setWidth: (value: number) => void;
+  readonly setHeight: (value: number) => void;
+  readonly setLoading: (value: ImageLoadingValue) => void;
 }
 
-export interface SafeVideoElement extends SafeElement {
-  setSrc(url: string): SafeURLDecision;
-  setWidth(value: number): void;
-  setHeight(value: number): void;
-  setControls(value: boolean): void;
-  setAutoplay(value: boolean): void;
-  setLoop(value: boolean): void;
-  setMuted(value: boolean): void;
-  setPoster(url: string): SafeURLDecision;
+export interface SafeAnchorElement extends SafeContainerElement {
+  readonly setHref: (url: string) => SafeURLDecision;
 }
 
-export interface SafeAudioElement extends SafeElement {
-  setSrc(url: string): SafeURLDecision;
-  setControls(value: boolean): void;
-  setAutoplay(value: boolean): void;
-  setLoop(value: boolean): void;
-  setMuted(value: boolean): void;
+export interface SafeVideoElement extends SafeContainerElement {
+  readonly setSrc: (url: string) => SafeURLDecision;
+  readonly setWidth: (value: number) => void;
+  readonly setHeight: (value: number) => void;
+  readonly setControls: (value: boolean) => void;
+  readonly setAutoplay: (value: boolean) => void;
+  readonly setLoop: (value: boolean) => void;
+  readonly setMuted: (value: boolean) => void;
+  readonly setPoster: (url: string) => SafeURLDecision;
 }
 
-export interface SafeSourceElement extends SafeElement {
-  setSrc(url: string): SafeURLDecision;
-  setType(value: string): void;
+export interface SafeAudioElement extends SafeContainerElement {
+  readonly setSrc: (url: string) => SafeURLDecision;
+  readonly setControls: (value: boolean) => void;
+  readonly setAutoplay: (value: boolean) => void;
+  readonly setLoop: (value: boolean) => void;
+  readonly setMuted: (value: boolean) => void;
 }
 
-export interface SafeCanvasElement extends SafeElement {
-  setWidth(value: number): void;
-  setHeight(value: number): void;
+export interface SafeSourceElement extends SafeVoidElement {
+  readonly setSrc: (url: string) => SafeURLDecision;
+  readonly setType: (value: string) => void;
 }
 
-export interface SafeTableCellElement extends SafeElement {
-  setColspan(value: number): void;
-  setRowspan(value: number): void;
-  setScope(value: TableScopeValue): void;
-  setHeaders(value: string): void;
-  getHeaders(): string;
+export interface SafeCanvasElement extends SafeContainerElement {
+  readonly setWidth: (value: number) => void;
+  readonly setHeight: (value: number) => void;
 }
 
-export interface SafeDetailsElement extends SafeElement {
-  setOpen(value: boolean): void;
+export interface SafeTableCellElement extends SafeContainerElement {
+  readonly setColspan: (value: number) => void;
+  readonly setRowspan: (value: number) => void;
+  readonly setScope: (value: TableScopeValue) => void;
+  readonly setHeaders: (value: string) => void;
+  readonly getHeaders: () => string;
 }
 
-export interface SafeDialogElement extends SafeElement {
-  setOpen(value: boolean): void;
+export interface SafeDetailsElement extends SafeContainerElement {
+  readonly setOpen: (value: boolean) => void;
 }
 
-export interface SafeProgressElement extends SafeElement {
-  setValue(value: number): void;
-  setMax(value: number): void;
+export interface SafeDialogElement extends SafeContainerElement {
+  readonly setOpen: (value: boolean) => void;
 }
 
-export interface SafeMeterElement extends SafeElement {
-  setValue(value: number): void;
-  setMin(value: number): void;
-  setMax(value: number): void;
+export interface SafeProgressElement extends SafeContainerElement {
+  readonly setValue: (value: number) => void;
+  readonly setMax: (value: number) => void;
 }
 
-export interface SafeListElement extends SafeElement {
-  createItem(): SafeElement;
+export interface SafeMeterElement extends SafeContainerElement {
+  readonly setValue: (value: number) => void;
+  readonly setMin: (value: number) => void;
+  readonly setMax: (value: number) => void;
 }
 
-export interface SafeDescriptionListElement extends SafeElement {
-  createTerm(): SafeElement;
-  createDescription(): SafeElement;
+export interface SafeListElement extends SafeContainerElement {
+  readonly createItem: () => SafeContainerElement;
+}
+
+export interface SafeDescriptionListElement extends SafeContainerElement {
+  readonly createTerm: () => SafeContainerElement;
+  readonly createDescription: () => SafeContainerElement;
+}
+
+export interface SafeElementByKind {
+  readonly input: SafeInputElement;
+  readonly textarea: SafeTextareaElement;
+  readonly select: SafeSelectElement;
+  readonly option: SafeOptionElement;
+  readonly button: SafeButtonElement;
+  readonly label: SafeLabelElement;
+  readonly fieldset: SafeFieldsetElement;
+  readonly image: SafeImageElement;
+  readonly anchor: SafeAnchorElement;
+  readonly video: SafeVideoElement;
+  readonly audio: SafeAudioElement;
+  readonly source: SafeSourceElement;
+  readonly canvas: SafeCanvasElement;
+  readonly th: SafeTableCellElement;
+  readonly td: SafeTableCellElement;
+  readonly details: SafeDetailsElement;
+  readonly dialog: SafeDialogElement;
+  readonly progress: SafeProgressElement;
+  readonly meter: SafeMeterElement;
+  readonly list: SafeListElement;
+  readonly "description-list": SafeDescriptionListElement;
+}
+
+export interface CreateList {
+  (type: "unordered" | "ordered"): SafeListElement;
+  (type: "description"): SafeDescriptionListElement;
+  (type: ListType): SafeListElement | SafeDescriptionListElement;
+}
+
+export interface GetElement {
+  (id: string): SafeElement | null;
+  <K extends SpecializedElementKind>(
+    id: string,
+    kind: K,
+  ): SafeElementByKind[K] | null;
 }
 
 export interface SafeDocument {
   /** Mount operations target the claimed ShadowRoot without exposing a root wrapper. */
-  appendChild(child: SafeElement | SafeTextNode): void;
-  insertBefore(
+  readonly appendChild: (child: SafeElement | SafeTextNode) => void;
+  readonly insertBefore: (
     newChild: SafeElement | SafeTextNode,
     reference: SafeElement | SafeTextNode,
-  ): void;
-  removeChild(child: SafeElement | SafeTextNode): void;
-  replaceChild(
+  ) => void;
+  readonly removeChild: (child: SafeElement | SafeTextNode) => void;
+  readonly replaceChild: (
     newChild: SafeElement | SafeTextNode,
     oldChild: SafeElement | SafeTextNode,
-  ): void;
+  ) => void;
   /** Irreversibly dispose every owned wrapper/resource. Idempotent. */
-  dispose(): void;
+  readonly dispose: () => void;
 
-  createDiv(): SafeElement;
-  createSpan(): SafeElement;
-  createSection(): SafeElement;
-  createArticle(): SafeElement;
-  createNav(): SafeElement;
-  createHeader(): SafeElement;
-  createFooter(): SafeElement;
-  createMain(): SafeElement;
-  createAside(): SafeElement;
-  createFigure(): SafeElement;
-  createFigcaption(): SafeElement;
+  readonly createDiv: () => SafeContainerElement;
+  readonly createSpan: () => SafeContainerElement;
+  readonly createSection: () => SafeContainerElement;
+  readonly createArticle: () => SafeContainerElement;
+  readonly createNav: () => SafeContainerElement;
+  readonly createHeader: () => SafeContainerElement;
+  readonly createFooter: () => SafeContainerElement;
+  readonly createMain: () => SafeContainerElement;
+  readonly createAside: () => SafeContainerElement;
+  readonly createFigure: () => SafeContainerElement;
+  readonly createFigcaption: () => SafeContainerElement;
 
-  createText(): SafeElement;
-  createHeading(level: HeadingLevel): SafeElement;
-  createFormatting(format: FormattingTag): SafeElement;
+  readonly createText: () => SafeContainerElement;
+  readonly createHeading: (level: HeadingLevel) => SafeContainerElement;
+  readonly createFormatting: (format: FormattingTag) => SafeContainerElement;
 
-  createBlockquote(): SafeElement;
-  createPre(): SafeElement;
+  readonly createBlockquote: () => SafeContainerElement;
+  readonly createPre: () => SafeContainerElement;
 
-  createList(type: ListType): SafeListElement | SafeDescriptionListElement;
-  createListItem(): SafeElement;
-  createTerm(): SafeElement;
-  createDescription(): SafeElement;
+  readonly createList: CreateList;
+  readonly createListItem: () => SafeContainerElement;
+  readonly createTerm: () => SafeContainerElement;
+  readonly createDescription: () => SafeContainerElement;
 
-  createTable(): SafeElement;
-  createThead(): SafeElement;
-  createTbody(): SafeElement;
-  createTfoot(): SafeElement;
-  createTr(): SafeElement;
-  createTh(): SafeTableCellElement;
-  createTd(): SafeTableCellElement;
-  createCaption(): SafeElement;
-  createColgroup(): SafeElement;
-  createCol(): SafeElement;
+  readonly createTable: () => SafeContainerElement;
+  readonly createThead: () => SafeContainerElement;
+  readonly createTbody: () => SafeContainerElement;
+  readonly createTfoot: () => SafeContainerElement;
+  readonly createTr: () => SafeContainerElement;
+  readonly createTh: () => SafeTableCellElement;
+  readonly createTd: () => SafeTableCellElement;
+  readonly createCaption: () => SafeContainerElement;
+  readonly createColgroup: () => SafeContainerElement;
+  readonly createCol: () => SafeVoidElement;
 
-  createButton(): SafeButtonElement;
-  createInput(): SafeInputElement;
-  createSelect(): SafeSelectElement;
-  createOption(): SafeOptionElement;
-  createOptgroup(): SafeElement;
-  createTextarea(): SafeTextareaElement;
-  createLabel(): SafeLabelElement;
-  createFieldset(): SafeFieldsetElement;
-  createLegend(): SafeElement;
+  readonly createButton: () => SafeButtonElement;
+  readonly createInput: () => SafeInputElement;
+  readonly createSelect: () => SafeSelectElement;
+  readonly createOption: () => SafeOptionElement;
+  readonly createOptgroup: () => SafeContainerElement;
+  readonly createTextarea: () => SafeTextareaElement;
+  readonly createLabel: () => SafeLabelElement;
+  readonly createFieldset: () => SafeFieldsetElement;
+  readonly createLegend: () => SafeContainerElement;
 
-  createImage(): SafeImageElement;
-  createVideo(): SafeVideoElement;
-  createAudio(): SafeAudioElement;
-  createSource(): SafeSourceElement;
-  createTrack(): SafeElement;
-  createPicture(): SafeElement;
-  createCanvas(): SafeCanvasElement;
+  readonly createImage: () => SafeImageElement;
+  readonly createVideo: () => SafeVideoElement;
+  readonly createAudio: () => SafeAudioElement;
+  readonly createSource: () => SafeSourceElement;
+  readonly createTrack: () => SafeVoidElement;
+  readonly createPicture: () => SafeContainerElement;
+  readonly createCanvas: () => SafeCanvasElement;
 
-  createAnchor(): SafeAnchorElement;
-  createDetails(): SafeDetailsElement;
-  createSummary(): SafeElement;
-  createDialog(): SafeDialogElement;
-  createHr(): SafeElement;
-  createBr(): SafeElement;
-  createWbr(): SafeElement;
-  createProgress(): SafeProgressElement;
-  createMeter(): SafeMeterElement;
-  createOutput(): SafeElement;
-  createTime(): SafeElement;
-  createData(): SafeElement;
-  createRuby(): SafeElement;
-  createRt(): SafeElement;
-  createRp(): SafeElement;
+  readonly createAnchor: () => SafeAnchorElement;
+  readonly createDetails: () => SafeDetailsElement;
+  readonly createSummary: () => SafeContainerElement;
+  readonly createDialog: () => SafeDialogElement;
+  readonly createHr: () => SafeVoidElement;
+  readonly createBr: () => SafeVoidElement;
+  readonly createWbr: () => SafeVoidElement;
+  readonly createProgress: () => SafeProgressElement;
+  readonly createMeter: () => SafeMeterElement;
+  readonly createOutput: () => SafeContainerElement;
+  readonly createTime: () => SafeContainerElement;
+  readonly createData: () => SafeContainerElement;
+  readonly createRuby: () => SafeContainerElement;
+  readonly createRt: () => SafeContainerElement;
+  readonly createRp: () => SafeContainerElement;
 
-  createRawText(): SafeTextNode;
+  readonly createRawText: () => SafeTextNode;
 
-  getElement(id: string): SafeElement | null;
+  readonly getElement: GetElement;
 }

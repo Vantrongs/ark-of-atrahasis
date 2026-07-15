@@ -4,8 +4,14 @@ import type {
   ListType,
   SafeDocument,
   SafeDocumentOptions,
+  SafeContainerElement,
+  SafeDescriptionListElement,
   SafeElement,
+  SafeElementByKind,
+  SafeListElement,
   SafeTextNode,
+  SafeVoidElement,
+  SpecializedElementKind,
 } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
 import { createDocumentContext } from "./context.ts";
@@ -15,10 +21,10 @@ import {
   createSafeAudioElement,
   createSafeButtonElement,
   createSafeCanvasElement,
+  createSafeContainerElement,
   createSafeDescriptionListElement,
   createSafeDetailsElement,
   createSafeDialogElement,
-  createSafeElement,
   createSafeFieldsetElement,
   createSafeImageElement,
   createSafeInputElement,
@@ -32,16 +38,20 @@ import {
   createSafeTableCellElement,
   createSafeTextareaElement,
   createSafeVideoElement,
+  createSafeVoidElement,
 } from "./element.ts";
 import { createSafeTextNode } from "./text.ts";
 import { requireExactKeyword, requireIntegerInRange, requireString } from "./attribute-contract.ts";
-import { FORMATTING_TAGS, LIST_TYPES } from "./vocabularies.ts";
+import { FORMATTING_TAGS, LIST_TYPES, SPECIALIZED_ELEMENT_KINDS } from "./vocabularies.ts";
 
 export { isSafeDOMError } from "./errors.ts";
 export type { SafeDOMError, SafeDOMErrorCode } from "./errors.ts";
 export type {
   SafeDocument,
   SafeElement,
+  SafeContainerElement,
+  SafeVoidElement,
+  SafeElementByKind,
   SafeTextNode,
   SafeEvent,
   SafeEventKind,
@@ -77,6 +87,8 @@ export type {
   SafeMeterElement,
   SafeListElement,
   SafeDescriptionListElement,
+  CreateList,
+  GetElement,
   EventHandler,
   EventCleanup,
   SafeDocumentOptions,
@@ -148,8 +160,12 @@ export {
   type CSSNetworkRiskDecision,
 } from "./validation.ts";
 
-function simple(context: DocumentContext, tag: string): SafeElement {
-  return createSafeElement(context, context.createElement(tag));
+function container(context: DocumentContext, tag: string): SafeContainerElement {
+  return createSafeContainerElement(context, context.createElement(tag));
+}
+
+function voidElement(context: DocumentContext, tag: string): SafeVoidElement {
+  return createSafeVoidElement(context, context.createElement(tag));
 }
 
 /**
@@ -163,6 +179,36 @@ export function createSafeDocument(
   options: SafeDocumentOptions,
 ): SafeDocument {
   const context = createDocumentContext(root, options);
+
+  function createList(type: "unordered" | "ordered"): SafeListElement;
+  function createList(type: "description"): SafeDescriptionListElement;
+  function createList(type: ListType): SafeListElement | SafeDescriptionListElement;
+  function createList(type: ListType): SafeListElement | SafeDescriptionListElement {
+    const primitiveType = requireExactKeyword(type, LIST_TYPES, "SafeDocument.createList.type");
+    if (primitiveType === "unordered") {
+      return createSafeListElement(context, context.createElement("ul"));
+    }
+    if (primitiveType === "ordered") {
+      return createSafeListElement(context, context.createElement("ol"));
+    }
+    return createSafeDescriptionListElement(context, context.createElement("dl"));
+  }
+
+  function getElement(id: string): SafeElement | null;
+  function getElement<Kind extends SpecializedElementKind>(
+    id: string,
+    kind: Kind,
+  ): SafeElementByKind[Kind] | null;
+  function getElement(id: string, ...kindArgument: [] | [kind: unknown]): SafeElement | null {
+    const primitiveId = requireString(id, "SafeDocument.getElement.id");
+    if (kindArgument.length === 0) return context.lookupLocalId(primitiveId);
+    const primitiveKind = requireExactKeyword(
+      kindArgument[0],
+      SPECIALIZED_ELEMENT_KINDS,
+      "SafeDocument.getElement.kind",
+    );
+    return context.lookupLocalId(primitiveId, primitiveKind);
+  }
 
   const document: SafeDocument = {
     appendChild(child): void {
@@ -205,54 +251,46 @@ export function createSafeDocument(
     },
     dispose(): void { context.disposeDocument(); },
 
-    createDiv(): SafeElement { return simple(context, "div"); },
-    createSpan(): SafeElement { return simple(context, "span"); },
-    createSection(): SafeElement { return simple(context, "section"); },
-    createArticle(): SafeElement { return simple(context, "article"); },
-    createNav(): SafeElement { return simple(context, "nav"); },
-    createHeader(): SafeElement { return simple(context, "header"); },
-    createFooter(): SafeElement { return simple(context, "footer"); },
-    createMain(): SafeElement { return simple(context, "main"); },
-    createAside(): SafeElement { return simple(context, "aside"); },
-    createFigure(): SafeElement { return simple(context, "figure"); },
-    createFigcaption(): SafeElement { return simple(context, "figcaption"); },
+    createDiv(): SafeContainerElement { return container(context, "div"); },
+    createSpan(): SafeContainerElement { return container(context, "span"); },
+    createSection(): SafeContainerElement { return container(context, "section"); },
+    createArticle(): SafeContainerElement { return container(context, "article"); },
+    createNav(): SafeContainerElement { return container(context, "nav"); },
+    createHeader(): SafeContainerElement { return container(context, "header"); },
+    createFooter(): SafeContainerElement { return container(context, "footer"); },
+    createMain(): SafeContainerElement { return container(context, "main"); },
+    createAside(): SafeContainerElement { return container(context, "aside"); },
+    createFigure(): SafeContainerElement { return container(context, "figure"); },
+    createFigcaption(): SafeContainerElement { return container(context, "figcaption"); },
 
-    createText(): SafeElement { return simple(context, "p"); },
-    createHeading(level: HeadingLevel): SafeElement {
+    createText(): SafeContainerElement { return container(context, "p"); },
+    createHeading(level: HeadingLevel): SafeContainerElement {
       const numericLevel = requireIntegerInRange(level, 1, 6, "SafeDocument.createHeading.level");
-      return simple(context, `h${numericLevel}`);
+      return container(context, `h${numericLevel}`);
     },
-    createFormatting(format: FormattingTag): SafeElement {
+    createFormatting(format: FormattingTag): SafeContainerElement {
       const primitiveFormat = requireExactKeyword(format, FORMATTING_TAGS, "SafeDocument.createFormatting.format");
-      return simple(context, primitiveFormat);
+      return container(context, primitiveFormat);
     },
 
-    createBlockquote(): SafeElement { return simple(context, "blockquote"); },
-    createPre(): SafeElement { return simple(context, "pre"); },
+    createBlockquote(): SafeContainerElement { return container(context, "blockquote"); },
+    createPre(): SafeContainerElement { return container(context, "pre"); },
 
-    createList(type: ListType) {
-      const primitiveType = requireExactKeyword(type, LIST_TYPES, "SafeDocument.createList.type");
-      if (primitiveType === "unordered") return createSafeListElement(context, context.createElement("ul"));
-      if (primitiveType === "ordered") return createSafeListElement(context, context.createElement("ol"));
-      if (primitiveType === "description") {
-        return createSafeDescriptionListElement(context, context.createElement("dl"));
-      }
-      return primitiveType;
-    },
-    createListItem(): SafeElement { return simple(context, "li"); },
-    createTerm(): SafeElement { return simple(context, "dt"); },
-    createDescription(): SafeElement { return simple(context, "dd"); },
+    createList,
+    createListItem(): SafeContainerElement { return container(context, "li"); },
+    createTerm(): SafeContainerElement { return container(context, "dt"); },
+    createDescription(): SafeContainerElement { return container(context, "dd"); },
 
-    createTable(): SafeElement { return simple(context, "table"); },
-    createThead(): SafeElement { return simple(context, "thead"); },
-    createTbody(): SafeElement { return simple(context, "tbody"); },
-    createTfoot(): SafeElement { return simple(context, "tfoot"); },
-    createTr(): SafeElement { return simple(context, "tr"); },
-    createTh() { return createSafeTableCellElement(context, context.createElement("th")); },
-    createTd() { return createSafeTableCellElement(context, context.createElement("td")); },
-    createCaption(): SafeElement { return simple(context, "caption"); },
-    createColgroup(): SafeElement { return simple(context, "colgroup"); },
-    createCol(): SafeElement { return simple(context, "col"); },
+    createTable(): SafeContainerElement { return container(context, "table"); },
+    createThead(): SafeContainerElement { return container(context, "thead"); },
+    createTbody(): SafeContainerElement { return container(context, "tbody"); },
+    createTfoot(): SafeContainerElement { return container(context, "tfoot"); },
+    createTr(): SafeContainerElement { return container(context, "tr"); },
+    createTh() { return createSafeTableCellElement(context, context.createElement("th"), "th"); },
+    createTd() { return createSafeTableCellElement(context, context.createElement("td"), "td"); },
+    createCaption(): SafeContainerElement { return container(context, "caption"); },
+    createColgroup(): SafeContainerElement { return container(context, "colgroup"); },
+    createCol(): SafeVoidElement { return voidElement(context, "col"); },
 
     createButton() {
       const element = context.createElement("button");
@@ -266,14 +304,14 @@ export function createSafeDocument(
       return createSafeSelectElement(context, context.createElement("select"), true);
     },
     createOption() { return createSafeOptionElement(context, context.createElement("option")); },
-    createOptgroup(): SafeElement { return simple(context, "optgroup"); },
+    createOptgroup(): SafeContainerElement { return container(context, "optgroup"); },
     createTextarea() {
       const element = context.createElement("textarea");
       return createSafeTextareaElement(context, element, true);
     },
     createLabel() { return createSafeLabelElement(context, context.createElement("label")); },
     createFieldset() { return createSafeFieldsetElement(context, context.createElement("fieldset")); },
-    createLegend(): SafeElement { return simple(context, "legend"); },
+    createLegend(): SafeContainerElement { return container(context, "legend"); },
 
     createImage() {
       return createSafeImageElement(context, context.createElement("img"));
@@ -287,36 +325,33 @@ export function createSafeDocument(
     createSource() {
       return createSafeSourceElement(context, context.createElement("source"));
     },
-    createTrack(): SafeElement { return simple(context, "track"); },
-    createPicture(): SafeElement { return simple(context, "picture"); },
+    createTrack(): SafeVoidElement { return voidElement(context, "track"); },
+    createPicture(): SafeContainerElement { return container(context, "picture"); },
     createCanvas() { return createSafeCanvasElement(context, context.createElement("canvas")); },
 
     createAnchor() {
       return createSafeAnchorElement(context, context.createElement("a"));
     },
     createDetails() { return createSafeDetailsElement(context, context.createElement("details")); },
-    createSummary(): SafeElement { return simple(context, "summary"); },
+    createSummary(): SafeContainerElement { return container(context, "summary"); },
     createDialog() { return createSafeDialogElement(context, context.createElement("dialog")); },
-    createHr(): SafeElement { return simple(context, "hr"); },
-    createBr(): SafeElement { return simple(context, "br"); },
-    createWbr(): SafeElement { return simple(context, "wbr"); },
+    createHr(): SafeVoidElement { return voidElement(context, "hr"); },
+    createBr(): SafeVoidElement { return voidElement(context, "br"); },
+    createWbr(): SafeVoidElement { return voidElement(context, "wbr"); },
     createProgress() { return createSafeProgressElement(context, context.createElement("progress")); },
     createMeter() { return createSafeMeterElement(context, context.createElement("meter")); },
-    createOutput(): SafeElement { return simple(context, "output"); },
-    createTime(): SafeElement { return simple(context, "time"); },
-    createData(): SafeElement { return simple(context, "data"); },
-    createRuby(): SafeElement { return simple(context, "ruby"); },
-    createRt(): SafeElement { return simple(context, "rt"); },
-    createRp(): SafeElement { return simple(context, "rp"); },
+    createOutput(): SafeContainerElement { return container(context, "output"); },
+    createTime(): SafeContainerElement { return container(context, "time"); },
+    createData(): SafeContainerElement { return container(context, "data"); },
+    createRuby(): SafeContainerElement { return container(context, "ruby"); },
+    createRt(): SafeContainerElement { return container(context, "rt"); },
+    createRp(): SafeContainerElement { return container(context, "rp"); },
 
     createRawText(): SafeTextNode {
       return createSafeTextNode(context, context.createTextNode(""));
     },
 
-    getElement(id: string): SafeElement | null {
-      const primitiveId = requireString(id, "SafeDocument.getElement.id");
-      return context.lookupLocalId(primitiveId);
-    },
+    getElement,
   };
 
   try {
