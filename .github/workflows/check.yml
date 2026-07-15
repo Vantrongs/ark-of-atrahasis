@@ -30,16 +30,20 @@ jobs:
           cache: npm
           cache-dependency-path: npm-shrinkwrap.json
 
-      - name: Use the pinned npm version
-        run: npm install --global npm@11.18.0 --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned npm CLI without replacing the runner npm
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-cli"
+          npm install --prefix "$RUNNER_TEMP/npm-cli" npm@11.18.0 \
+            --ignore-scripts --no-audit --no-fund --no-package-lock
+          echo "NPM_CLI=$RUNNER_TEMP/npm-cli/node_modules/npm/bin/npm-cli.js" >> "$GITHUB_ENV"
 
       - name: Verify toolchain versions
         run: |
           test "$(node --version)" = "v22.22.2"
-          test "$(npm --version)" = "11.18.0"
+          test "$(node "$NPM_CLI" --version)" = "11.18.0"
 
       - name: Install frozen dependencies
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund
 
       - name: Run the complete gate
-        run: npm run check
+        run: node "$NPM_CLI" run check
