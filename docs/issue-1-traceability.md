@@ -2,11 +2,17 @@
 
 This document maps the live umbrella security-hardening
 [issue #1](https://github.com/Vantrongs/ark-of-atrahasis/issues/1) to source,
-tests, CI, and release-owner evidence at integration commit
-`cc8df22fcb0dd2cc0613e483f6e5fb4f69edf60a`. A criterion is marked satisfied
-only where a committed test or artifact check directly exercises the claim.
-Repository-complete release machinery is kept separate from external owner
-configuration and from an actual tag/publication.
+tests, CI, and release-owner evidence. The audited integration base for this
+evidence pass is `f5097879cf21c1ee53d9a354ee4bcc4180ae8974`; that is a historical
+base, not a claim that the commit containing this document has the same SHA. A
+criterion is marked satisfied only where a committed test or artifact check
+directly exercises the claim. Repository-complete release machinery is kept
+separate from external owner configuration and from an actual tag/publication.
+
+Exact checks for a later code or documentation commit are per-commit CI
+evidence. The final live SHA, check-run link, counts, and artifact digest belong
+in issue/PR status after CI runs for that immutable commit; embedding them here
+would make the next documentation commit stale by construction.
 
 ## Exact public boundary
 
@@ -128,7 +134,7 @@ Same-thread SES denial of service remains an explicit non-goal.
 | 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. `test/types/{positive,negative}.ts` and `test/element-types-runtime.test.ts` align declarations with runtime; package tests compile fixtures with TypeScript 5.0.4 and 7.0.2. | Source/property-model typecheck itself runs TypeScript 6.0.3 and 7.0.2; the minimum compiler check is on packed declarations. |
 | 11 | **Satisfied with platform-specific termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven limits; property/lifecycle tests exercise exact 0–8 limits, release, shrinking, and replay. Browser Worker tests prove scheduled Worker termination in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser preemption claim; bundled Chromium failed the tested unyielding variants. `operations` and `requestAttempts` are cumulative rather than released. |
 | 12 | **Partially satisfied** | `test/browser/boundary.spec.mjs`, `test/browser/ses.spec.mjs`, and `test/browser/worker-termination.spec.mjs` pass 8 cases per engine under Playwright 1.61.1 and SES 2.2.0. | The three-engine suite is a committed representative boundary corpus, not a per-engine repetition of every Node/jsdom property, numeric, lifecycle-model, type, and packaging invariant in criteria 1–11. The broad literal wording “these invariants pass” is not fully proven for every invariant in every engine. |
-| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, frozen-installs, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, rebuilds packed `dist` from included source/lock, and emits the tested tarball/SBOM/checksums. `test/release.test.mjs` and `.github/workflows/release.yml` verify exact artifact handoff to trusted publish and GitHub release. | No `0.4.0` tag/publication exists. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
+| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, frozen-installs, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, rebuilds packed `dist` from included source/lock, and emits the tested tarball/SBOM/checksums. `scripts/release-recovery.mjs`, `test/release.test.mjs`, and `.github/workflows/release.yml` execute first-run, interrupted upload (including an exact empty `starter`), exact-rerun, npm provenance identity, conflict, and no-duplicate-publication behavior while preserving the exact artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
 
 Because criteria 12 and 13 retain the gaps above, this document does not claim
 issue #1 is closed.
@@ -155,17 +161,18 @@ issue #1 is closed.
 
 ## PR chain and live CI
 
-The live umbrella [PR #7](https://github.com/Vantrongs/ark-of-atrahasis/pull/7)
-remains an open draft from `agent/issue-1-integration` to `main`; its prose is
-older than the current head and is not acceptance evidence by itself.
+At the 2026-07-15 evidence observation, umbrella
+[PR #7](https://github.com/Vantrongs/ark-of-atrahasis/pull/7) was an open draft
+from `agent/issue-1-integration` to `main`. That state is historical, and PR prose
+or state is not acceptance evidence by itself.
 
 Initial draft stacks [#2](https://github.com/Vantrongs/ark-of-atrahasis/pull/2),
 [#3](https://github.com/Vantrongs/ark-of-atrahasis/pull/3),
 [#4](https://github.com/Vantrongs/ark-of-atrahasis/pull/4),
 [#5](https://github.com/Vantrongs/ark-of-atrahasis/pull/5), and
-[#6](https://github.com/Vantrongs/ark-of-atrahasis/pull/6) remain open drafts;
-their live PR state is not evidence of merge. Selected work was integrated into
-PR #7 and then completed by these merged PRs to
+[#6](https://github.com/Vantrongs/ark-of-atrahasis/pull/6) were also open drafts
+at that observation; their PR state is not evidence of merge. Selected work was
+integrated into PR #7 and then completed by these merged PRs to
 `agent/issue-1-integration`:
 
 - [#8](https://github.com/Vantrongs/ark-of-atrahasis/pull/8) protected release
@@ -185,15 +192,18 @@ PR #7 and then completed by these merged PRs to
 - [#15](https://github.com/Vantrongs/ark-of-atrahasis/pull/15) public type/runtime
   completion (`0361972`); and
 - [#16](https://github.com/Vantrongs/ark-of-atrahasis/pull/16) property/model and
-  hard Worker coverage, merged as the current head `cc8df22`.
+  hard Worker coverage, merged at `cc8df22`; and
+- [#17](https://github.com/Vantrongs/ark-of-atrahasis/pull/17) final evidence
+  documentation, merged into the audited integration base `f509787`.
 
-The current integration-head [check job](https://github.com/Vantrongs/ark-of-atrahasis/actions/runs/29410388350/job/87335805917)
+A historical [check job](https://github.com/Vantrongs/ark-of-atrahasis/actions/runs/29410388350/job/87335805917)
 completed successfully on 2026-07-15 for exact SHA `cc8df22`: Node 22.22.2,
 npm 11.18.0, Playwright 1.61.1, 55 linted files, source/property typecheck under
 TypeScript 6.0.3 and 7.0.2, 545 Vitest tests, 4 built API tests, 7 release tests,
 24 browser tests (8 per engine), 2 Node SES tests, zero audit findings, and a
 verified pristine `ark-of-atrahasis-0.4.0.tgz` with SHA-256
 `b8930b3c17af7bbe7f0c26fb89f3a07a3b13108a5f43cb1eae6388dfae8fe078`.
+Those counts and that digest describe only `cc8df22`, not later commits.
 
 ## External owner and legal status
 

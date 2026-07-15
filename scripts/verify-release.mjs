@@ -45,13 +45,16 @@ export function verifyAnnotatedTagAtHead(tag, cwd = repositoryRoot) {
     cwd,
     encoding: "utf8",
   }).trim();
-  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  const head = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd,
+    encoding: "utf8",
+  }).trim();
   if (taggedCommit !== head) {
     throw new Error(`release tag ${tag} does not resolve to checked-out HEAD`);
   }
 }
 
-export async function verifyVersionCanPublish(name, version, fetchImplementation = fetch) {
+export async function inspectVersionForRelease(name, version, fetchImplementation = fetch) {
   const encodedName = encodeURIComponent(name).replaceAll("%2F", "%2f");
   const encodedVersion = encodeURIComponent(version);
   const response = await fetchImplementation(
@@ -63,20 +66,27 @@ export async function verifyVersionCanPublish(name, version, fetchImplementation
   );
 
   if (response.status === 200) {
-    throw new Error(`${name}@${version} is already present in the npm registry`);
+    const metadata = await response.json();
+    if (
+      metadata?.name !== name ||
+      metadata?.version !== version ||
+      !/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(metadata?.dist?.integrity ?? "") ||
+      !/^[0-9a-f]{40}$/u.test(metadata?.dist?.shasum ?? "") ||
+      typeof metadata?.dist?.tarball !== "string"
+    ) {
+      throw new Error(`${name}@${version} has invalid npm registry metadata`);
+    }
+    return "published";
   }
   if (response.status !== 404) {
     throw new Error(`npm registry returned unexpected HTTP ${response.status}`);
   }
 
-  const packageResponse = await fetchImplementation(
-    `https://registry.npmjs.org/${encodedName}`,
-    {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
-  if (packageResponse.status === 404) return;
+  const packageResponse = await fetchImplementation(`https://registry.npmjs.org/${encodedName}`, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (packageResponse.status === 404) return "unpublished";
   if (packageResponse.status !== 200) {
     throw new Error(`npm registry returned unexpected HTTP ${packageResponse.status}`);
   }
@@ -88,6 +98,7 @@ export async function verifyVersionCanPublish(name, version, fetchImplementation
   if (compareStableVersions(version, latest) <= 0) {
     throw new Error(`${name}@${version} would not advance the current latest version ${latest}`);
   }
+  return "unpublished";
 }
 
 function compareStableVersions(left, right) {
@@ -109,8 +120,11 @@ async function main() {
 
   verifyReleaseMetadata({ changelog, manifest, tag });
   verifyAnnotatedTagAtHead(tag);
-  await verifyVersionCanPublish(manifest.name, manifest.version);
-  console.log(`Verified unpublished release ${manifest.name}@${manifest.version} at ${tag}`);
+  const registryState = await inspectVersionForRelease(manifest.name, manifest.version);
+  console.log(
+    `Verified release candidate ${manifest.name}@${manifest.version} at ${tag}; ` +
+      `registry state is ${registryState}`,
+  );
 }
 
 function joinRoot(path) {

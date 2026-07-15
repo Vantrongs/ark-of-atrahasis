@@ -2,15 +2,16 @@
 
 `ark-of-atrahasis` is an ESM-only, capability-oriented DOM wrapper for
 host-controlled Secure ECMAScript (SES) integrations. The repository is at the
-unpublished `0.4.0` release candidate: it requires a host-created `ShadowRoot`
+`0.4.0` release-candidate source state: it requires a host-created `ShadowRoot`
 and a host-supplied SES `harden`, exposes fixed wrapper operations rather than
 raw DOM nodes, denies URL and inline-style authority unless the host grants it,
-and deterministically revokes owned wrappers and tracked effects.
+and deterministically revokes owned wrappers and tracked effects. Repository
+documentation does not assert the candidate's current publication status.
 
-The npm `latest` tag is still `0.3.1` as of 2026-07-15. That published version
-has the retired string-ID/light-DOM API and does **not** implement the strict
-boundary documented here. Do not treat `npm install ark-of-atrahasis` as an
-installation of this release candidate until the protected release completes.
+A live observation on 2026-07-15 found npm `latest` at `0.3.1`. That version has
+the retired string-ID/light-DOM API and does **not** implement the strict
+boundary documented here. Recheck npm and the protected release evidence before
+treating `npm install ark-of-atrahasis` as this release candidate.
 
 ## Public capability boundary
 

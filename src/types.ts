@@ -196,7 +196,7 @@ export interface SafeDocumentQuotas {
   readonly textBytes: number;
   /** Aggregate live UTF-8 bytes in serialized attribute names and values. */
   readonly attributeBytes: number;
-  /** Aggregate live UTF-8 bytes in inline declarations and stylesheet text. */
+  /** Aggregate live UTF-8 bytes in inline style declarations. */
   readonly styleBytes: number;
   /** Aggregate live URL-bearing request/navigation attribute slots. */
   readonly requests: number;
