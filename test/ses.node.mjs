@@ -37,16 +37,20 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   const firstDocument = createSafeDocument(firstRoot, {
     harden,
     stylePolicy: { allowedProperties: ["color"] },
-    formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    formControlPolicy: { allowNonCredentialFormElements: true },
   });
   const secondDocument = createSafeDocument(secondRoot, {
     harden,
     stylePolicy: { allowedProperties: ["color"] },
+    formControlPolicy: { allowNonCredentialFormElements: true },
   });
   const firstGuest = new Compartment({ safeDocument: firstDocument });
   const secondGuest = new Compartment({ safeDocument: secondDocument });
 
-  const strictFormError = secondGuest.evaluate(`(() => {
+  const { firstRoot: strictRoot } = fixture();
+  const strictDocument = createSafeDocument(strictRoot, { harden });
+  const strictGuest = new Compartment({ safeDocument: strictDocument });
+  const strictFormError = strictGuest.evaluate(`(() => {
     try {
       safeDocument.createInput();
       return null;
@@ -58,6 +62,7 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   assert.equal(Object.isFrozen(strictFormError), true);
   assert.equal(strictFormError.code, "FORM_CONTROL_POLICY_REQUIRED");
   assert.equal(strictFormError.operation, "SafeDocument.createInput.policy");
+  strictDocument.dispose();
 
   assert.deepEqual(
     firstGuest.evaluate("[typeof createSafeDocument, typeof root, typeof document, typeof window]"),
@@ -204,7 +209,10 @@ test("real SES completes capabilities for two mutually distrusting compartments"
 
 test("primitive-only errors and URL decisions are pass-by-copy data", () => {
   const { firstRoot } = fixture();
-  const safeDocument = createSafeDocument(firstRoot, { harden });
+  const safeDocument = createSafeDocument(firstRoot, {
+    harden,
+    formControlPolicy: { allowNonCredentialFormElements: true },
+  });
   const decision = safeDocument.createImage().setSrc("https://denied.example.test/pixel.png");
   let error;
   try {

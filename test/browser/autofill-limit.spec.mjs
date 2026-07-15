@@ -48,7 +48,7 @@ test("Chromium address Autofill remains guest-readable only behind the explicit 
     document.body.append(optInMount);
     const optInRoot = optInMount.attachShadow({ mode: "open" });
     const optInDocument = globalThis.arkPublicAPI.createSafeDocument(optInRoot, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const givenName = optInDocument.createInput();
     const email = optInDocument.createInput();

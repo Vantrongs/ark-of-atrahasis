@@ -3,7 +3,7 @@
 This document maps the live umbrella security-hardening
 [issue #1](https://github.com/Vantrongs/ark-of-atrahasis/issues/1) to source,
 tests, CI, and release-owner evidence. The audited integration base for this
-evidence pass is `c3169865343a94d5a9807eca8937754612f30ebc`; that is a historical
+evidence pass is `2360347962a2befca8ab0627ab2ee02dd04a74c2`; that is a historical
 base, not a claim that the commit containing this document has the same SHA. A
 criterion is marked satisfied only where a committed test or artifact check
 directly exercises the claim. Repository-complete release machinery is kept
@@ -37,7 +37,9 @@ justifies adding specialized mutable authority or a breaking removal.
 
 The other runtime exports are frozen quota/rate defaults and vocabularies, pure policy
 compilers and validators, and the `isSafeDOMError` record guard; they carry no
-DOM capability. `src/types.ts`, `src/vocabularies.ts`, and the emitted
+DOM capability. `scripts/runtime-export-contract.mjs` is the exact independent
+sorted value-namespace allowlist consumed by both the built API and installed
+tarball gates. `src/types.ts`, `src/vocabularies.ts`, and the emitted
 declarations define the complete type surface. `test/types/positive.ts` and
 `test/types/negative.ts` assert literal list overloads, specialized canonical
 lookup, readonly snapshots/vocabularies, and container-versus-void restrictions
@@ -71,13 +73,15 @@ with TypeScript 5.0.4 and 7.0.2 during the package gate.
   records, captured owner-realm clocks, clock rollback/failure, and generated
   fixed-window traces.
 
-`detach()` is reversible. Disposal is irreversible and idempotent: it aborts
-wrapper-owned listeners, removes tracked request/style/identifier effects,
-detaches owned nodes still in the mount, releases live accounting after cleanup,
-and blocks all later wrapper operations. Disposal does not erase or mutate a raw
-node that the trusted host already reparented outside the mount; placement
-auditing instead revokes guest authority and clears wrapper-tracked effects.
-Ordinary safe attributes, text, and IDL state are not all tracked resources.
+`detach()` is reversible. Disposal is irreversible and idempotent. For owned
+placements it aborts wrapper-owned listeners, removes tracked request/style/
+identifier effects, detaches nodes still in the mount, releases live accounting
+after cleanup, and blocks all later wrapper operations. For a raw node that the
+trusted host has already moved outside the mount, placement auditing performs
+logical-only revocation: it aborts listeners and releases registry, namespace,
+and accounting state without writing attributes, style, text, IDL state, URL
+state, or tree placement. An already-issued raw request is host-owned and is not
+canceled.
 
 ### Policy, forms, events, and errors
 
@@ -93,8 +97,11 @@ Ordinary safe attributes, text, and IDL state are not all tracked resources.
   tokens, exclude password/submit/file-like states, and validate
   primitive/vocabulary/state relations before reflected IDL mutation.
   `src/context.ts` parses the exact own-data `formControlPolicy` once; the strict
-  default rejects `input`, `textarea`, and `select` before native node creation,
-  while the explicit non-credential grant retains structural non-form defaults.
+  default rejects the complete public form surface—`button`, `fieldset`, `img`,
+  `input`, `label`, `legend`, `optgroup`, `option`, `output`, `select`, and
+  `textarea`—before native node creation, while the exact
+  `allowNonCredentialFormElements: true` grant retains structural non-form
+  defaults.
 - `src/event-catalog.ts` is the authoritative catalog for all 21 public handler
   methods, native event types, snapshot kinds, and root/target fence placement.
   `src/event.ts` snapshots captured standard getters into frozen discriminated
@@ -143,7 +150,7 @@ is made.
   the authoritative event catalog, every generic/keyboard/mouse/pointer/touch/
   focus/input field, hostile getters, cancellation lifetime/reentrancy,
   normalized errors, URL/style policy with a zero-activity ledger,
-  form/password rejection, cross-owner failure, placement cleanup and terminal
+  form/password rejection, cross-owner failure, external-state preservation and terminal
   state, finite numeric rejection, and exact quota failure/release. Chromium
   and Firefox use full constructed touch records; WebKit's rejected constructors
   select an explicit trusted-touch injection substitute that still checks every
@@ -179,18 +186,18 @@ non-goal.
 | # | Status | Direct source and test evidence | Limits / outstanding authority |
 | ---: | --- | --- | --- |
 | 1 | **Satisfied** | `src/index.ts` accepts only a native `ShadowRoot` and returns mount operations without root/host access; `src/context.ts` claims it once and requires computed paint containment on a host with a principal box. Capability, built-package, containment, and SES tests reject string IDs/uncontained roots and show the guest has no factory/root/document/window endowment. | The trusted host still owns the outer host and must maintain containment and controlled bounds for the capability lifetime; immutability is from the guest boundary. |
-| 2 | **Satisfied** | `DocumentContextImplementation.#auditPlacements()` revokes before each operation and `#clearOwnedResources()` removes tracked effects. `test/lifecycle-placement.test.ts` and `test/browser/boundary.spec.mjs` cover raw reparent, adopt, and detach-to-external cases without later guest mutation of external DOM. | Disposal revokes guest authority and tracked effects; it deliberately does not erase or mutate a host-retained raw node already reparented outside the mount. |
+| 2 | **Satisfied** | `DocumentContextImplementation.#auditPlacements()` runs after operation reservation, and terminal cleanup independently classifies every tracked entry as owned-physical or logical-only before registry removal. `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and `test/browser/boundary.spec.mjs` cover raw reparent, adopt, and detach-to-external cases with exact markup/IDL preservation plus revoked setters and listeners; deterministic regressions also cover style, URL, IDL, and namespace entries already revoked by unproven rollback before the host move. | A host-retained external raw node is not sanitized: its physical DOM and already-issued URL remain host-owned while guest wrappers, listeners, namespace state, and accounting are revoked/released. |
 | 3 | **Satisfied for the documented boundary values** | `src/platform.ts`, `src/event.ts`, and `src/errors.ts` replace platform exceptions and event graphs with frozen primitive records. `test/platform-boundary.test.ts`, `test/event-membrane.test.ts`, `test/completion-boundary.test.ts`, and `test/ses.node.mjs` check no DOM/global/function/native exception escapes and copied nested data has the documented pass style. | A whole `SafeEvent` is a local hardened control record, deliberately not pass-by-copy/eventual-send. |
 | 4 | **Satisfied** | `src/event-catalog.ts` authoritatively maps all 21 public methods to native types, snapshot kinds, and fences; runtime registration and unit/post-lockdown three-engine dispatch tests consume it directly. Captured branded accessors, primitive defaults, deep completion, independent native-event cells, and dispatch-scoped cancellation cover malicious getters, every public field/type, reentrancy, callback throws, and closed controls. | Cancellation is synchronous only by design. WebKit touch construction is replaced by an explicit trusted-injection path, so pre-dispatch malicious touch getters are not claimed there. |
 | 5 | **Satisfied for all public URL sinks** | `src/url-policy.ts` is default-deny and per-sink; element URL setters apply only an allowed canonical string. `test/browser/boundary.spec.mjs` intercepts request/navigation/form activity and observes exactly one explicitly approved image request in the grant case and none for denied sinks/actions. | The host remains responsible for policy selection and defense-in-depth CSP/navigation controls. |
-| 6 | **Satisfied by strict default denial; opt-in limitation is explicit** | `src/context.ts` and `src/index.ts` deny `input`, `textarea`, and `select` factories before native node creation unless the host supplies the exact non-credential form-control grant. Unit, type, built-package, SES, and three-engine browser cases prove stable denial plus unchanged external host submission, FormData, named access, radio grouping, labels, and IDREFs for the opt-in profile. The dedicated Chromium address-Autofill test proves the strict profile has no sink and positively witnesses that an opt-in email can be filled/read without changing external host state. | Same-origin opt-in controls are not autofill/PII confidential. The Chromium address CDP witness is not password-manager proof. Credential UI requires a separately trusted cross-origin iframe/origin or process/RPC boundary plus deployment-browser and credential-agent testing. |
-| 7 | **Satisfied under the documented disposal contract** | `src/registry.ts` enforces canonical owner identity; `src/context.ts` implements idempotent terminal states and effect cleanup. `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and browser SES tests cover cross-owner failure, cleanup, accounting release, repeated dispose, and stable post-dispose errors. | Disposal removes wrapper-owned capabilities/tracked effects. It does not erase or mutate an externally reparented host node or every ordinary attribute/text/IDL field on it. |
+| 6 | **Satisfied by strict default denial; opt-in limitation is explicit** | `src/context.ts` and `src/index.ts` route all eleven public form-surface factories through one policy seam and deny them after operation reservation but before native node creation unless the host supplies the exact `allowNonCredentialFormElements: true` grant. Unit, type, built-package, SES, and three-engine browser cases prove stable full-inventory denial plus unchanged external host submission, FormData, named access, radio grouping, labels, and IDREFs for the opt-in profile. The dedicated Chromium address-Autofill test proves the strict profile has no sink and positively witnesses that an opt-in email can be filled/read without changing external host state. | Same-origin opt-in controls are not autofill/PII confidential. The Chromium address CDP witness is not password-manager proof. Credential UI requires a separately trusted cross-origin iframe/origin or process/RPC boundary plus deployment-browser and credential-agent testing. |
+| 7 | **Satisfied under the documented disposal contract** | `src/registry.ts` enforces canonical owner identity; `src/context.ts` implements idempotent terminal states, owned physical cleanup, and external logical-only revocation. `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and browser SES tests cover cross-owner failure, exact external-state preservation, listener/setter revocation, accounting release/reacquisition, repeated dispose, and stable post-dispose errors. | Owned disposal removes tracked physical effects. External revocation deliberately preserves every raw DOM field and tree position while removing wrapper authority and logical ownership state. |
 | 8 | **Satisfied** | `src/context.ts` resolves the supplied root's `ownerDocument/defaultView`; `src/platform.ts` captures that realm without ambient `instanceof`, including native host and computed-style access. Platform tests poison ambient constructors, root getters, and computed-style operations while proving owner-realm operation or normalized failure; the browser iframe case covers a second realm. | No claim is made for non-standard DOM implementations outside the checked contracts. |
 | 9 | **Satisfied** | `src/attribute-contract.ts`, `src/input-state-contract.ts`, `src/primitives.ts`, `src/platform.ts`, and `src/errors.ts` enforce primitive, finite/integer/range/relation rules and one stable error-record policy. Numeric/input/platform/property tests cover hostile inputs, atomic failures, media IDL, and native exception replacement. | The stable rejection value is a record, not an `Error` subclass. |
 | 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. Runtime/API/type tests require preferred factory/casing names and exact deprecated same-function aliases, uniformly detached list helpers, reusable descendants after `setText()`, and password rejection; package tests compile declarations with TypeScript 5.0.4 and 7.0.2. | `createStyle` is gone; void/table shapes are corrected. The fixed `track`, `time`, `data`, `output`, `optgroup`, and `col` factories remain deliberately shallow rather than gaining speculative authority or being removed incompatibly. |
-| 11 | **Satisfied with dedicated-Worker termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven lifetime limits. `DEFAULT_SAFE_DOCUMENT_RATES` adds real fixed owner-clock windows for operations and request attempts; unit/property/API/three-engine SES tests exercise exact `N`/`N+1`/reset, hostile configuration/clock failure, generated traces, lifetime separation, and stable errors. Browser Worker tests prove termination of a real unyielding shared-memory loop in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser-page main-thread preemption claim. Lifetime `operations`/`requestAttempts` ceilings remain cumulative while their independent rate windows reset. |
+| 11 | **Satisfied with dedicated-Worker termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven lifetime limits. `DEFAULT_SAFE_DOCUMENT_RATES` adds real fixed owner-clock windows for operations and request attempts; strict policy denials reserve the operation rate/lifetime call before policy evaluation. Unit/property/API/three-engine SES tests exercise denial metering, exact `N`/`N+1`/reset, hostile configuration/clock failure, generated traces, lifetime separation, and stable errors. Browser Worker tests prove termination of a real unyielding shared-memory loop in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser-page main-thread preemption claim. Lifetime `operations`/`requestAttempts` ceilings remain cumulative while their independent rate windows reset. |
 | 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm and delegated-event behavior; the real-Compartment SES matrix dispatches all 21 catalog-derived event types, covers every public event family/field plus rates and browser-relevant criteria 1–12, and the Worker suite proves unyielding-loop termination. The separate Chromium-channel project executes the non-portable CDP address-Autofill witness exactly once. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | Standard Firefox/WebKit/Chromium projects do not run a Chromium-only protocol test. WebKit uses the documented trusted-touch substitute because scripted `Touch` construction is rejected. No portable password-store or same-agent page-main-thread preemption coverage is claimed. |
-| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, executes every literal executable packed README fence in TypeScript 5.0.4/7.0.2 and Chromium, rebuilds packed `dist`, and emits the tested tarball/SBOM/checksums. Release metadata requires empty `[Unreleased]` before the dated target heading; shared `scripts/stable-version.mjs`, recovery tests, and the workflow enforce one stable version contract plus exact interrupted-publication recovery and artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
+| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, builds twice byte-identically, installs the exact tarball offline, rejects any missing or extra root runtime export against `scripts/runtime-export-contract.mjs`, checks declarations, executes every literal executable packed README fence in TypeScript 5.0.4/7.0.2 and Chromium, rebuilds packed `dist`, and emits the tested tarball/SBOM/checksums. Release metadata requires empty `[Unreleased]` before the dated target heading; shared `scripts/stable-version.mjs`, recovery tests, and the workflow enforce one stable version contract plus exact interrupted-publication recovery and artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
 
 The repository strict runtime/type/browser contract in criteria 1–12 is covered
 by committed gates. Criterion 13 still requires external owner configuration,
@@ -212,14 +219,16 @@ release is externally complete.
 - `test/property/lifecycle-model.test.ts` has eight topology/quota/replay tests:
   a 100-run topology profile up to 40 commands, a 150-run exact-quota profile
   with limits 0–8 and up to 24 commands, deterministic command-family traces,
-  and runner/command replay paths.
+  external raw-markup preservation after logical revocation, and runner/command
+  replay paths.
 - `scripts/test-package.mjs` requires Node 22.22.2 and the npm 11.18.0 CLI via
   `npm_execpath`, a clean committed tree, no pre-existing `dist/` in the Git
   archive, exact manifest/lock pins and registry integrity records, relative
   source maps with embedded content, two byte-identical prepack tarballs, an
   offline consumer install, literal minimum/current typecheck and Chromium
-  execution of every executable packed README fence, and a byte-for-byte `dist`
-  rebuild. `scripts/readme-examples.mjs` recognizes CommonMark backtick/tilde,
+  execution of every executable packed README fence, exact installed ESM root
+  namespace comparison with `scripts/runtime-export-contract.mjs`, and a
+  byte-for-byte `dist` rebuild. `scripts/readme-examples.mjs` recognizes CommonMark backtick/tilde,
   length, and indentation forms and structurally rejects unclosed or unsupported
   executable fences instead of maintaining a copied example.
 - `scripts/stable-version.mjs` is the single parser/comparator/advance contract
@@ -277,8 +286,12 @@ integrated into PR #7 and then completed by these merged PRs to
   form-control policy (head `bd41ab0`), merged into this pass's historical base
   at `c316986`; and
 - [#23](https://github.com/Vantrongs/ark-of-atrahasis/pull/23) primary release,
-  compatibility API, event-catalog, and browser evidence gap closure (this PR;
-  its mutable head SHA is intentionally not embedded here).
+  compatibility API, event-catalog, and browser evidence gap closure, merged at
+  `2360347`; and
+- [#24](https://github.com/Vantrongs/ark-of-atrahasis/pull/24) final contract
+  closure for external raw preservation, form-surface policy metering, and the
+  exact runtime namespace (this PR; its mutable head SHA is intentionally not
+  embedded here).
 
 Exact check counts, artifact digests, and links are intentionally not copied
 into this mutable document. They belong to the CI check for the immutable head

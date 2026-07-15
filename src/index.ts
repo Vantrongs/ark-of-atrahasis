@@ -171,6 +171,14 @@ function voidElement(context: DocumentContext, tag: string): SafeVoidElement {
   return createSafeVoidElement(context, context.createElement(tag));
 }
 
+function formContainer(
+  context: DocumentContext,
+  tag: "legend" | "optgroup" | "output",
+  operation: string,
+): SafeContainerElement {
+  return createSafeContainerElement(context, context.createFormElement(tag, operation));
+}
+
 /**
  * Create a DOM capability scoped to one host-created ShadowRoot.
  *
@@ -306,38 +314,60 @@ export function createSafeDocument(
     createCol(): SafeVoidElement { return voidElement(context, "col"); },
 
     createButton() {
-      const element = context.createElement("button");
+      const element = context.createFormElement("button", "SafeDocument.createButton.policy");
       return createSafeButtonElement(context, element, true);
     },
     createInput() {
-      const element = context.createGuestReadableFormControl(
+      const element = context.createFormElement(
         "input",
         "SafeDocument.createInput.policy",
       );
       return createSafeInputElement(context, element, true);
     },
     createSelect() {
-      const element = context.createGuestReadableFormControl(
+      const element = context.createFormElement(
         "select",
         "SafeDocument.createSelect.policy",
       );
       return createSafeSelectElement(context, element, true);
     },
-    createOption() { return createSafeOptionElement(context, context.createElement("option")); },
-    createOptgroup(): SafeContainerElement { return container(context, "optgroup"); },
+    createOption() {
+      return createSafeOptionElement(
+        context,
+        context.createFormElement("option", "SafeDocument.createOption.policy"),
+      );
+    },
+    createOptgroup(): SafeContainerElement {
+      return formContainer(context, "optgroup", "SafeDocument.createOptgroup.policy");
+    },
     createTextarea() {
-      const element = context.createGuestReadableFormControl(
+      const element = context.createFormElement(
         "textarea",
         "SafeDocument.createTextarea.policy",
       );
       return createSafeTextareaElement(context, element, true);
     },
-    createLabel() { return createSafeLabelElement(context, context.createElement("label")); },
-    createFieldset() { return createSafeFieldsetElement(context, context.createElement("fieldset")); },
-    createLegend(): SafeContainerElement { return container(context, "legend"); },
+    createLabel() {
+      return createSafeLabelElement(
+        context,
+        context.createFormElement("label", "SafeDocument.createLabel.policy"),
+      );
+    },
+    createFieldset() {
+      return createSafeFieldsetElement(
+        context,
+        context.createFormElement("fieldset", "SafeDocument.createFieldset.policy"),
+      );
+    },
+    createLegend(): SafeContainerElement {
+      return formContainer(context, "legend", "SafeDocument.createLegend.policy");
+    },
 
     createImage() {
-      return createSafeImageElement(context, context.createElement("img"));
+      return createSafeImageElement(
+        context,
+        context.createFormElement("img", "SafeDocument.createImage.policy"),
+      );
     },
     createVideo() {
       return createSafeVideoElement(context, context.createElement("video"));
@@ -363,7 +393,9 @@ export function createSafeDocument(
     createWbr(): SafeVoidElement { return voidElement(context, "wbr"); },
     createProgress() { return createSafeProgressElement(context, context.createElement("progress")); },
     createMeter() { return createSafeMeterElement(context, context.createElement("meter")); },
-    createOutput(): SafeContainerElement { return container(context, "output"); },
+    createOutput(): SafeContainerElement {
+      return formContainer(context, "output", "SafeDocument.createOutput.policy");
+    },
     createTime(): SafeContainerElement { return container(context, "time"); },
     createData(): SafeContainerElement { return container(context, "data"); },
     createRuby(): SafeContainerElement { return container(context, "ruby"); },

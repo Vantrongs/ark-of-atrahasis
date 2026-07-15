@@ -5,19 +5,21 @@ import "ses";
 // This suite exercises the built package with Node's test runner.
 
 import { JSDOM } from "jsdom";
+import { EXPECTED_RUNTIME_EXPORTS } from "../scripts/runtime-export-contract.mjs";
 
 lockdown();
 
+const api = await import("../dist/index.js");
 const {
   DEFAULT_SAFE_DOCUMENT_RATES,
   createSafeDocument,
-} = await import("../dist/index.js");
+} = api;
 
 const options = Object.freeze({ harden });
 const formControlOptions = Object.freeze({
   harden,
   formControlPolicy: Object.freeze({
-    allowGuestReadableNonCredentialValues: true,
+    allowNonCredentialFormElements: true,
   }),
 });
 
@@ -30,6 +32,10 @@ function createRoot() {
   const root = host.attachShadow({ mode: "closed" });
   return { dom, root };
 }
+
+test("exports exactly the documented sorted runtime namespace", () => {
+  assert.deepEqual(Object.keys(api).sort(), EXPECTED_RUNTIME_EXPORTS);
+});
 
 test("fails closed without a native ShadowRoot capability", () => {
   assert.throws(
@@ -63,6 +69,7 @@ test("exports frozen window-rate defaults and enforces rates separately from lif
   const requestRoot = createRoot().root;
   const requestDocument = createSafeDocument(requestRoot, {
     harden,
+    formControlPolicy: formControlOptions.formControlPolicy,
     quotas: { operations: 10, requestAttempts: 10 },
     rates: {
       operations: { limit: 10, windowMs: 10_000 },
@@ -163,13 +170,21 @@ test("preferred and deprecated casing aliases are identical capabilities", () =>
   }
 });
 
-test("strict default denies guest-readable native values and opt-in still rejects passwords", () => {
+test("strict default denies the complete public form surface and opt-in still rejects passwords", () => {
   const strictFixture = createRoot();
   const strictDocument = createSafeDocument(strictFixture.root, options);
   for (const [factory, operation] of [
+    [() => strictDocument.createButton(), "SafeDocument.createButton.policy"],
     [() => strictDocument.createInput(), "SafeDocument.createInput.policy"],
-    [() => strictDocument.createTextarea(), "SafeDocument.createTextarea.policy"],
     [() => strictDocument.createSelect(), "SafeDocument.createSelect.policy"],
+    [() => strictDocument.createOption(), "SafeDocument.createOption.policy"],
+    [() => strictDocument.createOptgroup(), "SafeDocument.createOptgroup.policy"],
+    [() => strictDocument.createTextarea(), "SafeDocument.createTextarea.policy"],
+    [() => strictDocument.createLabel(), "SafeDocument.createLabel.policy"],
+    [() => strictDocument.createFieldset(), "SafeDocument.createFieldset.policy"],
+    [() => strictDocument.createLegend(), "SafeDocument.createLegend.policy"],
+    [() => strictDocument.createOutput(), "SafeDocument.createOutput.policy"],
+    [() => strictDocument.createImage(), "SafeDocument.createImage.policy"],
   ]) {
     assert.throws(
       factory,
@@ -205,7 +220,7 @@ test("validates heading levels at the runtime boundary", () => {
 
 test("event cleanup removes the registered native listener", () => {
   const { dom, root } = createRoot();
-  const safeDocument = createSafeDocument(root, options);
+  const safeDocument = createSafeDocument(root, formControlOptions);
   const button = safeDocument.createButton();
   safeDocument.appendChild(button);
   let calls = 0;

@@ -40,7 +40,9 @@ an isolated consumer with an empty cache and disabled registry, checks ESM
 import plus declarations on the documented minimum and current TypeScript, and
 rebuilds `dist/` from the source and lockfile included in the tarball. Two
 consecutive prepack builds from the same clean archive and frozen install must
-be byte-identical. Every executable fenced block in the exact packed README is
+be byte-identical. The installed ESM namespace must exactly match the sorted
+allowlist in `scripts/runtime-export-contract.mjs`, with no missing or extra
+root value export. Every executable fenced block in the exact packed README is
 classified across the CommonMark backtick/tilde, length, and indentation forms,
 copied without rewriting into the consumer, checked as JavaScript by both
 supported TypeScript versions, and executed in Chromium against the exact

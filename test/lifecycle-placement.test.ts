@@ -65,7 +65,7 @@ describe("placement enforcement", () => {
     expect(outside.firstElementChild).toBe(raw);
   });
 
-  it("clears every physical namespace effect before releasing a raw-reparented subtree", () => {
+  it("releases logical namespace accounting without changing external namespace bytes", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
       quotas: {
@@ -95,15 +95,15 @@ describe("placement enforcement", () => {
     const outside = document.createElement("section");
     document.body.appendChild(outside);
     outside.appendChild(rawParent);
+    const beforeMarkup = new TextEncoder().encode(rawParent.outerHTML);
 
     expectCode(() => parent.getText(), "PLACEMENT_VIOLATION");
-    for (const [element, names] of [
-      [rawInput, ["id", "name", "aria-controls"]],
-      [rawLabel, ["for"]],
-      [rawCell, ["headers"]],
-    ] as const) {
-      for (const name of names) expect(element.hasAttribute(name)).toBe(false);
-    }
+    expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
+    expect(rawInput.hasAttribute("id")).toBe(true);
+    expect(rawInput.hasAttribute("name")).toBe(true);
+    expect(rawInput.hasAttribute("aria-controls")).toBe(true);
+    expect(rawLabel.hasAttribute("for")).toBe(true);
+    expect(rawCell.hasAttribute("headers")).toBe(true);
 
     const replacementInput = safeDocument.createInput();
     const replacementLabel = safeDocument.createLabel();
@@ -115,7 +115,7 @@ describe("placement enforcement", () => {
     replacementCell.setHeaders("x");
   });
 
-  it("retains namespace accounting after cleanup failure and releases it on retry", () => {
+  it("does not attempt external namespace cleanup and releases its accounting", () => {
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
     if (descriptor === undefined || typeof descriptor.value !== "function") {
@@ -149,14 +149,14 @@ describe("placement enforcement", () => {
       outside.appendChild(raw);
       failNextIdCleanup = true;
 
-      expectCode(() => input.getId(), "DOM_OPERATION_FAILED");
+      const beforeMarkup = new TextEncoder().encode(raw.outerHTML);
+      expectCode(() => input.getId(), "PLACEMENT_VIOLATION");
+      expect(new TextEncoder().encode(raw.outerHTML)).toEqual(beforeMarkup);
       expect(raw.hasAttribute("id")).toBe(true);
-      expect(raw.hasAttribute("name")).toBe(false);
-      const blocked = safeDocument.createDiv();
-      expectCode(() => blocked.setId("z"), "QUOTA_EXCEEDED");
+      expect(raw.hasAttribute("name")).toBe(true);
 
       expect(() => input.dispose()).not.toThrow();
-      expect(raw.hasAttribute("id")).toBe(false);
+      expect(new TextEncoder().encode(raw.outerHTML)).toEqual(beforeMarkup);
       const replacement = safeDocument.createInput();
       replacement.setId("x");
       replacement.setName("y");
@@ -165,7 +165,7 @@ describe("placement enforcement", () => {
     }
   });
 
-  it("clears nested URL, style, and listeners before releasing revoked accounting", () => {
+  it("revokes nested capabilities and accounting without changing external raw-node bytes", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
       quotas: { nodes: 2, listeners: 1, styleBytes: 3, requests: 1 },
@@ -175,6 +175,11 @@ describe("placement enforcement", () => {
     const parent = safeDocument.createDiv();
     const image = safeDocument.createImage();
     const handler = vi.fn();
+    parent.setTitle("ordinary parent state");
+    image.setId("image");
+    image.setAria("describedby", "image");
+    image.setAlt("ordinary image state");
+    image.setData("host-state", "preserve");
     expect(image.style.set("color", "red")).toBe(true);
     expect(image.setSrc("https://example.test/image.png").allowed).toBe(true);
     image.onClick(handler);
@@ -182,20 +187,29 @@ describe("placement enforcement", () => {
     safeDocument.appendChild(parent);
 
     const rawParent = requireElement(root.querySelector("div"));
-    const rawImage = requireElement(root.querySelector("img"));
-    Object.defineProperty(rawImage, "removeAttribute", {
-      configurable: true,
-      value: () => { throw document.body; },
-    });
+    const rawImage = requireElement(root.querySelector("img")) as HTMLImageElement;
     const outside = document.createElement("section");
     document.body.appendChild(outside);
     outside.appendChild(rawParent);
+    const beforeMarkup = new TextEncoder().encode(rawParent.outerHTML);
+    const beforeIDL = new TextEncoder().encode(JSON.stringify({
+      alt: rawImage.alt,
+      complete: rawImage.complete,
+    }));
 
     expectCode(() => parent.getText(), "PLACEMENT_VIOLATION");
-    expect(rawImage.hasAttribute("style")).toBe(false);
-    expect(rawImage.hasAttribute("src")).toBe(false);
+    expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
+    expect(new TextEncoder().encode(JSON.stringify({
+      alt: rawImage.alt,
+      complete: rawImage.complete,
+    }))).toEqual(beforeIDL);
     rawImage.dispatchEvent(new Event("click"));
     expect(handler).not.toHaveBeenCalled();
+    expectCode(
+      () => image.setSrc("https://example.test/revoked.png"),
+      "NODE_REVOKED",
+    );
+    expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
 
     expect(() => parent.dispose()).not.toThrow();
     expect(() => image.dispose()).not.toThrow();
@@ -209,11 +223,10 @@ describe("placement enforcement", () => {
 
     expect(() => safeDocument.dispose()).not.toThrow();
     expect(outside.firstElementChild).toBe(rawParent);
-    expect(rawImage.hasAttribute("style")).toBe(false);
-    expect(rawImage.hasAttribute("src")).toBe(false);
+    expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
   });
 
-  it("retries failed revoked descendant cleanup before releasing placement accounting", () => {
+  it("does not attempt external request cleanup and releases descendant accounting", () => {
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
     if (descriptor === undefined || typeof descriptor.value !== "function") {
@@ -249,11 +262,14 @@ describe("placement enforcement", () => {
       document.body.appendChild(outside);
       outside.appendChild(rawParent);
       failNextSourceCleanup = true;
+      const beforeMarkup = new TextEncoder().encode(rawParent.outerHTML);
 
-      expectCode(() => parent.getText(), "DOM_OPERATION_FAILED");
+      expectCode(() => parent.getText(), "PLACEMENT_VIOLATION");
+      expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
       expect(rawImage.hasAttribute("src")).toBe(true);
       expect(() => parent.dispose()).not.toThrow();
-      expect(rawImage.hasAttribute("src")).toBe(false);
+      expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
+      failNextSourceCleanup = false;
 
       const replacementImage = safeDocument.createImage();
       const replacementParent = safeDocument.createDiv();
@@ -285,20 +301,24 @@ describe("placement enforcement", () => {
     const wrapper = safeDocument.createInput();
     wrapper.setId("adopted-id");
     wrapper.setName("adopted-name");
+    wrapper.setValue("ordinary IDL state");
     safeDocument.appendChild(wrapper);
     const raw = requireElement(root.firstElementChild);
     const foreignDocument = document.implementation.createHTMLDocument("foreign");
     foreignDocument.adoptNode(raw);
+    const beforeMarkup = new TextEncoder().encode(raw.outerHTML);
+    const beforeIDL = new TextEncoder().encode((raw as HTMLInputElement).value);
 
     expectCode(() => wrapper.setClass("cross-realm"), "PLACEMENT_VIOLATION");
     expect(raw.ownerDocument).toBe(foreignDocument);
     expect(raw.hasAttribute("class")).toBe(false);
     expect(raw.parentNode).toBe(null);
-    expect(raw.hasAttribute("id")).toBe(false);
-    expect(raw.hasAttribute("name")).toBe(false);
+    expect(new TextEncoder().encode(raw.outerHTML)).toEqual(beforeMarkup);
+    expect(new TextEncoder().encode((raw as HTMLInputElement).value)).toEqual(beforeIDL);
     expect(() => wrapper.dispose()).not.toThrow();
     expect(raw.ownerDocument).toBe(foreignDocument);
     expect(raw.parentNode).toBe(null);
+    expect(new TextEncoder().encode(raw.outerHTML)).toEqual(beforeMarkup);
   });
 
   it("suppresses callbacks after raw placement is compromised", () => {
@@ -399,6 +419,58 @@ describe("detach and disposal", () => {
       expect(writes).toBe(1);
       expect(target.checked).toBe(false);
       expect(() => wrapper.setTitle("still-active")).not.toThrow();
+    } finally {
+      Object.defineProperty(prototype, "checked", descriptor);
+    }
+  });
+
+  it("does not retry a pre-revocation IDL rollback after the host moves the raw node external", () => {
+    const prototype = window.HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "checked");
+    if (
+      descriptor === undefined
+      || typeof descriptor.get !== "function"
+      || typeof descriptor.set !== "function"
+    ) {
+      throw new Error("expected HTMLInputElement.checked accessors");
+    }
+    const nativeSetter = descriptor.set;
+    let target: HTMLInputElement | undefined;
+    let mutationFailure = true;
+    let restorationFailure = true;
+    Object.defineProperty(prototype, "checked", {
+      ...descriptor,
+      set(this: HTMLInputElement, value: boolean): void {
+        if (this === target && value && mutationFailure) {
+          mutationFailure = false;
+          Reflect.apply(nativeSetter, this, [value]);
+          throw document.body;
+        }
+        if (this === target && !value && restorationFailure) {
+          restorationFailure = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeSetter, this, [value]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root);
+      const wrapper = safeDocument.createInput();
+      wrapper.setType("checkbox");
+      safeDocument.appendChild(wrapper);
+      target = requireElement(root.querySelector("input")) as HTMLInputElement;
+
+      captureSafeError(() => wrapper.setChecked(true), "DOM_OPERATION_FAILED");
+      expect(target.checked).toBe(true);
+      const outside = document.createElement("section");
+      document.body.append(outside);
+      outside.append(target);
+
+      expect(() => wrapper.dispose()).not.toThrow();
+      expect(target.checked).toBe(true);
+      expect(outside.firstElementChild).toBe(target);
     } finally {
       Object.defineProperty(prototype, "checked", descriptor);
     }
@@ -538,6 +610,132 @@ describe("detach and disposal", () => {
     }
   });
 
+  it("does not retry a pre-revocation URL rollback after the host moves the raw node external", () => {
+    const prototype = window.Element.prototype;
+    const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setAttribute");
+    if (setDescriptor === undefined || typeof setDescriptor.value !== "function") {
+      throw new Error("expected Element.setAttribute");
+    }
+    const nativeSetAttribute = setDescriptor.value;
+    const trustedSource = "https://host.test/trusted-before.png";
+    const guestSource = "https://example.test/write-then-throw.png";
+    let target: Element | undefined;
+    let intercept = false;
+    let mutationFailure = true;
+    let restorationFailure = true;
+    Object.defineProperty(prototype, "setAttribute", {
+      ...setDescriptor,
+      value(this: Element, name: string, value: string): void {
+        if (intercept && this === target && name === "src") {
+          if (value === guestSource && mutationFailure) {
+            mutationFailure = false;
+            Reflect.apply(nativeSetAttribute, this, [name, value]);
+            throw document.body;
+          }
+          if (value === trustedSource && restorationFailure) {
+            restorationFailure = false;
+            throw document.body;
+          }
+        }
+        Reflect.apply(nativeSetAttribute, this, [name, value]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { requests: 1 },
+        urlPolicy: REQUEST_POLICY,
+      });
+      const image = safeDocument.createImage();
+      safeDocument.appendChild(image);
+      target = requireElement(root.querySelector("img"));
+      Reflect.apply(nativeSetAttribute, target, ["src", trustedSource]);
+      intercept = true;
+
+      captureSafeError(() => image.setSrc(guestSource), "DOM_OPERATION_FAILED");
+      expect(target.getAttribute("src")).toBe(guestSource);
+      const outside = document.createElement("section");
+      document.body.append(outside);
+      outside.append(target);
+      const before = new TextEncoder().encode(target.outerHTML);
+
+      expect(() => image.dispose()).not.toThrow();
+      expect(new TextEncoder().encode(target.outerHTML)).toEqual(before);
+      expect(outside.firstElementChild).toBe(target);
+      const replacement = safeDocument.createImage();
+      expect(replacement.setSrc("https://example.test/replacement.png").allowed).toBe(true);
+    } finally {
+      Object.defineProperty(prototype, "setAttribute", setDescriptor);
+    }
+  });
+
+  it("does not retry pre-revocation namespace cleanup against external raw DOM", () => {
+    const prototype = window.Element.prototype;
+    const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setAttribute");
+    const removeDescriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
+    if (
+      setDescriptor === undefined
+      || typeof setDescriptor.value !== "function"
+      || removeDescriptor === undefined
+      || typeof removeDescriptor.value !== "function"
+    ) {
+      throw new Error("expected Element attribute methods");
+    }
+    const nativeSetAttribute = setDescriptor.value;
+    const nativeRemoveAttribute = removeDescriptor.value;
+    let target: Element | undefined;
+    let mutationFailure = true;
+    let restorationFailure = true;
+    Object.defineProperty(prototype, "setAttribute", {
+      ...setDescriptor,
+      value(this: Element, name: string, value: string): void {
+        Reflect.apply(nativeSetAttribute, this, [name, value]);
+        if (this === target && name === "id" && mutationFailure) {
+          mutationFailure = false;
+          throw document.body;
+        }
+      },
+    });
+    Object.defineProperty(prototype, "removeAttribute", {
+      ...removeDescriptor,
+      value(this: Element, name: string): void {
+        if (this === target && name === "id" && restorationFailure) {
+          restorationFailure = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeRemoveAttribute, this, [name]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { identifierMappings: 1, identifierBytes: 7 },
+      });
+      const wrapper = safeDocument.createDiv();
+      safeDocument.appendChild(wrapper);
+      target = requireElement(root.querySelector("div"));
+
+      captureSafeError(() => wrapper.setId("pending"), "DOM_OPERATION_FAILED");
+      expect(target.id).toMatch(/^aoa-i-[0-9a-f]{48}$/u);
+      const outside = document.createElement("section");
+      document.body.append(outside);
+      outside.append(target);
+      const before = new TextEncoder().encode(target.outerHTML);
+
+      expect(() => wrapper.dispose()).not.toThrow();
+      expect(new TextEncoder().encode(target.outerHTML)).toEqual(before);
+      expect(outside.firstElementChild).toBe(target);
+      const replacement = safeDocument.createDiv();
+      replacement.setId("pending");
+      expect(replacement.getId()).toBe("pending");
+    } finally {
+      Object.defineProperty(prototype, "setAttribute", setDescriptor);
+      Object.defineProperty(prototype, "removeAttribute", removeDescriptor);
+    }
+  });
+
   it("revokes and retains an unproven style rollback until disposal succeeds", () => {
     const stylePrototype = window.CSSStyleDeclaration.prototype;
     const setDescriptor = Object.getOwnPropertyDescriptor(stylePrototype, "setProperty");
@@ -624,6 +822,255 @@ describe("detach and disposal", () => {
       Object.defineProperty(stylePrototype, "setProperty", setDescriptor);
       Object.defineProperty(stylePrototype, "removeProperty", removePropertyDescriptor);
       Object.defineProperty(elementPrototype, "removeAttribute", removeAttributeDescriptor);
+    }
+  });
+
+  it.each(["node", "document"] as const)(
+    "never retries a pre-revocation style rollback against external raw DOM during %s disposal",
+    (disposal) => {
+      const prototype = window.CSSStyleDeclaration.prototype;
+      const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setProperty");
+      const removeDescriptor = Object.getOwnPropertyDescriptor(prototype, "removeProperty");
+      if (
+        setDescriptor === undefined
+        || typeof setDescriptor.value !== "function"
+        || removeDescriptor === undefined
+        || typeof removeDescriptor.value !== "function"
+      ) {
+        throw new Error("expected CSSStyleDeclaration mutation methods");
+      }
+      const nativeSetProperty = setDescriptor.value;
+      const nativeRemoveProperty = removeDescriptor.value;
+      let target: CSSStyleDeclaration | undefined;
+      let mutationFailure = true;
+      let restorationFailure = true;
+      Object.defineProperty(prototype, "setProperty", {
+        ...setDescriptor,
+        value(this: CSSStyleDeclaration, property: string, value: string, priority?: string): void {
+          Reflect.apply(nativeSetProperty, this, [property, value, priority]);
+          if (this === target && mutationFailure) {
+            mutationFailure = false;
+            throw document.body;
+          }
+        },
+      });
+      Object.defineProperty(prototype, "removeProperty", {
+        ...removeDescriptor,
+        value(this: CSSStyleDeclaration, property: string): string {
+          if (this === target && restorationFailure) {
+            restorationFailure = false;
+            throw document.body;
+          }
+          return Reflect.apply(nativeRemoveProperty, this, [property]);
+        },
+      });
+
+      try {
+        const root = makeRoot();
+        const safeDocument = createSafeDocument(root, {
+          quotas: { styleBytes: 3 },
+          stylePolicy: STYLE_POLICY,
+        });
+        const wrapper = safeDocument.createDiv();
+        safeDocument.appendChild(wrapper);
+        const raw = requireElement(root.querySelector("div")) as HTMLElement;
+        target = raw.style;
+
+        expect(wrapper.style.set("color", "red")).toBe(false);
+        expect(raw.style.getPropertyValue("color")).toBe("red");
+        const outside = document.createElement("section");
+        document.body.append(outside);
+        outside.append(raw);
+        const before = new TextEncoder().encode(raw.outerHTML);
+
+        expect(() => disposal === "node" ? wrapper.dispose() : safeDocument.dispose()).not.toThrow();
+        expect(new TextEncoder().encode(raw.outerHTML)).toEqual(before);
+        expect(outside.firstElementChild).toBe(raw);
+
+        if (disposal === "node") {
+          const replacement = safeDocument.createDiv();
+          expect(replacement.style.set("color", "red")).toBe(true);
+        }
+      } finally {
+        Object.defineProperty(prototype, "setProperty", setDescriptor);
+        Object.defineProperty(prototype, "removeProperty", removeDescriptor);
+      }
+    },
+  );
+
+  it.each(["parent-first", "child-first"] as const)(
+    "releases a pre-revoked descendant when its active parent is disposed externally (%s)",
+    (creationOrder) => {
+    const prototype = window.CSSStyleDeclaration.prototype;
+    const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setProperty");
+    const removeDescriptor = Object.getOwnPropertyDescriptor(prototype, "removeProperty");
+    if (
+      setDescriptor === undefined
+      || typeof setDescriptor.value !== "function"
+      || removeDescriptor === undefined
+      || typeof removeDescriptor.value !== "function"
+    ) {
+      throw new Error("expected CSSStyleDeclaration mutation methods");
+    }
+    const nativeSetProperty = setDescriptor.value;
+    const nativeRemoveProperty = removeDescriptor.value;
+    let target: CSSStyleDeclaration | undefined;
+    let mutationFailure = true;
+    let restorationFailure = true;
+    Object.defineProperty(prototype, "setProperty", {
+      ...setDescriptor,
+      value(this: CSSStyleDeclaration, property: string, value: string, priority?: string): void {
+        Reflect.apply(nativeSetProperty, this, [property, value, priority]);
+        if (this === target && mutationFailure) {
+          mutationFailure = false;
+          throw document.body;
+        }
+      },
+    });
+    Object.defineProperty(prototype, "removeProperty", {
+      ...removeDescriptor,
+      value(this: CSSStyleDeclaration, property: string): string {
+        if (this === target && restorationFailure) {
+          restorationFailure = false;
+          throw document.body;
+        }
+        return Reflect.apply(nativeRemoveProperty, this, [property]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { nodes: 2, styleBytes: 3 },
+        stylePolicy: STYLE_POLICY,
+      });
+      const first = safeDocument.createDiv();
+      const second = safeDocument.createDiv();
+      const parent = creationOrder === "parent-first" ? first : second;
+      const child = creationOrder === "parent-first" ? second : first;
+      parent.appendChild(child);
+      safeDocument.appendChild(parent);
+      const rawParent = requireElement(root.querySelector("div")) as HTMLElement;
+      const rawChild = requireElement(rawParent.querySelector("div")) as HTMLElement;
+      target = rawChild.style;
+
+      expect(child.style.set("color", "red")).toBe(false);
+      expect(rawChild.style.getPropertyValue("color")).toBe("red");
+      const outside = document.createElement("section");
+      document.body.append(outside);
+      outside.append(rawParent);
+      const before = new TextEncoder().encode(rawParent.outerHTML);
+
+      expect(() => parent.dispose()).not.toThrow();
+      expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(before);
+      expectCode(() => child.getText(), "NODE_REVOKED");
+
+      const replacementParent = safeDocument.createDiv();
+      const replacementChild = safeDocument.createDiv();
+      expect(replacementChild.style.set("color", "red")).toBe(true);
+      replacementParent.appendChild(replacementChild);
+    } finally {
+      Object.defineProperty(prototype, "setProperty", setDescriptor);
+      Object.defineProperty(prototype, "removeProperty", removeDescriptor);
+    }
+    },
+  );
+
+  it("preserves a disposed descendant state while retrying owned subtree cleanup", () => {
+    const elementPrototype = window.Element.prototype;
+    const removeAttributeDescriptor = Object.getOwnPropertyDescriptor(
+      elementPrototype,
+      "removeAttribute",
+    );
+    const stylePrototype = window.CSSStyleDeclaration.prototype;
+    const setPropertyDescriptor = Object.getOwnPropertyDescriptor(stylePrototype, "setProperty");
+    const removePropertyDescriptor = Object.getOwnPropertyDescriptor(
+      stylePrototype,
+      "removeProperty",
+    );
+    if (
+      removeAttributeDescriptor === undefined
+      || typeof removeAttributeDescriptor.value !== "function"
+      || setPropertyDescriptor === undefined
+      || typeof setPropertyDescriptor.value !== "function"
+      || removePropertyDescriptor === undefined
+      || typeof removePropertyDescriptor.value !== "function"
+    ) {
+      throw new Error("expected Element and CSSStyleDeclaration mutation methods");
+    }
+    const nativeRemoveAttribute = removeAttributeDescriptor.value;
+    const nativeSetProperty = setPropertyDescriptor.value;
+    const nativeRemoveProperty = removePropertyDescriptor.value;
+    let imageTarget: Element | undefined;
+    let parentStyleTarget: CSSStyleDeclaration | undefined;
+    let sourceCleanupFailure = true;
+    let styleMutationFailure = true;
+    let styleRestorationFailure = true;
+    Object.defineProperty(elementPrototype, "removeAttribute", {
+      ...removeAttributeDescriptor,
+      value(this: Element, name: string): void {
+        if (this === imageTarget && name === "src" && sourceCleanupFailure) {
+          sourceCleanupFailure = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeRemoveAttribute, this, [name]);
+      },
+    });
+    Object.defineProperty(stylePrototype, "setProperty", {
+      ...setPropertyDescriptor,
+      value(this: CSSStyleDeclaration, property: string, value: string, priority?: string): void {
+        Reflect.apply(nativeSetProperty, this, [property, value, priority]);
+        if (this === parentStyleTarget && styleMutationFailure) {
+          styleMutationFailure = false;
+          throw document.body;
+        }
+      },
+    });
+    Object.defineProperty(stylePrototype, "removeProperty", {
+      ...removePropertyDescriptor,
+      value(this: CSSStyleDeclaration, property: string): string {
+        if (this === parentStyleTarget && styleRestorationFailure) {
+          styleRestorationFailure = false;
+          throw document.body;
+        }
+        return Reflect.apply(nativeRemoveProperty, this, [property]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { nodes: 2, requests: 1, styleBytes: 3 },
+        stylePolicy: STYLE_POLICY,
+        urlPolicy: REQUEST_POLICY,
+      });
+      const parent = safeDocument.createDiv();
+      const image = safeDocument.createImage();
+      expect(image.setSrc("https://example.test/original.png").allowed).toBe(true);
+      parent.appendChild(image);
+      safeDocument.appendChild(parent);
+      const rawParent = requireElement(root.querySelector("div")) as HTMLElement;
+      const rawImage = requireElement(rawParent.querySelector("img"));
+      imageTarget = rawImage;
+
+      expectCode(() => image.dispose(), "DOM_OPERATION_FAILED");
+      expect(rawImage.hasAttribute("src")).toBe(true);
+      rawParent.append(rawImage);
+      parentStyleTarget = rawParent.style;
+      expect(parent.style.set("color", "red")).toBe(false);
+
+      expect(() => parent.dispose()).not.toThrow();
+      expect(rawImage.hasAttribute("src")).toBe(false);
+      expect(root.childNodes).toHaveLength(0);
+
+      const replacementParent = safeDocument.createDiv();
+      const replacementImage = safeDocument.createImage();
+      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
+      replacementParent.appendChild(replacementImage);
+    } finally {
+      Object.defineProperty(elementPrototype, "removeAttribute", removeAttributeDescriptor);
+      Object.defineProperty(stylePrototype, "setProperty", setPropertyDescriptor);
+      Object.defineProperty(stylePrototype, "removeProperty", removePropertyDescriptor);
     }
   });
 

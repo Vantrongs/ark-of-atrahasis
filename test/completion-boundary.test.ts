@@ -11,7 +11,7 @@ import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { testHarden } from "./support/harden.ts";
 
 const FORM_CONTROL_POLICY = Object.freeze({
-  allowGuestReadableNonCredentialValues: true,
+  allowNonCredentialFormElements: true,
 }) satisfies SafeFormControlPolicy;
 
 describe("capability completion boundary", () => {

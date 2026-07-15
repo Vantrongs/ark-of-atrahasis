@@ -14,9 +14,12 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 
 ### Added
 
-- Added a strict-default policy denial for guest-readable native `input`,
-  `textarea`, and `select` values, an exact explicit non-credential host grant,
-  and unit/API/type/SES/three-engine coverage for stable pre-creation failure.
+- Added a strict-default policy denial for the complete public form surface
+  (`button`, `fieldset`, `img`, `input`, `label`, `legend`, `optgroup`, `option`,
+  `output`, `select`, and `textarea`), an exact
+  `allowNonCredentialFormElements: true` host grant, operation metering before
+  policy evaluation, and unit/API/type/SES/three-engine coverage for stable
+  pre-creation failure.
 - Added a dedicated Chrome-for-Testing Chromium address-Autofill limitation
   witness: opted-in email remains guest-readable after autofill while external
   host form/named state remains unchanged; no password-manager claim is made.
@@ -42,7 +45,8 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
   SES bootstrap, and unyielding dedicated-Worker termination coverage.
 - Fixed-seed generated CSS, URL, numeric, identifier, and lifecycle/model tests,
   including exact quota failure/release and replay paths.
-- Reproducible tarball verification from a clean Git archive, minimum/current
+- Reproducible tarball verification from a clean Git archive, exact installed
+  root runtime-export namespace enforcement, minimum/current
   TypeScript declaration checks, offline consumer installation, source rebuild
   comparison, literal typecheck/browser execution of every executable packed
   README fence, SHA-256 checksums, and a CycloneDX SBOM.
@@ -102,6 +106,10 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 - Added fail-closed handling for cross-owner, reparenting, active-element,
   form-default, malformed primitive, and post-disposal behavior in the strict
   profile.
+- External raw reparent/adopt/detach placement violations—including entries
+  already revoked by an unproven rollback—now revoke wrapper setters/listeners
+  and release logical accounting without mutating host-owned markup,
+  URL/style/identifier attributes, IDL state, or tree placement.
 - Added fail-closed validation for missing, accessor, non-function, no-op,
   shallow, identity-changing, throwing, replacement-returning, and stateful
   hardeners without claiming hardener provenance.

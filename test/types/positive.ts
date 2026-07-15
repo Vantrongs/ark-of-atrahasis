@@ -127,7 +127,7 @@ type _AutocompleteVocabulary = Expect<
 >;
 
 const formControlPolicy: SafeFormControlPolicy = {
-	allowGuestReadableNonCredentialValues: true,
+	allowNonCredentialFormElements: true,
 };
 const formControlDocumentOptions: SafeDocumentOptions = {
 	harden: (value) => value,
