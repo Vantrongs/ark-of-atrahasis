@@ -1,30 +1,62 @@
 # ark-of-atrahasis
 
-`ark-of-atrahasis` is a small, ESM-only DOM wrapper intended for host-controlled
-Secure ECMAScript (SES) integrations. It exposes fixed element factories and
-wrapper objects instead of returning raw DOM nodes.
+`ark-of-atrahasis` is an ESM-only, capability-oriented DOM wrapper for
+host-controlled Secure ECMAScript (SES) integrations. The repository is at the
+unpublished `0.4.0` release candidate: it requires a host-created `ShadowRoot`
+and a host-supplied SES `harden`, exposes fixed wrapper operations rather than
+raw DOM nodes, denies URL and inline-style authority unless the host grants it,
+and deterministically revokes owned wrappers and tracked effects.
 
-> **Security status of 0.3.1:** this release is a useful API prototype, not a
-> defensible boundary for adversarial code. In particular, its initializer uses
-> a document-global ID lookup and a light-DOM root, styles are installed in the
-> document head, network URLs are not deny-by-default, and wrappers do not have
-> owner-scoped revocation. Track the strict capability work in issue #1.
+The npm `latest` tag is still `0.3.1` as of 2026-07-15. That published version
+has the retired string-ID/light-DOM API and does **not** implement the strict
+boundary documented here. Do not treat `npm install ark-of-atrahasis` as an
+installation of this release candidate until the protected release completes.
 
-## Install
+## Public capability boundary
 
-```sh
-npm install ark-of-atrahasis
-```
+The package has one ESM root export and no package subpaths. Its runtime exports
+are exactly:
 
-The package has no runtime dependencies and does not require consumers to
-install TypeScript. Type declarations are shipped with the ESM build.
+- the authority-bearing `createSafeDocument` factory;
+- `DEFAULT_SAFE_DOCUMENT_QUOTAS`;
+- the pure policy helpers `createURLPolicy`, `createStylePolicy`,
+  `canonicalizeStyleProperty`, and their frozen ceilings `URL_SINKS` and
+  `SAFE_STYLE_PROPERTIES`;
+- the pure validators `requireFiniteNumber`, `requireInteger`,
+  `requirePrimitiveBoolean`, `requirePrimitiveString`, and
+  `scanCSSNetworkRisk`;
+- the `isSafeDOMError` record guard; and
+- the frozen vocabulary arrays `ARIA_IDREF_LIST_NAMES`, `ARIA_IDREF_NAMES`,
+  `ARIA_ROLES`, `AUTOCOMPLETE_VALUES`, `BUTTON_TYPES`, `DIR_VALUES`,
+  `ENTER_KEY_HINT_VALUES`, `FORMATTING_TAGS`, `HEADING_LEVELS`,
+  `IMAGE_LOADING_VALUES`, `INPUT_MODE_VALUES`, `INPUT_TYPES`, `LIST_TYPES`,
+  `SPECIALIZED_ELEMENT_KINDS`, `TABLE_SCOPE_VALUES`, and
+  `TEXTAREA_WRAP_VALUES`.
+
+Only `createSafeDocument(root, options)` grants DOM authority. The returned
+`SafeDocument` has mount operations, fixed `create*` factories, logical local-ID
+lookup, and `dispose()`. Its wrappers expose only their type-specific text,
+attribute, inline-style, event, tree, detach, and disposal methods. There is no
+public selector/document initializer, arbitrary-tag factory, raw-root/host/node
+getter, raw stylesheet factory, or raw CSS rule/text API. The pure policy and
+validation exports do not grant DOM authority.
+
+The trusted host must retain the factory, raw `ShadowRoot`, outer host element,
+`document`, `window`, and all raw DOM nodes. Guest code receives only the
+completed `SafeDocument` or selected wrappers. From that boundary it cannot
+remove, rename, style, or clear the outer host because no reference or wrapper
+for the root or host is exposed; the trusted host itself retains that authority.
+
+The emitted declarations enumerate the complete `SafeDocument`, specialized
+wrapper, event, policy, error, vocabulary, and readonly/container-versus-void
+type surface. `test/types/positive.ts` and `test/types/negative.ts` check that
+surface with TypeScript 5.0.4 and 7.0.2.
 
 ## Host bootstrap
 
-Run SES `lockdown()` before importing this package. The trusted host must create
-and retain a dedicated `ShadowRoot`, then pass the resulting `harden` function
-as the required own data property `options.harden`. Do not endow guest code with
-the factory, raw root, `document`, `window`, or any DOM node.
+Call SES `lockdown()` before importing this package. Create one exclusively
+owned `ShadowRoot`, and pass the resulting global `harden` as the required own
+data property `options.harden`.
 
 ```js
 import "ses";
@@ -34,95 +66,162 @@ lockdown();
 const { createSafeDocument } = await import("ark-of-atrahasis");
 const hostElement = document.querySelector("#plugin-a-root");
 const root = hostElement.attachShadow({ mode: "closed" });
-const safeDocument = createSafeDocument(root, { harden });
+const safeDocument = createSafeDocument(root, {
+  harden,
+  stylePolicy: { allowedProperties: ["color", "display"] },
+  urlPolicy: {
+    baseURL: "https://app.example/",
+    sinks: {
+      "image.src": {
+        allowedOrigins: ["https://cdn.example"],
+        allowedProtocols: ["https:"],
+      },
+    },
+  },
+});
 
 const compartment = new Compartment({ safeDocument });
 ```
 
-The package has zero runtime dependencies and does not import SES. It validates
-that the supplied function returns the same value and deeply freezes each
-completed graph, including later calls, but JavaScript cannot prove the
-function's provenance. Passing a test double outside tests does not satisfy the
-security precondition. Lockdown is a prerequisite, not a DOM or availability
-sandbox.
+Omitting `urlPolicy` denies all six URL sinks. An omitted sink is denied;
+enabled sinks separately constrain canonical origin (including port), protocol,
+credentials, query, fragment, and maximum length. Omitting `stylePolicy` denies
+all inline-style properties. A style grant selects from the library's fixed
+property ceiling; values containing URL/request grammar, indirection, malformed
+CSS, or non-primitive input are rejected. Raw stylesheets and global selectors
+are not part of the API.
 
-## Threat model and host responsibilities
+The package has zero runtime dependencies and does not import SES. It
+behaviorally checks that the supplied hardener returns the same value and deeply
+freezes each completed graph, including later wrappers, nested style methods,
+event records, cleanups, decisions, and errors. JavaScript cannot prove the
+hardener's provenance: a test double outside tests does not satisfy the security
+precondition.
 
-The current wrapper helps reduce accidental DOM exposure: element names come
-from fixed factories, text is written through `textContent`, and there is no
-public raw-node getter. Those properties do not confine malicious code.
+## Threat model and lifecycle contract
 
-- **Root ownership:** allocate one dedicated mount per integration. Do not share
-  its raw nodes with other owners. Version 0.3.1 cannot mount inside a
-  `ShadowRoot`; a shadow-based, owner-branded profile is required before treating
-  the wrapper as a capability boundary.
-- **CSS:** do not expose `createStyle()` to untrusted code in 0.3.1. It writes a
-  `<style>` element into the global document head, and string filtering is not a
-  CSS parser. Inline style values also need a host-approved grammar.
-- **Network and navigation:** URL setters currently accept absolute HTTP(S) URLs
-  from any origin. Enforce CSP and host-side request/navigation controls. A
-  strict deployment must inject a deny-by-default, per-sink policy and verify it
-  with browser request interception.
-- **Forms:** keep the mount outside host forms. Buttons, named controls,
-  autocomplete, autofill, labels, and composed/bubbling events can affect host
-  behavior. A shadow tree alone does not neutralize these effects.
-- **Lifecycle:** retain every event cleanup function and call it during teardown.
-  `remove()` detaches a node; in 0.3.1 it is not owner-wide revocation, and there
-  is no document-level `dispose()`. Stop guest execution before removing the
-  mount.
-- **Layout and events:** Shadow DOM is a tree and style boundary, not a layout,
-  event, network, or availability boundary.
-- **Availability:** SES compartments on the same JavaScript agent cannot stop an
-  infinite loop. Put hostile workloads behind a Worker, process, or RPC boundary
-  that the host can terminate.
+- **Ownership and placement:** one `SafeDocument` claims one native
+  `ShadowRoot`. Wrappers are canonical and owner-branded. Cross-owner/forged
+  wrappers fail. Each operation audits actual owner-document placement; raw-host
+  reparent, adoption, or detach-then-external insertion revokes the affected
+  wrappers before a later guest mutation can touch external DOM.
+- **Identifiers and forms:** logical IDs, names, IDREFs, and IDREF lists map to
+  per-document opaque physical tokens. Created form controls start with safe
+  non-form defaults (`button` type, control type, autocomplete, and autofocus
+  constraints); submit/reset/file-like states are not guest vocabularies.
+- **Events and errors:** handlers receive deeply frozen primitive snapshots made
+  through captured standard accessors. Malicious getters and platform failures
+  collapse to primitive defaults or frozen `SafeDOMError` records without
+  native/custom exceptions, stacks, causes, DOM nodes, globals, or functions.
+  Cancellation functions are usable only during the synchronous callback and
+  return `false` afterward.
+- **SES pass style:** copied event target/touch records, URL decisions, and
+  `SafeDOMError` records are pass-by-copy. A whole `SafeEvent` is deliberately a
+  hardened synchronous local control record, not SES pass-by-copy and not an
+  eventual-send value, because it contains time-bounded cancellation methods.
+- **Detach and disposal:** `detach()` (and deprecated `remove()`) is reversible.
+  Wrapper or document `dispose()` is irreversible and idempotent, closes future
+  wrapper mutation, aborts wrapper-owned listeners, removes tracked URL/style
+  and identifier effects, detaches owned nodes still in the mount, releases live
+  accounting, and returns stable disposed/revoked errors on later operations.
+  Safe ordinary attributes, text, and IDL state are not all tracked resources;
+  if trusted raw DOM has already moved a node outside the mount, such inert state
+  may remain after revocation/disposal. The contract is removal of wrapper-owned
+  capabilities and tracked effects, not a promise to erase every ordinary DOM
+  field from an externally retained raw node.
+- **Layout and host authority:** Shadow DOM is a tree/style boundary, not a
+  layout, event, network, or availability sandbox. The host must still control
+  raw nodes, endowments, navigation, CSP, and integration lifetime.
 
-Do not treat CSP, Shadow DOM, URL regexes, or TypeScript types as substitutes for
-runtime ownership and policy checks.
+### Quotas
+
+Quotas are per `SafeDocument`. Supplied limits must be non-negative safe
+integers. The defaults are:
+
+| Quota | Default | Accounting |
+| --- | ---: | --- |
+| `nodes` | 1,000 | live wrappers |
+| `listeners` | 1,000 | live wrapper-owned listeners |
+| `operations` | 100,000 | calls entering the active context |
+| `textBytes` | 1,000,000 | live UTF-8 guest text/value bytes |
+| `attributeBytes` | 256,000 | live serialized attribute name/value bytes |
+| `styleBytes` | 256,000 | live approved inline-style bytes |
+| `requests` | 64 | live URL-bearing attribute slots |
+| `requestAttempts` | 256 | every URL setter attempt, including denied input |
+| `identifierMappings` | 4,096 | live logical ID/name records |
+| `identifierReferences` | 8,192 | live logical IDREF occurrences |
+| `identifierBytes` | 256,000 | live UTF-8 logical ID/name bytes |
+
+Resource accounting is released only after terminal cleanup succeeds;
+`operations` and `requestAttempts` are cumulative rate ceilings and are not
+released.
+
+## Availability boundary
+
+Same-agent SES code can block its JavaScript agent indefinitely. The browser
+acceptance test proves that the host terminates one indefinitely progressing,
+scheduled dedicated Worker while the page remains responsive in Chromium,
+Firefox, and WebKit. The Node `worker_threads` test separately proves termination
+of an unyielding CPU/`Atomics.add` loop after observable shared-memory progress.
+
+Those are different claims. Playwright 1.61.1's bundled Chromium did not preempt
+the tested unyielding loops (tight `Atomics.add`, infinite Promise microtasks, or
+one-millisecond `Atomics.wait` interruption points). Therefore this project does
+not claim arbitrary same-agent browser preemption. Choose and test a
+Worker/process/RPC boundary whose termination semantics match the hostile
+workload.
 
 ## Compatibility
 
 - ESM only; CommonJS `require()` is not provided.
 - Source and output target ES2022 plus standard DOM APIs.
-- The package is intended for modern browsers. The current release does not yet
-  claim a qualified cross-browser security matrix.
-- Packed declarations are checked with TypeScript 5.0.4 (the documented
-  consumer minimum) and 7.0.2 (the pinned current compiler); source is checked
-  with the build compiler and TypeScript 7. The build uses pinned TypeScript
-  6.0.3 because tsup 8's declaration bundler is not compatible with the
-  TypeScript 7 compiler API. TypeScript is not a consumer peer dependency.
+- The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
+  by Playwright 1.61.1.
+- Real SES checks use SES 2.2.0, `@endo/pass-style` 1.8.1, and
+  `@endo/eventual-send` 1.5.0.
+- Packed declarations are checked with TypeScript 5.0.4 (consumer minimum) and
+  7.0.2 (pinned current). Source and property-model commands run under pinned
+  TypeScript 6.0.3 and 7.0.2. The build remains on TypeScript 6.0.3 because
+  tsup 8.5.1 declaration generation is not compatible with the TypeScript 7
+  compiler API. TypeScript is not a consumer peer dependency.
 - Node can import the module for packaging/tooling checks, but DOM operations
   require a browser-like host.
 
 ## Development
 
-Development and release automation use Node.js 22.22.2 and npm 11.18.0. Install
-exactly `npm-shrinkwrap.json` without dependency lifecycle scripts:
+The exact CI/release toolchain is Node.js 22.22.2, npm 11.18.0, and Playwright
+1.61.1. Install the frozen `npm-shrinkwrap.json` without dependency lifecycle
+scripts:
 
 ```sh
-npm ci --ignore-scripts
+npm ci --ignore-scripts --no-audit --no-fund
 npm run check
 ```
-
-Available gates:
 
 | Command | Purpose |
 | --- | --- |
 | `npm run lint` | Lint TypeScript and test/release scripts |
-| `npm run typecheck` | Strict source and property-model typecheck under TypeScript 6 and 7 |
-| `npm test` | Build from source and run runtime smoke tests |
-| `npm run test:property` | Run fixed-seed generated security-input and lifecycle-model tests |
-| `npm run test:browser` | Run the browser boundary and SES bootstrap in Chromium, Firefox, and WebKit |
-| `npm run test:ses` | Run real SES 2.2.0 with two compartments/roots and pass-style data checks |
+| `npm run typecheck` | Check source and property/model commands with TypeScript 6.0.3 and 7.0.2 |
+| `npm test` | Run unit/property/model tests, built ESM/API smoke, and release-contract tests |
+| `npm run test:property` | Run only the fixed-seed generated security and lifecycle suites (already discovered by `test:unit`) |
+| `npm run test:browser` | Run boundary, SES, and scheduled-Worker tests in Chromium, Firefox, and WebKit |
+| `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
-| `npm run test:package` | Test a tarball built from a pristine Git archive |
+| `npm run test:package` | Build and test a tarball from a pristine Git archive |
 | `npm run check` | Run the complete CI gate |
-| `npm run pack:verified` | Write the tested tarball, SBOM, and checksums |
+| `npm run pack:verified` | Test and write the exact tarball, CycloneDX SBOM, and SHA-256 checksums |
 
-See [RELEASING.md](./RELEASING.md) for the exact-artifact release procedure and
-source-correspondence engineering notes.
+See [RELEASING.md](./RELEASING.md) for immutable artifact handoff, protected
+publishing, and source-correspondence engineering notes. The complete mapping of
+issue #1's acceptance criteria is in
+[docs/issue-1-traceability.md](./docs/issue-1-traceability.md).
 
 ## License and security reports
 
-The current package is licensed `GPL-3.0-only`; see [LICENSE](./LICENSE). Report
-security concerns through the repository issue tracker without including live
-secrets or exploit data that should remain private.
+The package declares `GPL-3.0-only`; see [LICENSE](./LICENSE). This is not a
+legal conclusion about the historical npm `0.1.0` metadata or the correct GPLv3
+section 6 conveyance method; those remain owner/legal decisions documented in
+[RELEASING.md](./RELEASING.md).
+
+Report security concerns through the repository issue tracker without including
+live secrets or exploit data that should remain private.
