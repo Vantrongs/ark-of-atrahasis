@@ -6,4 +6,6 @@ export default defineConfig({
   dts: true,
   clean: true,
   outDir: "dist",
+  sourcemap: true,
+  target: "es2022",
 });
