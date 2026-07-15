@@ -3,6 +3,12 @@
 This document records reproducible packaging and source-correspondence measures.
 It is an engineering checklist, not legal advice or a legal conclusion.
 
+The repository currently contains the `0.4.0` release candidate. As verified on
+2026-07-15, npm `latest` is `0.3.1`, `0.4.0` is unpublished, and no `v0.4.0` tag
+or GitHub release exists. The repository evidence below is code-complete release
+engineering, not evidence that external owner controls are configured or that a
+release has occurred.
+
 ## Prerequisites
 
 - Use Node.js 22.22.2 and the exact npm version in
@@ -38,10 +44,32 @@ also writes a CycloneDX SBOM and a SHA-256 checksum file covering both assets.
 These local artifacts are for inspection; do not publish from the worktree or a
 developer credential.
 
+## Immutable artifact handoff
+
+The release workflow does not rebuild in the credentialed job. Its credential-
+free `verify` job runs the complete gate, invokes `pack:verified`, permits exactly
+one tarball, one SBOM, and one checksum manifest, and uploads those three files
+under an artifact name bound to `github.sha`. The protected `publish` job has no
+checkout and downloads only that artifact.
+
+Before publishing, the protected job checks the exact filenames, verifies the
+two SHA-256 entries with `sha256sum --check --strict`, and reads the packed
+manifest to bind package name/version to the release tag. It creates a draft
+GitHub release, uploads the same three files, publishes that exact `.tgz` with
+scripts disabled and npm provenance enabled, and only then makes the populated
+GitHub release non-draft. npm package versions are immutable; the registry
+preflight rejects an existing version and also rejects a version that would not
+advance the stable `latest` tag.
+
+This repository-enforced identity chain does not make GitHub releases immutable
+by itself. The canonical repository owner must enable immutable releases and
+protect the tag/ref policy outside the workflow.
+
 ## Protected release path
 
-Create a signed, annotated `v<version>` tag at the reviewed release commit and
-push it to the canonical upstream repository. `.github/workflows/release.yml`:
+After the external controls below are audited, create a signed, annotated
+`v<version>` tag at the reviewed release commit and push it to the canonical
+upstream repository. `.github/workflows/release.yml`:
 
 The workflow verifies that the tag is annotated and resolves to the release
 commit. It cannot establish signer trust from repository content alone; tag
@@ -93,6 +121,20 @@ Before enabling releases, repository/package owners must:
 
 These settings cannot be enforced by a pull request. A release owner must audit
 them in both GitHub and npm before the first publication.
+
+Repository tests verify workflow structure, least-privilege job separation,
+action SHA pins, artifact identity, release metadata, and registry-preflight
+behavior. They do **not** prove any of these external states:
+
+- that npm trusted publishing is configured for the canonical repository,
+  workflow, and `npm` environment;
+- that the protected environment and required reviewers exist;
+- that `main` and release tags have the required protection and signed-tag
+  policy;
+- that GitHub immutable releases are enabled; or
+- that the npm account and historical-package/legal follow-up is complete.
+
+Do not tag or publish until the owner confirms those states independently.
 
 ## Preferred source and build information
 
