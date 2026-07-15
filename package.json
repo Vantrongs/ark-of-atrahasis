@@ -17,6 +17,8 @@
   ],
   "scripts": {
     "build": "tsup",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "tsup"
   },
   "keywords": [

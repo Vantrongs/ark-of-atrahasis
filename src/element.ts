@@ -27,7 +27,8 @@ import type {
 import { registerPair, unregisterPair, getRealNode } from "./registry.ts";
 import { createSafeEvent } from "./event.ts";
 import { createSafeStyle } from "./style.ts";
-import { isUrlSafe, isInputTypeAllowed, isButtonTypeAllowed, isAttrKeySafe } from "./validation.ts";
+import { isInputTypeAllowed, isButtonTypeAllowed, isAttrKeySafe } from "./validation.ts";
+import type { SafeURLDecision, URLPolicyEngine } from "./url-policy.ts";
 
 function addSafeEvent(realEl: Element, wrapper: SafeElement, eventName: string, handler: EventHandler): EventCleanup {
   const nativeHandler = (nativeEvent: Event): void => {
@@ -280,12 +281,14 @@ export function createSafeFieldsetElement(realEl: HTMLFieldSetElement): SafeFiel
   }) as SafeFieldsetElement;
 }
 
-export function createSafeImageElement(realEl: HTMLImageElement): SafeImageElement {
+export function createSafeImageElement(realEl: HTMLImageElement, urlPolicy: URLPolicyEngine): SafeImageElement {
   const base = createSafeElement(realEl);
 
   return Object.assign(base, {
-    setSrc(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("src", url);
+    setSrc(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("image.src", url);
+      if (decision.allowed) realEl.setAttribute("src", decision.url);
+      return decision;
     },
     setAlt(value: string): void { realEl.setAttribute("alt", String(value)); },
     setWidth(value: number): void { realEl.setAttribute("width", String(Number(value) | 0)); },
@@ -294,22 +297,26 @@ export function createSafeImageElement(realEl: HTMLImageElement): SafeImageEleme
   }) as SafeImageElement;
 }
 
-export function createSafeAnchorElement(realEl: HTMLAnchorElement): SafeAnchorElement {
+export function createSafeAnchorElement(realEl: HTMLAnchorElement, urlPolicy: URLPolicyEngine): SafeAnchorElement {
   const base = createSafeElement(realEl);
 
   return Object.assign(base, {
-    setHref(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("href", url);
+    setHref(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("anchor.href", url);
+      if (decision.allowed) realEl.setAttribute("href", decision.url);
+      return decision;
     },
   }) as SafeAnchorElement;
 }
 
-export function createSafeVideoElement(realEl: HTMLVideoElement): SafeVideoElement {
+export function createSafeVideoElement(realEl: HTMLVideoElement, urlPolicy: URLPolicyEngine): SafeVideoElement {
   const base = createSafeElement(realEl);
 
   return Object.assign(base, {
-    setSrc(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("src", url);
+    setSrc(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("video.src", url);
+      if (decision.allowed) realEl.setAttribute("src", decision.url);
+      return decision;
     },
     setWidth(value: number): void { realEl.setAttribute("width", String(Number(value) | 0)); },
     setHeight(value: number): void { realEl.setAttribute("height", String(Number(value) | 0)); },
@@ -329,18 +336,22 @@ export function createSafeVideoElement(realEl: HTMLVideoElement): SafeVideoEleme
       if (value) realEl.setAttribute("muted", "");
       else realEl.removeAttribute("muted");
     },
-    setPoster(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("poster", url);
+    setPoster(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("video.poster", url);
+      if (decision.allowed) realEl.setAttribute("poster", decision.url);
+      return decision;
     },
   }) as SafeVideoElement;
 }
 
-export function createSafeAudioElement(realEl: HTMLAudioElement): SafeAudioElement {
+export function createSafeAudioElement(realEl: HTMLAudioElement, urlPolicy: URLPolicyEngine): SafeAudioElement {
   const base = createSafeElement(realEl);
 
   return Object.assign(base, {
-    setSrc(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("src", url);
+    setSrc(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("audio.src", url);
+      if (decision.allowed) realEl.setAttribute("src", decision.url);
+      return decision;
     },
     setControls(value: boolean): void {
       if (value) realEl.setAttribute("controls", "");
@@ -361,12 +372,14 @@ export function createSafeAudioElement(realEl: HTMLAudioElement): SafeAudioEleme
   }) as SafeAudioElement;
 }
 
-export function createSafeSourceElement(realEl: HTMLSourceElement): SafeSourceElement {
+export function createSafeSourceElement(realEl: HTMLSourceElement, urlPolicy: URLPolicyEngine): SafeSourceElement {
   const base = createSafeElement(realEl);
 
   return Object.assign(base, {
-    setSrc(url: string): void {
-      if (isUrlSafe(url)) realEl.setAttribute("src", url);
+    setSrc(url: string): SafeURLDecision {
+      const decision = urlPolicy.decide("source.src", url);
+      if (decision.allowed) realEl.setAttribute("src", decision.url);
+      return decision;
     },
     setType(value: string): void { realEl.setAttribute("type", String(value)); },
   }) as SafeSourceElement;

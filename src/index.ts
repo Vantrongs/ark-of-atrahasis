@@ -6,6 +6,7 @@ import type {
   FormattingTag,
   HeadingLevel,
   ListType,
+  SafeDocumentOptions,
 } from "./types.ts";
 import {
   createSafeElement,
@@ -32,6 +33,9 @@ import {
 } from "./element.ts";
 import { createSafeTextNode } from "./text.ts";
 import { createSafeStyleSheet } from "./stylesheet.ts";
+import { createURLPolicy } from "./url-policy.ts";
+import { requireFiniteNumber, requirePrimitiveString } from "./primitives.ts";
+import { invalidArgument } from "./errors.ts";
 
 export type {
   SafeDocument,
@@ -65,7 +69,31 @@ export type {
   HeadingLevel,
   EventHandler,
   EventCleanup,
+  SafeDocumentOptions,
 } from "./types.ts";
+
+export {
+  URL_SINKS,
+  createURLPolicy,
+  type SafeURLDecision,
+  type SafeURLPolicy,
+  type URLPolicyEngine,
+  type URLProtocol,
+  type URLSink,
+  type URLSinkPolicy,
+} from "./url-policy.ts";
+export { SafeDOMError, type SafeDOMErrorCode } from "./errors.ts";
+export {
+  requireFiniteNumber,
+  requireInteger,
+  requirePrimitiveBoolean,
+  requirePrimitiveString,
+} from "./primitives.ts";
+export {
+  scanCSSNetworkRisk,
+  type CSSNetworkRisk,
+  type CSSNetworkRiskDecision,
+} from "./validation.ts";
 
 const FORMATTING_TAGS = new Set<string>([
   "strong", "em", "small", "b", "i", "u",
@@ -77,12 +105,19 @@ function simple(tag: string): SafeElement {
   return createSafeElement(document.createElement(tag));
 }
 
-export function createSafeDocument(pluginRootID: string): SafeDocument {
-  const pluginRoot: HTMLElement | null = document.getElementById(pluginRootID);
+export function createSafeDocument(
+  pluginRootID: string,
+  options: SafeDocumentOptions = {},
+): SafeDocument {
+  const rootID = requirePrimitiveString(pluginRootID, "createSafeDocument.rootID");
+  const pluginRoot: HTMLElement | null = document.getElementById(rootID);
 
   if (!pluginRoot) {
-    throw new Error(`No HTML element with the '${pluginRootID}' id was found`);
+    throw invalidArgument("createSafeDocument.rootID");
   }
+
+  const URLImpl = document.defaultView?.URL ?? URL;
+  const urlPolicy = createURLPolicy(options.urlPolicy, URLImpl);
 
   return {
     createDiv(): SafeElement { return simple("div"); },
@@ -99,8 +134,11 @@ export function createSafeDocument(pluginRootID: string): SafeDocument {
 
     createText(): SafeElement { return simple("p"); },
     createHeading(level: HeadingLevel): SafeElement {
-      if (level < 1 || level > 6) throw new Error("Heading level must be 1-6");
-      return simple(`h${level}`);
+      const numericLevel = requireFiniteNumber(level, "createHeading.level");
+      if (!Number.isInteger(numericLevel) || numericLevel < 1 || numericLevel > 6) {
+        throw invalidArgument("createHeading.level");
+      }
+      return simple(`h${numericLevel}`);
     },
     createFormatting(format: FormattingTag): SafeElement {
       if (!FORMATTING_TAGS.has(format)) throw new Error(`Unknown formatting tag: ${format}`);
@@ -141,15 +179,15 @@ export function createSafeDocument(pluginRootID: string): SafeDocument {
     createFieldset() { return createSafeFieldsetElement(document.createElement("fieldset") as HTMLFieldSetElement); },
     createLegend(): SafeElement { return simple("legend"); },
 
-    createImage() { return createSafeImageElement(document.createElement("img") as HTMLImageElement); },
-    createVideo() { return createSafeVideoElement(document.createElement("video") as HTMLVideoElement); },
-    createAudio() { return createSafeAudioElement(document.createElement("audio") as HTMLAudioElement); },
-    createSource() { return createSafeSourceElement(document.createElement("source") as HTMLSourceElement); },
+    createImage() { return createSafeImageElement(document.createElement("img") as HTMLImageElement, urlPolicy); },
+    createVideo() { return createSafeVideoElement(document.createElement("video") as HTMLVideoElement, urlPolicy); },
+    createAudio() { return createSafeAudioElement(document.createElement("audio") as HTMLAudioElement, urlPolicy); },
+    createSource() { return createSafeSourceElement(document.createElement("source") as HTMLSourceElement, urlPolicy); },
     createTrack(): SafeElement { return simple("track"); },
     createPicture(): SafeElement { return simple("picture"); },
     createCanvas() { return createSafeCanvasElement(document.createElement("canvas") as HTMLCanvasElement); },
 
-    createAnchor() { return createSafeAnchorElement(document.createElement("a") as HTMLAnchorElement); },
+    createAnchor() { return createSafeAnchorElement(document.createElement("a") as HTMLAnchorElement, urlPolicy); },
     createDetails() { return createSafeDetailsElement(document.createElement("details") as HTMLDetailsElement); },
     createSummary(): SafeElement { return simple("summary"); },
     createDialog() { return createSafeDialogElement(document.createElement("dialog") as HTMLDialogElement); },

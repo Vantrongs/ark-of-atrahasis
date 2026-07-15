@@ -1,3 +1,5 @@
+import type { SafeURLDecision, SafeURLPolicy } from "./url-policy.ts";
+
 export interface SafeEvent {
   type: string;
   ctrlKey: boolean;
@@ -164,7 +166,7 @@ export interface SafeFieldsetElement extends SafeElement {
 }
 
 export interface SafeImageElement extends SafeElement {
-  setSrc(url: string): void;
+  setSrc(url: string): SafeURLDecision;
   setAlt(value: string): void;
   setWidth(value: number): void;
   setHeight(value: number): void;
@@ -172,22 +174,22 @@ export interface SafeImageElement extends SafeElement {
 }
 
 export interface SafeAnchorElement extends SafeElement {
-  setHref(url: string): void;
+  setHref(url: string): SafeURLDecision;
 }
 
 export interface SafeVideoElement extends SafeElement {
-  setSrc(url: string): void;
+  setSrc(url: string): SafeURLDecision;
   setWidth(value: number): void;
   setHeight(value: number): void;
   setControls(value: boolean): void;
   setAutoplay(value: boolean): void;
   setLoop(value: boolean): void;
   setMuted(value: boolean): void;
-  setPoster(url: string): void;
+  setPoster(url: string): SafeURLDecision;
 }
 
 export interface SafeAudioElement extends SafeElement {
-  setSrc(url: string): void;
+  setSrc(url: string): SafeURLDecision;
   setControls(value: boolean): void;
   setAutoplay(value: boolean): void;
   setLoop(value: boolean): void;
@@ -195,7 +197,7 @@ export interface SafeAudioElement extends SafeElement {
 }
 
 export interface SafeSourceElement extends SafeElement {
-  setSrc(url: string): void;
+  setSrc(url: string): SafeURLDecision;
   setType(value: string): void;
 }
 
@@ -247,6 +249,11 @@ export type FormattingTag =
   | "sub" | "sup" | "mark" | "abbr" | "cite";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface SafeDocumentOptions {
+  /** Missing policy means every URL-bearing sink is denied. */
+  readonly urlPolicy?: SafeURLPolicy;
+}
 
 export interface SafeDocument {
   createDiv(): SafeElement;
