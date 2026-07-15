@@ -275,7 +275,10 @@ integrated into PR #7 and then completed by these merged PRs to
   strict event boundary (head `5fb320e`), merged at `33817f6`; and
 - [#22](https://github.com/Vantrongs/ark-of-atrahasis/pull/22) strict-default
   form-control policy (head `bd41ab0`), merged into this pass's historical base
-  at `c316986`.
+  at `c316986`; and
+- [#23](https://github.com/Vantrongs/ark-of-atrahasis/pull/23) primary release,
+  compatibility API, event-catalog, and browser evidence gap closure (this PR;
+  its mutable head SHA is intentionally not embedded here).
 
 Exact check counts, artifact digests, and links are intentionally not copied
 into this mutable document. They belong to the CI check for the immutable head
