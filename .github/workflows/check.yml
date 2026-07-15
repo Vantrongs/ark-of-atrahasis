@@ -36,6 +36,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/npm-cli" npm@11.18.0 \
             --ignore-scripts --no-audit --no-fund --no-package-lock
           echo "NPM_CLI=$RUNNER_TEMP/npm-cli/node_modules/npm/bin/npm-cli.js" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/npm-cli/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Verify toolchain versions
         run: |
