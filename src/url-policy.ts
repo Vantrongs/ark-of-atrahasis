@@ -1,4 +1,4 @@
-import { SafeDOMError, invalidPolicy } from "./errors.ts";
+import { createSafeDOMError, invalidPolicy, type SafeDOMError } from "./errors.ts";
 
 export const URL_SINKS = [
   "anchor.href",
@@ -91,7 +91,7 @@ function policyInteger(value: unknown, fallback: number, operation: string): num
 function deny(operation: string): SafeURLDecision {
   return Object.freeze({
     allowed: false as const,
-    error: new SafeDOMError("ERR_URL_DENIED", operation),
+    error: createSafeDOMError("ERR_URL_DENIED", operation),
   });
 }
 

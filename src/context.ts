@@ -1,4 +1,4 @@
-import { SafeDOMError } from "./errors.ts";
+import { createSafeDOMError, isSafeDOMError, type SafeDOMError } from "./errors.ts";
 import { createEventSnapshotter, type EventSnapshotter } from "./event.ts";
 import {
   NodeRegistry,
@@ -7,7 +7,7 @@ import {
   type RegistryEntry,
   type SafeNode,
 } from "./registry.ts";
-import type { SafeDocumentOptions, SafeDocumentQuotas } from "./types.ts";
+import type { Hardener, SafeDocumentOptions, SafeDocumentQuotas } from "./types.ts";
 import {
   createStylePolicy,
   type SafeStylePolicy,
@@ -63,6 +63,7 @@ const QUOTA_NAMES = [
 ] as const;
 
 interface NormalizedOptions {
+  readonly harden: Hardener;
   readonly quotas?: Partial<SafeDocumentQuotas>;
   readonly urlPolicy?: SafeURLPolicy;
   readonly stylePolicy?: SafeStylePolicy;
@@ -84,28 +85,71 @@ function readOwnDataProperty<Value>(
 }
 
 function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedOptions {
-  if (options === undefined) return {};
-  if (options === null || typeof options !== "object") {
-    throw new SafeDOMError("ERR_INVALID_ARGUMENT", "createSafeDocument.options");
-  }
+  if (options === null || typeof options !== "object") throw invalidHardener();
+
+  const harden = readOwnDataProperty<Hardener>(options, "harden", invalidHardener);
+  if (typeof harden !== "function") throw invalidHardener();
+
+  completeWithHardener(harden, { nested: { method: (): boolean => true } });
 
   return {
+    harden,
     quotas: readOwnDataProperty(
       options,
       "quotas",
-      () => new SafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas"),
+      () => createSafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas"),
     ),
     urlPolicy: readOwnDataProperty(
       options,
       "urlPolicy",
-      () => new SafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.urlPolicy"),
+      () => createSafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.urlPolicy"),
     ),
     stylePolicy: readOwnDataProperty(
       options,
       "stylePolicy",
-      () => new SafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.stylePolicy"),
+      () => createSafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.stylePolicy"),
     ),
   };
+}
+
+function invalidHardener(): SafeDOMError {
+  return createSafeDOMError("ERR_INVALID_HARDENER", "createSafeDocument.options.harden");
+}
+
+function isDeeplyFrozen(root: unknown): boolean {
+  const pending: unknown[] = [root];
+  const visited = new WeakSet<object>();
+
+  try {
+    while (pending.length > 0) {
+      const value = pending.pop();
+      if ((typeof value !== "object" && typeof value !== "function") || value === null) {
+        continue;
+      }
+      if (visited.has(value)) continue;
+      if (!Object.isFrozen(value)) return false;
+
+      visited.add(value);
+      for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+        if ("value" in descriptor) pending.push(descriptor.value);
+        else pending.push(descriptor.get, descriptor.set);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function completeWithHardener<Value>(harden: Hardener, value: Value): Value {
+  try {
+    const completed = harden(value);
+    if (!Object.is(completed, value) || !isDeeplyFrozen(value)) throw invalidHardener();
+    return completed;
+  } catch {
+    // A bad/stateful hardener never gets to choose the thrown boundary value.
+    throw invalidHardener();
+  }
 }
 
 function utf8ByteLength(value: string): number {
@@ -122,7 +166,7 @@ function utf8ByteLength(value: string): number {
 
 function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeDocumentQuotas {
   if (supplied !== undefined && (supplied === null || typeof supplied !== "object")) {
-    throw new SafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas");
+    throw createSafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas");
   }
 
   const resolved: QuotaUsage = { ...DEFAULT_SAFE_DOCUMENT_QUOTAS };
@@ -131,7 +175,7 @@ function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeD
       const value = readOwnDataProperty<number>(
         supplied,
         name,
-        () => new SafeDOMError("INVALID_QUOTA", `createSafeDocument.options.quotas.${name}`),
+        () => createSafeDOMError("INVALID_QUOTA", `createSafeDocument.options.quotas.${name}`),
       );
       if (value !== undefined) resolved[name] = value;
     }
@@ -139,7 +183,7 @@ function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeD
   for (const name of QUOTA_NAMES) {
     const value = resolved[name];
     if (!Number.isSafeInteger(value) || value < 0) {
-      throw new SafeDOMError(
+      throw createSafeDOMError(
         "INVALID_QUOTA",
         `Quota ${name} must be a non-negative safe integer`,
       );
@@ -157,10 +201,11 @@ export interface DocumentContext {
   readonly stylePolicy: StylePolicyEngine;
   readonly eventSnapshotter: EventSnapshotter;
   readonly platform: PlatformOps;
+  complete<Value>(value: Value): Value;
+  complete<Node extends SafeNode>(value: Node, real: RealNode): Node;
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
-  register(wrapper: SafeNode, real: RealNode): void;
   documentOperation<T>(action: () => T): T;
   nodeOperation<T>(real: RealNode, action: () => T): T;
   requireRealNode(wrapper: SafeNode): RealNode;
@@ -185,6 +230,7 @@ export interface DocumentContext {
   detachNode(real: RealNode): void;
   disposeNode(real: RealNode): void;
   disposeDocument(): void;
+  abandonInitialization(): void;
 }
 
 function getNativeRoot(value: unknown): {
@@ -194,7 +240,7 @@ function getNativeRoot(value: unknown): {
 } {
   try {
     if ((typeof value !== "object" && typeof value !== "function") || value === null) {
-      throw new SafeDOMError("INVALID_ROOT", "createSafeDocument.root");
+      throw createSafeDOMError("INVALID_ROOT", "createSafeDocument.root");
     }
 
     // Initialisation is a host operation. Resolve the constructor from the
@@ -208,12 +254,12 @@ function getNativeRoot(value: unknown): {
       || !ShadowRootConstructor
       || !objectIsPrototypeOf(ShadowRootConstructor.prototype, value)
     ) {
-      throw new SafeDOMError("INVALID_ROOT", "createSafeDocument.root");
+      throw createSafeDOMError("INVALID_ROOT", "createSafeDocument.root");
     }
 
     return { root: value as ShadowRoot, ownerDocument, view };
   } catch {
-    throw new SafeDOMError("INVALID_ROOT", "createSafeDocument requires a native ShadowRoot");
+    throw createSafeDOMError("INVALID_ROOT", "createSafeDocument requires a native ShadowRoot");
   }
 }
 
@@ -226,6 +272,7 @@ class DocumentContextImplementation implements DocumentContext {
   readonly urlPolicy: URLPolicyEngine;
   readonly stylePolicy: StylePolicyEngine;
   readonly eventSnapshotter: EventSnapshotter;
+  readonly #harden: Hardener;
   readonly #quotas: SafeDocumentQuotas;
   readonly #usage: QuotaUsage = {
     nodes: 0,
@@ -247,6 +294,7 @@ class DocumentContextImplementation implements DocumentContext {
     options?: SafeDocumentOptions,
   ) {
     const normalizedOptions = normalizeOptions(options);
+    this.#harden = normalizedOptions.harden;
     this.root = root;
     this.ownerDocument = ownerDocument;
     this.ownerRealm = view;
@@ -255,7 +303,18 @@ class DocumentContextImplementation implements DocumentContext {
     this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
     this.urlPolicy = createURLPolicy(normalizedOptions.urlPolicy, this.platform.URL);
     this.stylePolicy = createStylePolicy(normalizedOptions.stylePolicy);
-    this.eventSnapshotter = createEventSnapshotter(view);
+    this.eventSnapshotter = createEventSnapshotter(
+      view,
+      <Value>(value: Value): Value => this.complete(value),
+    );
+  }
+
+  complete<Value>(value: Value): Value;
+  complete<Node extends SafeNode>(value: Node, real: RealNode): Node;
+  complete<Value>(value: Value, real?: RealNode): Value {
+    const completed = completeWithHardener(this.#harden, value);
+    if (real !== undefined) this.#register(completed as SafeNode, real);
+    return completed;
   }
 
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
@@ -268,7 +327,7 @@ class DocumentContextImplementation implements DocumentContext {
     return this.documentOperation(() => this.platform.createTextNode(value));
   }
 
-  register(wrapper: SafeNode, real: RealNode): void {
+  #register(wrapper: SafeNode, real: RealNode): void {
     this.#assertDocumentActive();
     this.#reserve("nodes", 1);
     try {
@@ -291,7 +350,7 @@ class DocumentContextImplementation implements DocumentContext {
     const entry = this.#requireEntryByReal(real);
     const compromised = this.#auditPlacements();
     if (compromised.has(entry)) {
-      throw new SafeDOMError(
+      throw createSafeDOMError(
         "PLACEMENT_VIOLATION",
         "The owned node was placed outside its SafeDocument mount and has been revoked",
       );
@@ -341,7 +400,7 @@ class DocumentContextImplementation implements DocumentContext {
   ): SafeURLDecision {
     return this.nodeOperation(real, () => {
       this.#reserve("requestAttempts", 1);
-      const decision = decide();
+      const decision = this.complete(decide());
       if (!decision.allowed) return decision;
 
       const entry = this.#requireEntryByReal(real);
@@ -370,7 +429,7 @@ class DocumentContextImplementation implements DocumentContext {
       const previous = entry.resources.style.get(property) ?? 0;
       const delta = amount - previous;
       if (delta > 0 && this.#usage.styleBytes + delta > this.#quotas.styleBytes) {
-        throw new SafeDOMError("QUOTA_EXCEEDED", "SafeDocument quota exceeded: styleBytes");
+        throw createSafeDOMError("QUOTA_EXCEEDED", "SafeDocument quota exceeded: styleBytes");
       }
       this.#usage.styleBytes += delta;
 
@@ -379,8 +438,8 @@ class DocumentContextImplementation implements DocumentContext {
         committed = action();
       } catch (error) {
         this.#usage.styleBytes -= delta;
-        if (error instanceof SafeDOMError) throw error;
-        throw new SafeDOMError(
+        if (isSafeDOMError(error)) throw error;
+        throw createSafeDOMError(
           "DOM_OPERATION_FAILED",
           "The DOM mutation could not be completed",
         );
@@ -423,13 +482,18 @@ class DocumentContextImplementation implements DocumentContext {
         );
       } catch (error) {
         cleanup();
-        if (error instanceof SafeDOMError) throw error;
-        throw new SafeDOMError(
+        if (isSafeDOMError(error)) throw error;
+        throw createSafeDOMError(
           "DOM_OPERATION_FAILED",
           "The event listener could not be installed",
         );
       }
-      return cleanup;
+      try {
+        return this.complete(cleanup);
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
     });
   }
 
@@ -481,9 +545,9 @@ class DocumentContextImplementation implements DocumentContext {
         const state = entry.state === "revoked" ? "revoked" : "disposed";
         this.#finalizeEntry(entry, state, "from-root");
       } catch (error) {
-        firstFailure ??= error instanceof SafeDOMError
+        firstFailure ??= isSafeDOMError(error)
           ? error
-          : new SafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose");
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose");
       }
     }
 
@@ -491,33 +555,43 @@ class DocumentContextImplementation implements DocumentContext {
     if (firstFailure !== undefined) throw firstFailure;
   }
 
+  abandonInitialization(): void {
+    try {
+      this.disposeDocument();
+    } catch {
+      // Preserve the original initialization error after best-effort cleanup.
+    } finally {
+      claimedRoots.delete(this.root);
+    }
+  }
+
   #assertDocumentActive(): void {
     if (this.#disposed) {
-      throw new SafeDOMError("DOCUMENT_DISPOSED", "The SafeDocument has been disposed");
+      throw createSafeDOMError("DOCUMENT_DISPOSED", "The SafeDocument has been disposed");
     }
   }
 
   #requireEntryByReal(real: RealNode): RegistryEntry {
     const entry = this.registry.getEntryByReal(real);
     if (!entry) {
-      throw new SafeDOMError("CROSS_OWNER", "The node is not owned by this SafeDocument");
+      throw createSafeDOMError("CROSS_OWNER", "The node is not owned by this SafeDocument");
     }
     return entry;
   }
 
   #assertEntryActive(entry: RegistryEntry): void {
     if (entry.state === "disposed") {
-      throw new SafeDOMError("NODE_DISPOSED", "The node wrapper has been disposed");
+      throw createSafeDOMError("NODE_DISPOSED", "The node wrapper has been disposed");
     }
     if (entry.state === "revoked") {
-      throw new SafeDOMError("NODE_REVOKED", "The node wrapper has been revoked");
+      throw createSafeDOMError("NODE_REVOKED", "The node wrapper has been revoked");
     }
   }
 
   #reserve(name: keyof SafeDocumentQuotas, amount: number): void {
     const next = this.#usage[name] + amount;
     if (next > this.#quotas[name]) {
-      throw new SafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
+      throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
     }
     this.#usage[name] = next;
   }
@@ -533,9 +607,9 @@ class DocumentContextImplementation implements DocumentContext {
       try {
         this.#finalizeEntry(entry, "revoked");
       } catch (error) {
-        firstFailure ??= error instanceof SafeDOMError
+        firstFailure ??= isSafeDOMError(error)
           ? error
-          : new SafeDOMError("DOM_OPERATION_FAILED", "SafeElement.revoke");
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.revoke");
       }
     }
     if (firstFailure !== undefined) throw firstFailure;
@@ -588,17 +662,17 @@ class DocumentContextImplementation implements DocumentContext {
       try {
         this.#finalizeEntry(candidate, state);
       } catch (error) {
-        firstFailure ??= error instanceof SafeDOMError
+        firstFailure ??= isSafeDOMError(error)
           ? error
-          : new SafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.descendant`);
+          : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.descendant`);
       }
     }
     try {
       this.#finalizeEntry(rootEntry, state, rootDetach);
     } catch (error) {
-      firstFailure ??= error instanceof SafeDOMError
+      firstFailure ??= isSafeDOMError(error)
         ? error
-        : new SafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}`);
+        : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}`);
     }
     if (firstFailure !== undefined) throw firstFailure;
   }
@@ -646,7 +720,7 @@ class DocumentContextImplementation implements DocumentContext {
 
     for (const [quota, delta] of deltas) {
       if (delta > 0 && this.#usage[quota] + delta > this.#quotas[quota]) {
-        throw new SafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${quota}`);
+        throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${quota}`);
       }
     }
     for (const [quota, delta] of deltas) this.#usage[quota] += delta;
@@ -655,8 +729,8 @@ class DocumentContextImplementation implements DocumentContext {
       action();
     } catch (error) {
       for (const [quota, delta] of deltas) this.#usage[quota] -= delta;
-      if (error instanceof SafeDOMError) throw error;
-      throw new SafeDOMError(
+      if (isSafeDOMError(error)) throw error;
+      throw createSafeDOMError(
         "DOM_OPERATION_FAILED",
         "The DOM mutation could not be completed",
       );
@@ -681,7 +755,7 @@ export function createDocumentContext(
 ): DocumentContext {
   const { root, ownerDocument, view } = getNativeRoot(rootCapability);
   if (claimedRoots.has(root)) {
-    throw new SafeDOMError(
+    throw createSafeDOMError(
       "ROOT_ALREADY_CLAIMED",
       "A ShadowRoot can be claimed by only one SafeDocument",
     );

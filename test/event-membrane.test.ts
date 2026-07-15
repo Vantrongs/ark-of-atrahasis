@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { test } from "vitest";
 
-import { createSafeDocument } from "../src/index.ts";
+import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 import type {
   SafeEvent,
   SafeGenericEvent,

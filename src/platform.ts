@@ -1,4 +1,4 @@
-import { SafeDOMError } from "./errors.ts";
+import { createSafeDOMError } from "./errors.ts";
 
 type PlatformMethod = (...arguments_: never[]) => unknown;
 
@@ -20,7 +20,7 @@ function captureMethod<Method extends PlatformMethod>(
   } catch {
     // The thrown platform value is deliberately discarded below.
   }
-  throw new SafeDOMError("DOM_OPERATION_FAILED", operation);
+  throw createSafeDOMError("DOM_OPERATION_FAILED", operation);
 }
 
 function captureAccessor<Accessor extends PlatformMethod>(
@@ -45,7 +45,7 @@ function captureAccessor<Accessor extends PlatformMethod>(
   } catch {
     // The thrown platform value is deliberately discarded below.
   }
-  throw new SafeDOMError("DOM_OPERATION_FAILED", operation);
+  throw createSafeDOMError("DOM_OPERATION_FAILED", operation);
 }
 
 type OwnerDocumentGetter = (this: Node) => Document | null;
@@ -62,7 +62,7 @@ function prototypeOwns(prototype: object, value: object): boolean {
   try {
     return Reflect.apply(Object.prototype.isPrototypeOf, prototype, [value]);
   } catch {
-    throw new SafeDOMError("DOM_OPERATION_FAILED", "Element.brand");
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "Element.brand");
   }
 }
 
@@ -315,7 +315,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
     try {
       return new this.#AbortController();
     } catch {
-      throw new SafeDOMError("DOM_OPERATION_FAILED", "AbortController.constructor");
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "AbortController.constructor");
     }
   }
 
@@ -386,7 +386,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
     try {
       return Reflect.apply(method, receiver, arguments_);
     } catch {
-      throw new SafeDOMError("DOM_OPERATION_FAILED", operation);
+      throw createSafeDOMError("DOM_OPERATION_FAILED", operation);
     }
   }
 }
@@ -398,6 +398,6 @@ export function createPlatformOps(
   try {
     return new OwnerRealmPlatformOps(ownerDocument, view);
   } catch {
-    throw new SafeDOMError("DOM_OPERATION_FAILED", "PlatformOps.capture");
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "PlatformOps.capture");
   }
 }

@@ -80,15 +80,15 @@ export function createSafeStyle(
     }
   };
 
-  const get = Object.freeze((property: string): string | undefined => {
+  const get = (property: string): string | undefined => {
     return context.nodeOperation(realEl, () => {
       const canonical = canonicalizeStyleProperty(property);
       if (canonical === undefined || !policy.allows(canonical)) return undefined;
       return readCanonical(canonical);
     });
-  });
+  };
 
-  const set = Object.freeze((property: string, value: string): boolean => {
+  const set = (property: string, value: string): boolean => {
     const canonical = canonicalizeStyleProperty(property);
     if (
       canonical === undefined ||
@@ -137,9 +137,9 @@ export function createSafeStyle(
       }
       return false;
     });
-  });
+  };
 
-  const remove = Object.freeze((property: string): boolean => {
+  const remove = (property: string): boolean => {
     const canonical = canonicalizeStyleProperty(property);
     if (
       canonical === undefined ||
@@ -157,7 +157,7 @@ export function createSafeStyle(
         return false;
       }
     });
-  });
+  };
 
-  return Object.freeze({ get, set, remove });
+  return { get, set, remove };
 }

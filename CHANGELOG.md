@@ -6,6 +6,22 @@ a matching heading.
 
 ## [Unreleased]
 
+### Changed
+
+- The strict initializer now requires a host-supplied SES-compatible `harden`
+  own data option and completes each document, specialized wrapper, nested
+  style, event, cleanup capability, and URL result before exposure.
+- Replaced the native `Error` subclass boundary with hardened primitive-only
+  typed error records and an explicit `isSafeDOMError()` guard.
+
+### Security
+
+- Added fail-closed validation for missing, accessor, non-function, no-op,
+  shallow, identity-changing, throwing, replacement-returning, and stateful
+  hardeners without claiming hardener provenance.
+- Added real SES 2.2.0 compartment tests, pass-style 1.8.1 data checks, and
+  browser lockdown coverage across the existing three-engine Playwright gate.
+
 ## [0.4.0] - 2026-07-15
 
 ### Added

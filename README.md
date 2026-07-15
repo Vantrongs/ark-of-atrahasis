@@ -21,36 +21,10 @@ install TypeScript. Type declarations are shipped with the ESM build.
 
 ## Host bootstrap
 
-Call the initializer in trusted host code. Do not give guest code the factory,
-the root ID, `document`, a DOM node, or any other host selector capability.
-
-```html
-<div id="plugin-a-root"></div>
-<script type="module">
-  import { createSafeDocument } from "ark-of-atrahasis";
-
-  // The ID must identify a dedicated host-created mount, not user content.
-  const safeDocument = createSafeDocument("plugin-a-root");
-  const mount = safeDocument.getElement("plugin-a-root");
-  const message = safeDocument.createText();
-
-  message.setText("Hello from a trusted integration");
-  mount?.appendChild(message);
-</script>
-```
-
-The example describes the current light-DOM API and is suitable only when the
-code receiving `safeDocument` is trusted. An application handling mutually
-distrusting code needs the strict profile proposed in issue #1: the host creates
-and exclusively owns a `ShadowRoot` plus an inner mount, retains the raw root,
-and endows only a hardened wrapper that cannot select, clear, rename, style, or
-remove the outer host container.
-
-### SES ordering
-
-Run SES `lockdown()` before importing this package or creating/endowing any
-wrapper. The `ses` package is a host application dependency, not a dependency of
-this library.
+Run SES `lockdown()` before importing this package. The trusted host must create
+and retain a dedicated `ShadowRoot`, then pass the resulting `harden` function
+as the required own data property `options.harden`. Do not endow guest code with
+the factory, raw root, `document`, `window`, or any DOM node.
 
 ```js
 import "ses";
@@ -58,15 +32,18 @@ import "ses";
 lockdown();
 
 const { createSafeDocument } = await import("ark-of-atrahasis");
-const safeDocument = createSafeDocument("plugin-a-root");
+const hostElement = document.querySelector("#plugin-a-root");
+const root = hostElement.attachShadow({ mode: "closed" });
+const safeDocument = createSafeDocument(root, { harden });
 
-// 0.3.1 wrappers are not yet a complete hardened pass-by-copy/capability
-// surface. Endow this object only to code you already trust.
 const compartment = new Compartment({ safeDocument });
 ```
 
-Lockdown is a prerequisite, not a DOM sandbox. Without it, a host function's
-constructor and mutable intrinsics defeat attempts to construct a same-realm
+The package has zero runtime dependencies and does not import SES. It validates
+that the supplied function returns the same value and deeply freezes each
+completed graph, including later calls, but JavaScript cannot prove the
+function's provenance. Passing a test double outside tests does not satisfy the
+security precondition. Lockdown is a prerequisite, not a DOM or availability
 sandbox.
 
 ## Threat model and host responsibilities
@@ -133,14 +110,12 @@ Available gates:
 | `npm run lint` | Lint TypeScript and test/release scripts |
 | `npm run typecheck` | Strict source typecheck without emitting |
 | `npm test` | Build from source and run runtime smoke tests |
+| `npm run test:browser` | Run the browser boundary and SES bootstrap in Chromium, Firefox, and WebKit |
+| `npm run test:ses` | Run real SES 2.2.0 with two compartments/roots and pass-style data checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run test:package` | Test a tarball built from a pristine Git archive |
 | `npm run check` | Run the complete CI gate |
 | `npm run pack:verified` | Write the tested tarball, SBOM, and checksums |
-
-Browser, SES-compartment, policy-fuzzing, and cross-realm security suites belong
-with the strict API. Adding placeholder green tests for the insecure 0.3.1
-surface would give a false assurance signal.
 
 See [RELEASING.md](./RELEASING.md) for the exact-artifact release procedure and
 source-correspondence engineering notes.

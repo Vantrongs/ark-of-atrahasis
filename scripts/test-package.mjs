@@ -261,6 +261,10 @@ try {
     throw new Error("packed manifest must not impose a consumer TypeScript peer");
   }
 
+  if (Object.keys(packedManifest.dependencies ?? {}).length !== 0) {
+    throw new Error("packed runtime must have zero production dependencies");
+  }
+
   if (packedManifest.devDependencies?.["@types/bun"]) {
     throw new Error("packed manifest must not depend on unbounded Bun types");
   }
@@ -268,11 +272,12 @@ try {
   if (
     packedManifest.devDependencies?.typescript !== "6.0.3" ||
     packedManifest.devDependencies?.["typescript-current"] !== "npm:typescript@7.0.2" ||
-    packedManifest.devDependencies?.["typescript-min"] !== "npm:typescript@5.0.4"
+    packedManifest.devDependencies?.["typescript-min"] !== "npm:typescript@5.0.4" ||
+    packedManifest.devDependencies?.ses !== "2.2.0" ||
+    packedManifest.devDependencies?.["@endo/pass-style"] !== "1.8.1" ||
+    packedManifest.devDependencies?.["@endo/eventual-send"] !== "1.5.0"
   ) {
-    throw new Error(
-      "packed manifest must pin the build, current, and minimum TypeScript versions",
-    );
+    throw new Error("packed manifest must pin TypeScript and the SES verification toolchain");
   }
 
   const packedLock = JSON.parse(
@@ -335,6 +340,31 @@ if (typeof api.createSafeDocument !== "function") {
   throw new Error("installed ESM package does not export createSafeDocument");
 }
 
+const hardenForSmoke = value => {
+  const pending = [value];
+  const visited = new WeakSet();
+  while (pending.length > 0) {
+    const candidate = pending.pop();
+    if ((typeof candidate !== "object" && typeof candidate !== "function") || candidate === null) continue;
+    if (visited.has(candidate)) continue;
+    visited.add(candidate);
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(candidate))) {
+      if ("value" in descriptor) pending.push(descriptor.value);
+      else pending.push(descriptor.get, descriptor.set);
+    }
+    Object.freeze(candidate);
+  }
+  return value;
+};
+Object.freeze(hardenForSmoke);
+
+try {
+  api.createSafeDocument(null, { harden: hardenForSmoke });
+  throw new Error("the installed runtime accepted a non-ShadowRoot capability");
+} catch (error) {
+  if (error?.code !== "INVALID_ROOT") throw error;
+}
+
 const resolved = import.meta.resolve("ark-of-atrahasis");
 if (!resolved.includes("/node_modules/ark-of-atrahasis/dist/index.js")) {
   throw new Error(\`runtime resolved outside the installed tarball: \${resolved}\`);
@@ -349,15 +379,18 @@ if (!resolved.includes("/node_modules/ark-of-atrahasis/dist/index.js")) {
     join(consumerDirectory, "declarations-smoke.ts"),
     `import {
   createSafeDocument,
+  type Hardener,
   type SafeDocument,
   type SafeElement,
 } from "ark-of-atrahasis";
 
-const factory: (root: ShadowRoot) => SafeDocument = createSafeDocument;
+const factory: (root: ShadowRoot, options: { harden: Hardener }) => SafeDocument = createSafeDocument;
+declare const hostHarden: Hardener;
 declare const safeDocument: SafeDocument;
 const element: SafeElement = safeDocument.createDiv();
 element.setText("declaration smoke");
 void factory;
+void hostHarden;
 void element;
 `,
   );
