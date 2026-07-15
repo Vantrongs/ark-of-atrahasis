@@ -63,7 +63,7 @@ function attribute(
   name: string,
   value: string | null | undefined,
 ): void {
-  context.setAttribute(realEl, name, value, false);
+  context.setAttribute(realEl, name, value);
 }
 
 function booleanAttribute(
@@ -79,10 +79,9 @@ function applyURLDecision(
   context: DocumentContext,
   realEl: Element,
   name: string,
-  decision: SafeURLDecision,
+  decide: () => SafeURLDecision,
 ): SafeURLDecision {
-  if (decision.allowed) context.setAttribute(realEl, name, decision.url, true);
-  return decision;
+  return context.setURLAttribute(realEl, name, decide);
 }
 
 export function createSafeElement(context: DocumentContext, realEl: Element): SafeElement {
@@ -92,19 +91,31 @@ export function createSafeElement(context: DocumentContext, realEl: Element): Sa
 
   const wrapper: SafeElement = {
     appendChild(child: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => realEl.appendChild(context.requireRealNode(child)));
+      context.nodeOperation(realEl, () => {
+        context.platform.appendChild(realEl, context.requireRealNode(child));
+      });
     },
     insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void {
       context.nodeOperation(realEl, () => {
-        realEl.insertBefore(context.requireRealNode(newChild), context.requireRealNode(reference));
+        context.platform.insertBefore(
+          realEl,
+          context.requireRealNode(newChild),
+          context.requireRealNode(reference),
+        );
       });
     },
     removeChild(child: SafeElement | SafeTextNode): void {
-      context.nodeOperation(realEl, () => realEl.removeChild(context.requireRealNode(child)));
+      context.nodeOperation(realEl, () => {
+        context.platform.removeChild(realEl, context.requireRealNode(child));
+      });
     },
     replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void {
       context.nodeOperation(realEl, () => {
-        realEl.replaceChild(context.requireRealNode(newChild), context.requireRealNode(oldChild));
+        context.platform.replaceChild(
+          realEl,
+          context.requireRealNode(newChild),
+          context.requireRealNode(oldChild),
+        );
       });
     },
     detach(): void { context.detachNode(realEl); },
@@ -113,14 +124,28 @@ export function createSafeElement(context: DocumentContext, realEl: Element): Sa
 
     setText(value: string): void {
       const text = String(value ?? "");
-      context.setText(realEl, "textContent", text, () => { htmlEl.textContent = text; });
+      context.setText(realEl, "textContent", text, () => {
+        context.platform.setTextContent(htmlEl, text);
+      });
     },
-    getText(): string { return context.nodeOperation(realEl, () => htmlEl.textContent ?? ""); },
+    getText(): string {
+      return context.nodeOperation(realEl, () => context.platform.getTextContent(htmlEl) ?? "");
+    },
 
     setClass(value: string): void { attribute(context, realEl, "class", String(value)); },
-    getClass(): string { return context.nodeOperation(realEl, () => realEl.getAttribute("class") ?? ""); },
+    getClass(): string {
+      return context.nodeOperation(
+        realEl,
+        () => context.platform.getAttribute(realEl, "class") ?? "",
+      );
+    },
     setId(value: string): void { attribute(context, realEl, "id", String(value)); },
-    getId(): string { return context.nodeOperation(realEl, () => realEl.getAttribute("id") ?? ""); },
+    getId(): string {
+      return context.nodeOperation(
+        realEl,
+        () => context.platform.getAttribute(realEl, "id") ?? "",
+      );
+    },
     setTitle(value: string): void { attribute(context, realEl, "title", String(value)); },
     setRole(value: string): void { attribute(context, realEl, "role", String(value)); },
     setTabIndex(value: number): void {
@@ -140,7 +165,7 @@ export function createSafeElement(context: DocumentContext, realEl: Element): Sa
     getData(key: string): string | undefined {
       return context.nodeOperation(realEl, () => {
         if (typeof key !== "string" || !isAttrKeySafe(key)) return undefined;
-        return realEl.getAttribute(`data-${key}`) ?? undefined;
+        return context.platform.getAttribute(realEl, `data-${key}`) ?? undefined;
       });
     },
     setAria(key: string, value: string): void {
@@ -150,7 +175,7 @@ export function createSafeElement(context: DocumentContext, realEl: Element): Sa
     getAria(key: string): string | undefined {
       return context.nodeOperation(realEl, () => {
         if (typeof key !== "string" || !isAttrKeySafe(key)) return undefined;
-        return realEl.getAttribute(`aria-${key}`) ?? undefined;
+        return context.platform.getAttribute(realEl, `aria-${key}`) ?? undefined;
       });
     },
 
@@ -196,17 +221,25 @@ export function createSafeInputElement(context: DocumentContext, realEl: HTMLInp
     },
     setValue(value: string): void {
       const text = String(value);
-      context.setText(realEl, "value", text, () => { realEl.value = text; });
+      context.setText(realEl, "value", text, () => {
+        context.platform.setInputValue(realEl, text);
+      });
     },
-    getValue(): string { return context.nodeOperation(realEl, () => realEl.value); },
+    getValue(): string {
+      return context.nodeOperation(realEl, () => context.platform.getInputValue(realEl));
+    },
     setPlaceholder(value: string): void { attribute(context, realEl, "placeholder", String(value)); },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setReadonly(value: boolean): void { booleanAttribute(context, realEl, "readonly", value); },
     setRequired(value: boolean): void { booleanAttribute(context, realEl, "required", value); },
     setChecked(value: boolean): void {
-      context.nodeOperation(realEl, () => { realEl.checked = !!value; });
+      context.nodeOperation(realEl, () => {
+        context.platform.setInputChecked(realEl, !!value);
+      });
     },
-    getChecked(): boolean { return context.nodeOperation(realEl, () => realEl.checked); },
+    getChecked(): boolean {
+      return context.nodeOperation(realEl, () => context.platform.getInputChecked(realEl));
+    },
     setMin(value: string): void { attribute(context, realEl, "min", String(value)); },
     setMax(value: string): void { attribute(context, realEl, "max", String(value)); },
     setStep(value: string): void { attribute(context, realEl, "step", String(value)); },
@@ -243,9 +276,13 @@ export function createSafeTextareaElement(context: DocumentContext, realEl: HTML
   return Object.assign(base, {
     setValue(value: string): void {
       const text = String(value);
-      context.setText(realEl, "value", text, () => { realEl.value = text; });
+      context.setText(realEl, "value", text, () => {
+        context.platform.setTextareaValue(realEl, text);
+      });
     },
-    getValue(): string { return context.nodeOperation(realEl, () => realEl.value); },
+    getValue(): string {
+      return context.nodeOperation(realEl, () => context.platform.getTextareaValue(realEl));
+    },
     setPlaceholder(value: string): void { attribute(context, realEl, "placeholder", String(value)); },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setReadonly(value: boolean): void { booleanAttribute(context, realEl, "readonly", value); },
@@ -280,9 +317,13 @@ export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSe
   return Object.assign(base, {
     setValue(value: string): void {
       const text = String(value);
-      context.setText(realEl, "value", text, () => { realEl.value = text; });
+      context.setText(realEl, "value", text, () => {
+        context.platform.setSelectValue(realEl, text);
+      });
     },
-    getValue(): string { return context.nodeOperation(realEl, () => realEl.value); },
+    getValue(): string {
+      return context.nodeOperation(realEl, () => context.platform.getSelectValue(realEl));
+    },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setRequired(value: boolean): void { booleanAttribute(context, realEl, "required", value); },
     setMultiple(value: boolean): void { booleanAttribute(context, realEl, "multiple", value); },
@@ -301,7 +342,9 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
   return Object.assign(base, {
     setValue(value: string): void { attribute(context, realEl, "value", String(value)); },
     setSelected(value: boolean): void {
-      context.nodeOperation(realEl, () => { realEl.selected = !!value; });
+      context.nodeOperation(realEl, () => {
+        context.platform.setOptionSelected(realEl, !!value);
+      });
     },
     setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
     setLabel(value: string): void { attribute(context, realEl, "label", String(value)); },
@@ -353,7 +396,12 @@ export function createSafeImageElement(
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
-      return applyURLDecision(context, realEl, "src", context.urlPolicy.decide("image.src", url));
+      return applyURLDecision(
+        context,
+        realEl,
+        "src",
+        () => context.urlPolicy.decide("image.src", url),
+      );
     },
     setAlt(value: string): void { attribute(context, realEl, "alt", String(value)); },
     setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
@@ -374,7 +422,12 @@ export function createSafeAnchorElement(
 
   return Object.assign(base, {
     setHref(url: string): SafeURLDecision {
-      return applyURLDecision(context, realEl, "href", context.urlPolicy.decide("anchor.href", url));
+      return applyURLDecision(
+        context,
+        realEl,
+        "href",
+        () => context.urlPolicy.decide("anchor.href", url),
+      );
     },
   }) as SafeAnchorElement;
 }
@@ -389,7 +442,12 @@ export function createSafeVideoElement(
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
-      return applyURLDecision(context, realEl, "src", context.urlPolicy.decide("video.src", url));
+      return applyURLDecision(
+        context,
+        realEl,
+        "src",
+        () => context.urlPolicy.decide("video.src", url),
+      );
     },
     setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
     setHeight(value: number): void {
@@ -404,7 +462,7 @@ export function createSafeVideoElement(
         context,
         realEl,
         "poster",
-        context.urlPolicy.decide("video.poster", url),
+        () => context.urlPolicy.decide("video.poster", url),
       );
     },
   }) as SafeVideoElement;
@@ -420,7 +478,12 @@ export function createSafeAudioElement(
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
-      return applyURLDecision(context, realEl, "src", context.urlPolicy.decide("audio.src", url));
+      return applyURLDecision(
+        context,
+        realEl,
+        "src",
+        () => context.urlPolicy.decide("audio.src", url),
+      );
     },
     setControls(value: boolean): void { booleanAttribute(context, realEl, "controls", value); },
     setAutoplay(value: boolean): void { booleanAttribute(context, realEl, "autoplay", value); },
@@ -439,7 +502,12 @@ export function createSafeSourceElement(
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
-      return applyURLDecision(context, realEl, "src", context.urlPolicy.decide("source.src", url));
+      return applyURLDecision(
+        context,
+        realEl,
+        "src",
+        () => context.urlPolicy.decide("source.src", url),
+      );
     },
     setType(value: string): void { attribute(context, realEl, "type", String(value)); },
   }) as SafeSourceElement;

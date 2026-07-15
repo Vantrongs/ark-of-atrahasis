@@ -12,6 +12,7 @@ export interface RegistryEntry {
   readonly wrapper: SafeNode;
   readonly real: RealNode;
   state: NodeState;
+  accountingReleased: boolean;
   readonly listeners: Set<() => void>;
   readonly resources: Record<AccountedResource, Map<string, number>>;
 }
@@ -23,13 +24,18 @@ export class NodeRegistry {
   readonly #entryByReal = new WeakMap<RealNode, RegistryEntry>();
   readonly #entryByWrapper = new WeakMap<SafeNode, RegistryEntry>();
   readonly #entries = new Set<RegistryEntry>();
+  readonly #ownerDocumentOf: (node: RealNode) => Document | null;
 
-  constructor(ownerDocument: Document) {
+  constructor(
+    ownerDocument: Document,
+    ownerDocumentOf: (node: RealNode) => Document | null,
+  ) {
     this.#ownerDocument = ownerDocument;
+    this.#ownerDocumentOf = ownerDocumentOf;
   }
 
   register(wrapper: SafeNode, real: RealNode): RegistryEntry {
-    if (real.ownerDocument !== this.#ownerDocument) {
+    if (this.#ownerDocumentOf(real) !== this.#ownerDocument) {
       throw new SafeDOMError(
         "OWNER_DOCUMENT_MISMATCH",
         "A wrapper can only own nodes from its ShadowRoot document",
@@ -51,6 +57,7 @@ export class NodeRegistry {
       wrapper,
       real,
       state: "active",
+      accountingReleased: false,
       listeners: new Set(),
       resources: {
         text: new Map(),

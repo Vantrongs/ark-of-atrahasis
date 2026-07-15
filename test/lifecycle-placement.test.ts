@@ -55,6 +55,106 @@ describe("placement enforcement", () => {
     expect(outside.firstElementChild).toBe(raw);
   });
 
+  it("clears nested URL, style, and listeners before releasing revoked accounting", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: { nodes: 2, listeners: 1, styleBytes: 3, requests: 1 },
+      urlPolicy: REQUEST_POLICY,
+      stylePolicy: STYLE_POLICY,
+    });
+    const parent = safeDocument.createDiv();
+    const image = safeDocument.createImage();
+    const handler = vi.fn();
+    expect(image.style.set("color", "red")).toBe(true);
+    expect(image.setSrc("https://example.test/image.png").allowed).toBe(true);
+    image.onClick(handler);
+    parent.appendChild(image);
+    safeDocument.appendChild(parent);
+
+    const rawParent = requireElement(root.querySelector("div"));
+    const rawImage = requireElement(root.querySelector("img"));
+    Object.defineProperty(rawImage, "removeAttribute", {
+      configurable: true,
+      value: () => { throw document.body; },
+    });
+    const outside = document.createElement("section");
+    document.body.appendChild(outside);
+    outside.appendChild(rawParent);
+
+    expectCode(() => parent.getText(), "PLACEMENT_VIOLATION");
+    expect(rawImage.hasAttribute("style")).toBe(false);
+    expect(rawImage.hasAttribute("src")).toBe(false);
+    rawImage.dispatchEvent(new Event("click"));
+    expect(handler).not.toHaveBeenCalled();
+
+    expect(() => parent.dispose()).not.toThrow();
+    expect(() => image.dispose()).not.toThrow();
+    const replacement = safeDocument.createImage();
+    const secondReplacement = safeDocument.createDiv();
+    expect(replacement.style.set("color", "red")).toBe(true);
+    expect(replacement.setSrc("https://example.test/replacement.png").allowed).toBe(true);
+    const cleanup = replacement.onClick(() => undefined);
+    cleanup();
+    secondReplacement.dispose();
+
+    expect(() => safeDocument.dispose()).not.toThrow();
+    expect(outside.firstElementChild).toBe(rawParent);
+    expect(rawImage.hasAttribute("style")).toBe(false);
+    expect(rawImage.hasAttribute("src")).toBe(false);
+  });
+
+  it("retries failed revoked descendant cleanup before releasing placement accounting", () => {
+    const prototype = window.Element.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      throw new Error("expected Element.prototype.removeAttribute");
+    }
+    const nativeRemoveAttribute = descriptor.value;
+    let failNextSourceCleanup = false;
+    Object.defineProperty(prototype, "removeAttribute", {
+      ...descriptor,
+      value(this: Element, name: string): void {
+        if (failNextSourceCleanup && name === "src") {
+          failNextSourceCleanup = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeRemoveAttribute, this, [name]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { nodes: 2, requests: 1 },
+        urlPolicy: REQUEST_POLICY,
+      });
+      const parent = safeDocument.createDiv();
+      const image = safeDocument.createImage();
+      expect(image.setSrc("https://example.test/original.png").allowed).toBe(true);
+      parent.appendChild(image);
+      safeDocument.appendChild(parent);
+      const rawParent = requireElement(root.querySelector("div"));
+      const rawImage = requireElement(root.querySelector("img"));
+      const outside = document.createElement("section");
+      document.body.appendChild(outside);
+      outside.appendChild(rawParent);
+      failNextSourceCleanup = true;
+
+      expectCode(() => parent.getText(), "DOM_OPERATION_FAILED");
+      expect(rawImage.hasAttribute("src")).toBe(true);
+      expect(() => parent.dispose()).not.toThrow();
+      expect(rawImage.hasAttribute("src")).toBe(false);
+
+      const replacementImage = safeDocument.createImage();
+      const replacementParent = safeDocument.createDiv();
+      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
+      replacementImage.dispose();
+      replacementParent.dispose();
+    } finally {
+      Object.defineProperty(prototype, "removeAttribute", descriptor);
+    }
+  });
+
   it("treats a detached external parent as outside the owned tree", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
@@ -157,6 +257,90 @@ describe("detach and disposal", () => {
     expectCode(() => wrapper.style.get("color"), "DOCUMENT_DISPOSED");
   });
 
+  it("retries a failed captured detach before releasing disposal tracking", () => {
+    const prototype = window.Node.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeChild");
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      throw new Error("expected Node.prototype.removeChild");
+    }
+    const nativeRemoveChild = descriptor.value;
+    let failNext = false;
+    Object.defineProperty(prototype, "removeChild", {
+      ...descriptor,
+      value(this: Node, child: Node): Node {
+        if (failNext) {
+          failNext = false;
+          throw document.body;
+        }
+        return Reflect.apply(nativeRemoveChild, this, [child]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root);
+      const wrapper = safeDocument.createDiv();
+      safeDocument.appendChild(wrapper);
+      failNext = true;
+
+      expectCode(() => safeDocument.dispose(), "DOM_OPERATION_FAILED");
+      expect(root.childNodes).toHaveLength(1);
+      expect(() => safeDocument.dispose()).not.toThrow();
+      expect(root.childNodes).toHaveLength(0);
+      expectCode(() => wrapper.getText(), "DOCUMENT_DISPOSED");
+    } finally {
+      Object.defineProperty(prototype, "removeChild", descriptor);
+    }
+  });
+
+  it("retries failed descendant cleanup before releasing recursive disposal accounting", () => {
+    const prototype = window.Element.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      throw new Error("expected Element.prototype.removeAttribute");
+    }
+    const nativeRemoveAttribute = descriptor.value;
+    let failNextSourceCleanup = false;
+    Object.defineProperty(prototype, "removeAttribute", {
+      ...descriptor,
+      value(this: Element, name: string): void {
+        if (failNextSourceCleanup && name === "src") {
+          failNextSourceCleanup = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeRemoveAttribute, this, [name]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { nodes: 2, requests: 1 },
+        urlPolicy: REQUEST_POLICY,
+      });
+      const parent = safeDocument.createDiv();
+      const image = safeDocument.createImage();
+      expect(image.setSrc("https://example.test/original.png").allowed).toBe(true);
+      parent.appendChild(image);
+      safeDocument.appendChild(parent);
+      const rawImage = requireElement(root.querySelector("img"));
+      failNextSourceCleanup = true;
+
+      expectCode(() => parent.dispose(), "DOM_OPERATION_FAILED");
+      expect(rawImage.hasAttribute("src")).toBe(true);
+      expect(() => parent.dispose()).not.toThrow();
+      expect(rawImage.hasAttribute("src")).toBe(false);
+
+      const replacementImage = safeDocument.createImage();
+      const replacementParent = safeDocument.createDiv();
+      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
+      replacementImage.dispose();
+      replacementParent.dispose();
+    } finally {
+      Object.defineProperty(prototype, "removeAttribute", descriptor);
+    }
+  });
+
   it("aborts retained listeners and clears owned styles and request resources", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
@@ -199,7 +383,7 @@ describe("detach and disposal", () => {
     expect(() => safeDocument.dispose()).not.toThrow();
   });
 
-  it("normalizes native mutation/listener failures without retaining their cause", () => {
+  it("uses captured attribute and listener methods despite hostile own shadowing", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
       quotas: { attributeBytes: 5, listeners: 1 },
@@ -207,20 +391,17 @@ describe("detach and disposal", () => {
     const wrapper = safeDocument.createDiv();
     safeDocument.appendChild(wrapper);
     const raw = requireElement(root.firstElementChild);
-    const nativeSetAttribute = raw.setAttribute;
-    const nativeAddEventListener = raw.addEventListener;
-    raw.setAttribute = (() => { throw new DOMException("host secret"); }) as typeof raw.setAttribute;
+    Object.defineProperties(raw, {
+      setAttribute: { configurable: true, value: () => { throw document.body; } },
+      addEventListener: { configurable: true, value: () => { throw () => window; } },
+    });
 
-    expectCode(() => wrapper.setId("abc"), "DOM_OPERATION_FAILED");
-    raw.setAttribute = nativeSetAttribute;
-    wrapper.setId("abc"); // failed mutation rolled its attribute accounting back
-
-    raw.addEventListener = (() => {
-      throw new DOMException("another host secret");
-    }) as typeof raw.addEventListener;
-    expectCode(() => wrapper.onClick(() => undefined), "DOM_OPERATION_FAILED");
-    raw.addEventListener = nativeAddEventListener;
-    const cleanup = wrapper.onClick(() => undefined); // listener quota was rolled back too
+    expect(() => wrapper.setId("abc")).not.toThrow();
+    expect(raw.getAttribute("id")).toBe("abc");
+    const handler = vi.fn();
+    const cleanup = wrapper.onClick(handler);
+    raw.dispatchEvent(new Event("click"));
+    expect(handler).toHaveBeenCalledTimes(1);
     cleanup();
   });
 });
@@ -341,6 +522,33 @@ describe("exact quota accounting", () => {
     image.dispose(); // releases the active sink, not the lifetime attempt budget
     const anchor = safeDocument.createAnchor();
     expectCode(() => anchor.setHref("https://example.test/next"), "QUOTA_EXCEEDED");
+  });
+
+  it("meters denied URL setters as public operations", () => {
+    const safeDocument = createSafeDocument(makeRoot(), {
+      quotas: { operations: 1 },
+    });
+    const image = safeDocument.createImage();
+
+    expectCode(
+      () => image.setSrc("https://denied.example/image.png"),
+      "QUOTA_EXCEEDED",
+    );
+  });
+
+  it("counts malformed and denied URL calls as cumulative request attempts", () => {
+    const safeDocument = createSafeDocument(makeRoot(), {
+      quotas: { requestAttempts: 2 },
+      urlPolicy: REQUEST_POLICY,
+    });
+    const image = safeDocument.createImage();
+
+    expect(image.setSrc("https://%").allowed).toBe(false);
+    expect(image.setSrc("https://denied.example/image.png").allowed).toBe(false);
+    expectCode(
+      () => image.setSrc("https://example.test/approved.png"),
+      "QUOTA_EXCEEDED",
+    );
   });
 
   it("rejects invalid quota configuration without claiming the root", () => {

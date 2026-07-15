@@ -141,24 +141,40 @@ export function createSafeDocument(
 
   return {
     appendChild(child): void {
-      context.documentOperation(() => context.root.appendChild(context.requireRealNode(child)));
+      context.documentOperation(() => {
+        context.platform.appendChild(
+          context.root,
+          context.requireRealNode(child),
+          "ShadowRoot.appendChild",
+        );
+      });
     },
     insertBefore(newChild, reference): void {
       context.documentOperation(() => {
-        context.root.insertBefore(
+        context.platform.insertBefore(
+          context.root,
           context.requireRealNode(newChild),
           context.requireRealNode(reference),
+          "ShadowRoot.insertBefore",
         );
       });
     },
     removeChild(child): void {
-      context.documentOperation(() => context.root.removeChild(context.requireRealNode(child)));
+      context.documentOperation(() => {
+        context.platform.removeChild(
+          context.root,
+          context.requireRealNode(child),
+          "ShadowRoot.removeChild",
+        );
+      });
     },
     replaceChild(newChild, oldChild): void {
       context.documentOperation(() => {
-        context.root.replaceChild(
+        context.platform.replaceChild(
+          context.root,
           context.requireRealNode(newChild),
           context.requireRealNode(oldChild),
+          "ShadowRoot.replaceChild",
         );
       });
     },
@@ -269,7 +285,7 @@ export function createSafeDocument(
     getElement(id: string): SafeElement | null {
       const primitiveId = requirePrimitiveString(id, "getElement.id");
       return context.documentOperation(() => {
-        const real = context.root.getElementById(primitiveId);
+        const real = context.platform.getElementById(context.root, primitiveId);
         if (!real) return null;
         return registry.getWrapper<SafeElement>(real) ?? null;
       });

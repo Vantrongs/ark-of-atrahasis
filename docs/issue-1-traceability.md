@@ -67,6 +67,20 @@ test or packaging proof runs in CI.
       are recorded as release risks requiring owner/legal confirmation; this
       repository does not present that record as legal advice.
 
+### Runtime-core evidence (partial)
+
+- `src/platform.ts` captures root-owner-realm Web IDL methods/accessors once and
+  normalizes every platform failure to a fresh `SafeDOMError`.
+- `test/platform-boundary.test.ts` covers native invalid topology plus malicious
+  own root/node getters and methods that throw DOM/global/function values.
+- `test/lifecycle-placement.test.ts` proves placement revocation physically
+  clears URL/style/listener effects before accounting is reusable, and that
+  denied or malformed URL setter calls consume operation and cumulative-request
+  attempt budgets.
+
+This evidence is intentionally partial: it does not complete the unchecked SES,
+form-isolation, primitive/numeric, public-type, or real-browser criteria above.
+
 ## Acceptance evidence
 
 The final integration pass will replace this section with exact test files,

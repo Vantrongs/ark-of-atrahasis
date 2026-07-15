@@ -8,10 +8,15 @@ export function createSafeTextNode(context: DocumentContext, realText: Text): Sa
   const wrapper: SafeTextNode = {
     setText(value: string): void {
       const text = String(value ?? "");
-      context.setText(realText, "data", text, () => { realText.textContent = text; });
+      context.setText(realText, "data", text, () => {
+        context.platform.setTextContent(realText, text);
+      });
     },
     getText(): string {
-      return context.nodeOperation(realText, () => realText.textContent ?? "");
+      return context.nodeOperation(
+        realText,
+        () => context.platform.getTextContent(realText) ?? "",
+      );
     },
     detach(): void { context.detachNode(realText); },
     remove(): void { context.detachNode(realText); },
