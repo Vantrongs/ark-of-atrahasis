@@ -156,9 +156,303 @@ describe("owner-realm platform boundary", () => {
     expect(reads).toBe(1);
     expect(() => safeDocument.dispose()).not.toThrow();
   });
+
+  it("uses the iframe owner realm for representative reflected IDL families", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) {
+      throw new Error("expected an iframe document and window");
+    }
+    const root = makeRoot(foreignDocument);
+    const safeDocument = createSafeDocument(root);
+    const textarea = safeDocument.createTextarea();
+    const video = safeDocument.createVideo();
+    const canvas = safeDocument.createCanvas();
+    const cell = safeDocument.createTd();
+    const progress = safeDocument.createProgress();
+    const meter = safeDocument.createMeter();
+    for (const wrapper of [textarea, video, canvas, cell, progress, meter]) {
+      safeDocument.appendChild(wrapper);
+    }
+
+    textarea.setMaxLength(10);
+    textarea.setMinLength(2);
+    textarea.setRows(3);
+    textarea.setCols(4);
+    video.setWidth(640);
+    video.setHeight(360);
+    video.setControls(true);
+    video.setMuted(true);
+    canvas.setWidth(100);
+    canvas.setHeight(100);
+    cell.setColspan(2);
+    cell.setRowspan(0);
+    progress.setMax(2);
+    progress.setValue(1);
+    meter.setMin(-1);
+    meter.setMax(2);
+    meter.setValue(1);
+
+    const rawTextarea = root.querySelector("textarea");
+    const rawVideo = root.querySelector("video");
+    const rawCanvas = root.querySelector("canvas");
+    const rawCell = root.querySelector("td");
+    const rawProgress = root.querySelector("progress");
+    const rawMeter = root.querySelector("meter");
+    expect(rawTextarea).toBeInstanceOf(foreignWindow.HTMLTextAreaElement);
+    expect(rawVideo).toBeInstanceOf(foreignWindow.HTMLVideoElement);
+    expect(rawCanvas).toBeInstanceOf(foreignWindow.HTMLCanvasElement);
+    expect(rawCell).toBeInstanceOf(foreignWindow.HTMLTableCellElement);
+    expect(rawProgress).toBeInstanceOf(foreignWindow.HTMLProgressElement);
+    expect(rawMeter).toBeInstanceOf(foreignWindow.HTMLMeterElement);
+    expect({ minLength: rawTextarea?.minLength, maxLength: rawTextarea?.maxLength, rows: rawTextarea?.rows, cols: rawTextarea?.cols }).toEqual({ minLength: 2, maxLength: 10, rows: 3, cols: 4 });
+    expect({ width: rawVideo?.width, height: rawVideo?.height, controls: rawVideo?.controls, muted: rawVideo?.muted }).toEqual({ width: 640, height: 360, controls: true, muted: true });
+    expect({ width: rawCanvas?.width, height: rawCanvas?.height }).toEqual({ width: 100, height: 100 });
+    expect({ colSpan: rawCell?.colSpan, rowSpan: rawCell?.rowSpan }).toEqual({ colSpan: 2, rowSpan: 0 });
+    expect({ value: rawProgress?.value, max: rawProgress?.max }).toEqual({ value: 1, max: 2 });
+    expect({ value: rawMeter?.value, min: rawMeter?.min, max: rawMeter?.max }).toEqual({ value: 1, min: -1, max: 2 });
+  });
+
+  it("keeps captured reflected IDL accessors after ambient, instance, and prototype poisoning", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const textarea = safeDocument.createTextarea();
+    const video = safeDocument.createVideo();
+    const canvas = safeDocument.createCanvas();
+    const cell = safeDocument.createTd();
+    const progress = safeDocument.createProgress();
+    const meter = safeDocument.createMeter();
+    for (const wrapper of [textarea, video, canvas, cell, progress, meter]) {
+      safeDocument.appendChild(wrapper);
+    }
+    const rawTextarea = requireElement(root.querySelector("textarea"), "textarea");
+    const rawVideo = requireElement(root.querySelector("video"), "video");
+    const rawCanvas = requireElement(root.querySelector("canvas"), "canvas");
+    const rawCell = requireElement(root.querySelector("td"), "cell");
+    const rawProgress = requireElement(root.querySelector("progress"), "progress");
+    const rawMeter = requireElement(root.querySelector("meter"), "meter");
+    const entries = [
+      { prototype: HTMLTextAreaElement.prototype, name: "rows", instance: rawTextarea },
+      { prototype: HTMLMediaElement.prototype, name: "muted", instance: rawVideo },
+      { prototype: HTMLCanvasElement.prototype, name: "width", instance: rawCanvas },
+      { prototype: HTMLTableCellElement.prototype, name: "colSpan", instance: rawCell },
+      { prototype: HTMLProgressElement.prototype, name: "value", instance: rawProgress },
+      { prototype: HTMLMeterElement.prototype, name: "max", instance: rawMeter },
+    ].map((entry) => ({ ...entry, descriptor: requireAccessor(entry.prototype, entry.name) }));
+    const ambientEntries = [
+      "HTMLTextAreaElement",
+      "HTMLMediaElement",
+      "HTMLCanvasElement",
+      "HTMLTableCellElement",
+      "HTMLProgressElement",
+      "HTMLMeterElement",
+    ].map((name) => ({ name, descriptor: requireConfigurableProperty(globalThis, name) }));
+
+    try {
+      for (const { name } of ambientEntries) {
+        Object.defineProperty(globalThis, name, {
+          configurable: true,
+          writable: true,
+          value: () => { throw document; },
+        });
+      }
+      for (const { prototype, name, instance } of entries) {
+        Object.defineProperty(prototype, name, {
+          configurable: true,
+          enumerable: true,
+          get: () => { throw window; },
+          set: () => { throw document.body; },
+        });
+        Object.defineProperty(instance, name, {
+          configurable: true,
+          get: () => { throw document; },
+          set: () => { throw window; },
+        });
+      }
+
+      textarea.setRows(3);
+      video.setMuted(true);
+      canvas.setWidth(100);
+      cell.setColspan(2);
+      progress.setValue(0.5);
+      meter.setMax(2);
+
+      expect(readCaptured(entries[0], rawTextarea)).toBe(3);
+      expect(readCaptured(entries[1], rawVideo)).toBe(true);
+      expect(readCaptured(entries[2], rawCanvas)).toBe(100);
+      expect(readCaptured(entries[3], rawCell)).toBe(2);
+      expect(readCaptured(entries[4], rawProgress)).toBe(0.5);
+      expect(readCaptured(entries[5], rawMeter)).toBe(2);
+    } finally {
+      for (const { prototype, name, descriptor } of entries) {
+        Object.defineProperty(prototype, name, descriptor);
+      }
+      for (const { name, descriptor } of ambientEntries) {
+        Object.defineProperty(globalThis, name, descriptor);
+      }
+    }
+  });
+
+  it("rolls back reflected attributeBytes when a captured owner-realm setter throws", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) {
+      throw new Error("expected an iframe document and window");
+    }
+    const descriptor = requireAccessor(foreignWindow.HTMLTextAreaElement.prototype, "rows");
+    Object.defineProperty(foreignWindow.HTMLTextAreaElement.prototype, "rows", {
+      ...descriptor,
+      set: () => { throw foreignDocument.body; },
+    });
+
+    try {
+      const root = makeRoot(foreignDocument);
+      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 20 } });
+      const textarea = safeDocument.createTextarea();
+      safeDocument.appendChild(textarea);
+
+      expectSafeError(() => textarea.setRows(3), "DOM_OPERATION_FAILED", "HTMLTextAreaElement.rows.set");
+      expect(() => textarea.setClass("")).not.toThrow();
+      expect(root.querySelector("textarea")?.hasAttribute("rows")).toBe(false);
+      expect(root.querySelector("textarea")?.getAttribute("class")).toBe("");
+    } finally {
+      Object.defineProperty(foreignWindow.HTMLTextAreaElement.prototype, "rows", descriptor);
+    }
+  });
+
+  it("uses iframe input IDL and RegExp semantics from the owner realm", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const root = makeRoot(foreignDocument);
+    const safeDocument = createSafeDocument(root);
+    const input = safeDocument.createInput();
+    safeDocument.appendChild(input);
+
+    input.setMaxLength(5);
+    input.setMinLength(2);
+    input.setPattern("[a--b]");
+    input.setType("search");
+    expectSafeError(() => input.setPattern("[a-b-c]"), "ERR_INVALID_ARGUMENT", "SafeInputElement.setPattern.value");
+
+    const raw = root.querySelector("input");
+    expect(raw).toBeInstanceOf(foreignWindow.HTMLInputElement);
+    expect({ type: raw?.type, minLength: raw?.minLength, maxLength: raw?.maxLength, pattern: raw?.pattern }).toEqual({
+      type: "search",
+      minLength: 2,
+      maxLength: 5,
+      pattern: "[a--b]",
+    });
+  });
+
+  it("keeps captured input IDL and RegExp after ambient, prototype, and instance poisoning", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const input = safeDocument.createInput();
+    safeDocument.appendChild(input);
+    const raw = requireElement(root.querySelector("input"), "input");
+    const inputPrototype = HTMLInputElement.prototype;
+    const accessors = [
+      { prototype: inputPrototype, name: "type", descriptor: requireAccessor(inputPrototype, "type") },
+      { prototype: inputPrototype, name: "minLength", descriptor: requireAccessor(inputPrototype, "minLength") },
+      { prototype: inputPrototype, name: "maxLength", descriptor: requireAccessor(inputPrototype, "maxLength") },
+    ];
+    const ambient = ["HTMLInputElement", "RegExp"].map((name) => ({
+      name,
+      descriptor: requireConfigurableProperty(globalThis, name),
+    }));
+
+    try {
+      for (const { name } of ambient) {
+        Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: () => { throw document; } });
+      }
+      for (const { prototype, name } of accessors) {
+        Object.defineProperty(prototype, name, {
+          configurable: true,
+          get: () => { throw window; },
+          set: () => { throw document.body; },
+        });
+        Object.defineProperty(raw, name, {
+          configurable: true,
+          get: () => { throw document; },
+          set: () => { throw window; },
+        });
+      }
+
+      input.setMaxLength(5);
+      input.setMinLength(2);
+      input.setPattern("[a--b]");
+      input.setType("search");
+
+      expect(Reflect.apply(accessors[0]?.descriptor.get ?? (() => undefined), raw, [])).toBe("search");
+      expect(Reflect.apply(accessors[1]?.descriptor.get ?? (() => undefined), raw, [])).toBe(2);
+      expect(Reflect.apply(accessors[2]?.descriptor.get ?? (() => undefined), raw, [])).toBe(5);
+      expect(raw.getAttribute("pattern")).toBe("[a--b]");
+    } finally {
+      for (const { prototype, name, descriptor } of accessors) Object.defineProperty(prototype, name, descriptor);
+      for (const { name, descriptor } of ambient) Object.defineProperty(globalThis, name, descriptor);
+    }
+  });
+
+  it("normalizes an input IDL setter throw and rolls back reflected attributeBytes", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const descriptor = requireAccessor(foreignWindow.HTMLInputElement.prototype, "minLength");
+    Object.defineProperty(foreignWindow.HTMLInputElement.prototype, "minLength", {
+      ...descriptor,
+      set: () => { throw foreignDocument.body; },
+    });
+
+    try {
+      const root = makeRoot(foreignDocument);
+      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 25 } });
+      const input = safeDocument.createInput();
+      safeDocument.appendChild(input);
+      expectSafeError(() => input.setMinLength(2), "DOM_OPERATION_FAILED", "HTMLInputElement.minLength.set");
+      expect(() => input.setId("x")).not.toThrow();
+      expect(root.querySelector("input")?.hasAttribute("minlength")).toBe(false);
+      expect(root.querySelector("input")?.id).toBe("x");
+    } finally {
+      Object.defineProperty(foreignWindow.HTMLInputElement.prototype, "minLength", descriptor);
+    }
+  });
 });
 
-function expectSafeError(action: () => unknown, code: string): void {
+function requireElement<T extends Element>(value: T | null, label: string): T {
+  if (value === null) throw new Error(`expected ${label}`);
+  return value;
+}
+
+function requireAccessor(prototype: object, name: string): PropertyDescriptor & Required<Pick<PropertyDescriptor, "get" | "set">> {
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+  if (descriptor?.get === undefined || descriptor.set === undefined || descriptor.configurable !== true) {
+    throw new Error(`expected configurable ${name} accessor`);
+  }
+  return descriptor as PropertyDescriptor & Required<Pick<PropertyDescriptor, "get" | "set">>;
+}
+
+function requireConfigurableProperty(object: object, name: string): PropertyDescriptor {
+  const descriptor = Object.getOwnPropertyDescriptor(object, name);
+  if (descriptor === undefined || descriptor.configurable !== true) {
+    throw new Error(`expected configurable ${name} property`);
+  }
+  return descriptor;
+}
+
+function readCaptured(entry: { readonly descriptor: PropertyDescriptor & Required<Pick<PropertyDescriptor, "get">> }, instance: Element): unknown {
+  return Reflect.apply(entry.descriptor.get, instance, []);
+}
+
+function expectSafeError(action: () => unknown, code: string, operation?: string): void {
   let thrown: unknown;
   try {
     action();
@@ -169,6 +463,7 @@ function expectSafeError(action: () => unknown, code: string): void {
   expect(isSafeDOMError(thrown)).toBe(true);
   if (!isSafeDOMError(thrown)) return;
   expect(thrown.code).toBe(code);
+  if (operation !== undefined) expect(thrown.operation).toBe(operation);
   expect(Object.hasOwn(thrown, "stack")).toBe(false);
   expect(Object.hasOwn(thrown, "cause")).toBe(false);
 }

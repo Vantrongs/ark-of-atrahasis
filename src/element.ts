@@ -35,8 +35,51 @@ import type {
 } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
 import { createSafeStyle } from "./style.ts";
-import { isInputTypeAllowed, isButtonTypeAllowed, isAttrKeySafe } from "./validation.ts";
+import { isAttrKeySafe } from "./validation.ts";
 import type { SafeURLDecision } from "./url-policy.ts";
+import { invalidArgument } from "./errors.ts";
+import {
+  asciiLowercase,
+  requireAsciiKeyword,
+  requireBoolean,
+  requireExactKeyword,
+  requireFinite,
+  requireFunction,
+  requireIntegerInRange,
+  requireLineBreakFreeString,
+  requireMimeType,
+  requireString,
+} from "./attribute-contract.ts";
+import {
+  assertInputTypeTransition,
+  compareInputRangeValues,
+  getInputType,
+  inputTypeSupportsAutocomplete,
+  isCheckableInputType,
+  parseInputRangeValue,
+  parseInputStep,
+  requireAutocompleteInputState,
+  requireCheckableInputState,
+  requirePlaceholderInputState,
+  requireRangeInputState,
+  requireReadonlyInputState,
+  requireRequiredInputState,
+  requireTextInputState,
+} from "./input-state-contract.ts";
+import {
+  ARIA_ROLES,
+  AUTOCOMPLETE_VALUES,
+  BUTTON_TYPES,
+  DIR_VALUES,
+  ENTER_KEY_HINT_VALUES,
+  IMAGE_LOADING_VALUES,
+  INPUT_MODE_VALUES,
+  INPUT_TYPES,
+  TABLE_SCOPE_VALUES,
+  TEXTAREA_WRAP_VALUES,
+} from "./vocabularies.ts";
+
+const MAX_CANVAS_PIXELS = 16_777_216;
 
 function addSafeEvent<Kind extends SafeEventKind>(
   context: DocumentContext,
@@ -44,12 +87,14 @@ function addSafeEvent<Kind extends SafeEventKind>(
   eventName: string,
   kind: Kind,
   handler: EventHandler<Extract<SafeEvent, { readonly kind: Kind }>>,
+  operation: string,
 ): EventCleanup {
+  const primitiveHandler = requireFunction(handler, operation);
   const nativeHandler = (nativeEvent: Event): void => {
     if (!context.canDispatch(realEl)) return;
     const dispatch = context.eventSnapshotter.open(nativeEvent, kind);
     try {
-      handler(dispatch.event);
+      primitiveHandler(dispatch.event);
     } finally {
       dispatch.close();
     }
@@ -62,8 +107,9 @@ function attribute(
   realEl: Element,
   name: string,
   value: string | null | undefined,
+  validate?: () => void,
 ): void {
-  context.setAttribute(realEl, name, value);
+  context.setAttribute(realEl, name, value, validate);
 }
 
 function booleanAttribute(
@@ -127,7 +173,7 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
     dispose(): void { context.disposeNode(realEl); },
 
     setText(value: string): void {
-      const text = String(value ?? "");
+      const text = requireString(value, "SafeElement.setText.value");
       context.setText(realEl, "textContent", text, () => {
         context.platform.setTextContent(htmlEl, text);
       });
@@ -136,76 +182,102 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
       return context.nodeOperation(realEl, () => context.platform.getTextContent(htmlEl) ?? "");
     },
 
-    setClass(value: string): void { attribute(context, realEl, "class", String(value)); },
+    setClass(value: string): void {
+      attribute(context, realEl, "class", requireString(value, "SafeElement.setClass.value"));
+    },
     getClass(): string {
       return context.nodeOperation(
         realEl,
         () => context.platform.getAttribute(realEl, "class") ?? "",
       );
     },
-    setId(value: string): void { attribute(context, realEl, "id", String(value)); },
+    setId(value: string): void {
+      const primitive = requireString(value, "SafeElement.setId.value");
+      attribute(context, realEl, "id", primitive === "" ? null : primitive);
+    },
     getId(): string {
       return context.nodeOperation(
         realEl,
         () => context.platform.getAttribute(realEl, "id") ?? "",
       );
     },
-    setTitle(value: string): void { attribute(context, realEl, "title", String(value)); },
-    setRole(value: string): void { attribute(context, realEl, "role", String(value)); },
-    setTabIndex(value: number): void {
-      attribute(context, realEl, "tabindex", String(Number(value) | 0));
+    setTitle(value: string): void {
+      attribute(context, realEl, "title", requireString(value, "SafeElement.setTitle.value"));
     },
-    setHidden(value: boolean): void { booleanAttribute(context, realEl, "hidden", value); },
-    setLang(value: string): void { attribute(context, realEl, "lang", String(value)); },
-    setDir(value: string): void { attribute(context, realEl, "dir", String(value)); },
+    setRole(value: string): void {
+      attribute(context, realEl, "role", requireAsciiKeyword(value, ARIA_ROLES, "SafeElement.setRole.value"));
+    },
+    setTabIndex(value: number): void {
+      const tabIndex = requireIntegerInRange(value, -1, 0, "SafeElement.setTabIndex.value");
+      context.setReflectedIDL(realEl, "tabindex", `${tabIndex}`, () => {
+        context.platform.setTabIndex(htmlEl, tabIndex);
+      });
+    },
+    setHidden(value: boolean): void {
+      booleanAttribute(context, realEl, "hidden", requireBoolean(value, "SafeElement.setHidden.value"));
+    },
+    setLang(value: string): void {
+      const primitive = requireString(value, "SafeElement.setLang.value");
+      attribute(context, realEl, "lang", primitive === "" ? null : primitive);
+    },
+    setDir(value: string): void {
+      attribute(context, realEl, "dir", requireAsciiKeyword(value, DIR_VALUES, "SafeElement.setDir.value"));
+    },
     setSpellcheck(value: boolean): void {
-      attribute(context, realEl, "spellcheck", String(!!value));
+      const primitive = requireBoolean(value, "SafeElement.setSpellcheck.value");
+      attribute(context, realEl, "spellcheck", primitive ? "true" : "false");
     },
 
     setData(key: string, value: string): void {
-      const valid = typeof key === "string" && isAttrKeySafe(key);
-      attribute(context, realEl, valid ? `data-${key}` : "data-invalid", valid ? String(value) : undefined);
+      const primitiveKey = requireString(key, "SafeElement.setData.key");
+      if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.setData.key");
+      const primitiveValue = requireString(value, "SafeElement.setData.value");
+      attribute(context, realEl, `data-${primitiveKey}`, primitiveValue);
     },
     getData(key: string): string | undefined {
+      const primitiveKey = requireString(key, "SafeElement.getData.key");
+      if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.getData.key");
       return context.nodeOperation(realEl, () => {
-        if (typeof key !== "string" || !isAttrKeySafe(key)) return undefined;
-        return context.platform.getAttribute(realEl, `data-${key}`) ?? undefined;
+        return context.platform.getAttribute(realEl, `data-${primitiveKey}`) ?? undefined;
       });
     },
     setAria(key: string, value: string): void {
-      const valid = typeof key === "string" && isAttrKeySafe(key);
-      attribute(context, realEl, valid ? `aria-${key}` : "aria-invalid", valid ? String(value) : undefined);
+      const primitiveKey = requireString(key, "SafeElement.setAria.key");
+      if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.setAria.key");
+      const primitiveValue = requireString(value, "SafeElement.setAria.value");
+      attribute(context, realEl, `aria-${primitiveKey}`, primitiveValue);
     },
     getAria(key: string): string | undefined {
+      const primitiveKey = requireString(key, "SafeElement.getAria.key");
+      if (!isAttrKeySafe(primitiveKey)) throw invalidArgument("SafeElement.getAria.key");
       return context.nodeOperation(realEl, () => {
-        if (typeof key !== "string" || !isAttrKeySafe(key)) return undefined;
-        return context.platform.getAttribute(realEl, `aria-${key}`) ?? undefined;
+        return context.platform.getAttribute(realEl, `aria-${primitiveKey}`) ?? undefined;
       });
     },
 
-    onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "click", "mouse", handler); },
-    onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "dblclick", "mouse", handler); },
-    onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousedown", "mouse", handler); },
-    onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseup", "mouse", handler); },
-    onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseenter", "mouse", handler); },
-    onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseleave", "mouse", handler); },
-    onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousemove", "mouse", handler); },
-    onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerdown", "pointer", handler); },
-    onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerup", "pointer", handler); },
-    onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointermove", "pointer", handler); },
-    onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "contextmenu", "mouse", handler); },
+    onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "click", "mouse", handler, "SafeElement.onClick.handler"); },
+    onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "dblclick", "mouse", handler, "SafeElement.onDblClick.handler"); },
+    onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousedown", "mouse", handler, "SafeElement.onMouseDown.handler"); },
+    onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseup", "mouse", handler, "SafeElement.onMouseUp.handler"); },
+    onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseenter", "mouse", handler, "SafeElement.onMouseEnter.handler"); },
+    onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseleave", "mouse", handler, "SafeElement.onMouseLeave.handler"); },
+    onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousemove", "mouse", handler, "SafeElement.onMouseMove.handler"); },
+    onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerdown", "pointer", handler, "SafeElement.onPointerDown.handler"); },
+    onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerup", "pointer", handler, "SafeElement.onPointerUp.handler"); },
+    onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointermove", "pointer", handler, "SafeElement.onPointerMove.handler"); },
+    onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "contextmenu", "mouse", handler, "SafeElement.onContextMenu.handler"); },
 
-    onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keydown", "keyboard", handler); },
-    onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keyup", "keyboard", handler); },
+    onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keydown", "keyboard", handler, "SafeElement.onKeyDown.handler"); },
+    onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keyup", "keyboard", handler, "SafeElement.onKeyUp.handler"); },
 
-    onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "focus", "focus", handler); },
-    onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "blur", "focus", handler); },
+    onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "focus", "focus", handler, "SafeElement.onFocus.handler"); },
+    onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "blur", "focus", handler, "SafeElement.onBlur.handler"); },
 
-    onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchstart", "touch", handler); },
-    onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchend", "touch", handler); },
-    onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchmove", "touch", handler); },
+    onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchstart", "touch", handler, "SafeElement.onTouchStart.handler"); },
+    onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchend", "touch", handler, "SafeElement.onTouchEnd.handler"); },
+    onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchmove", "touch", handler, "SafeElement.onTouchMove.handler"); },
 
-    onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup { return addSafeEvent(context, realEl, "scroll", "generic", handler); },
+    onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup { return addSafeEvent(context, realEl, "scroll", "generic", handler, "SafeElement.onScroll.handler"); },
 
     style: createSafeStyle(context, htmlEl),
   };
@@ -213,72 +285,220 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
   return wrapper;
 }
 
-export function createSafeInputElement(context: DocumentContext, realEl: HTMLInputElement): SafeInputElement {
+export function createSafeInputElement(
+  context: DocumentContext,
+  realEl: HTMLInputElement,
+  initializeNonForm = false,
+): SafeInputElement {
   const known = context.registry.getWrapper<SafeInputElement>(realEl);
   if (known) return known;
   const base = buildSafeElement(context, realEl);
 
-  return context.complete(Object.assign(base, {
+  const wrapper = Object.assign(base, {
     setType(type: string): void {
-      attribute(context, realEl, "type", isInputTypeAllowed(type) ? type.toLowerCase() : undefined);
+      const normalized = requireAsciiKeyword(type, INPUT_TYPES, "SafeInputElement.setType.type");
+      context.updateContentResources(realEl, () => {
+        const current = assertInputTypeTransition(context.platform, realEl, normalized);
+        const preview = context.platform.previewInputType(realEl, normalized);
+        const sourceValue = isCheckableInputType(current)
+          ? (context.platform.getAttribute(realEl, "value") ?? "")
+          : context.platform.getInputValue(realEl);
+        const targetCreatesDefault = sourceValue === ""
+          && (normalized === "range" || normalized === "color");
+        if (!isCheckableInputType(normalized) && preview.value !== sourceValue && !targetCreatesDefault) {
+          throw invalidArgument("SafeInputElement.setType.state");
+        }
+        const autocomplete = inputTypeSupportsAutocomplete(normalized) ? "off" : null;
+        return {
+          changes: [
+            { resource: "attribute", slot: "type", value: normalized },
+            { resource: "attribute", slot: "value", value: preview.valueAttribute },
+            { resource: "attribute", slot: "autocomplete", value: autocomplete },
+            {
+              resource: "text",
+              slot: "value",
+              value: isCheckableInputType(normalized) ? null : preview.value,
+            },
+          ],
+          action: () => {
+            context.platform.setInputType(realEl, normalized);
+            if (autocomplete === null) context.platform.removeAttribute(realEl, "autocomplete");
+            else context.platform.setAttribute(realEl, "autocomplete", autocomplete);
+          },
+        };
+      });
     },
     setValue(value: string): void {
-      const text = String(value);
-      context.setText(realEl, "value", text, () => {
-        context.platform.setInputValue(realEl, text);
+      const text = requireString(value, "SafeInputElement.setValue.value");
+      context.updateContentResources(realEl, () => {
+        const type = getInputType(context.platform, realEl, "SafeInputElement.setValue.state");
+        const preview = context.platform.previewInputValue(realEl, text);
+        if (!isCheckableInputType(type) && preview.value !== text) {
+          throw invalidArgument("SafeInputElement.setValue.value");
+        }
+        return {
+          changes: [
+            { resource: "attribute", slot: "value", value: preview.valueAttribute },
+            {
+              resource: "text",
+              slot: "value",
+              value: isCheckableInputType(type) ? null : preview.value,
+            },
+          ],
+          action: () => context.platform.setInputValue(realEl, text),
+        };
       });
     },
     getValue(): string {
-      return context.nodeOperation(realEl, () => context.platform.getInputValue(realEl));
+      return context.nodeOperation(realEl, () => {
+        getInputType(context.platform, realEl, "SafeInputElement.getValue.state");
+        return context.platform.getInputValue(realEl);
+      });
     },
-    setPlaceholder(value: string): void { attribute(context, realEl, "placeholder", String(value)); },
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-    setReadonly(value: boolean): void { booleanAttribute(context, realEl, "readonly", value); },
-    setRequired(value: boolean): void { booleanAttribute(context, realEl, "required", value); },
+    setPlaceholder(value: string): void {
+      const primitive = requireLineBreakFreeString(value, "SafeInputElement.setPlaceholder.value");
+      attribute(context, realEl, "placeholder", primitive, () => {
+        requirePlaceholderInputState(context.platform, realEl, "SafeInputElement.setPlaceholder.state");
+      });
+    },
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeInputElement.setDisabled.value"));
+    },
+    setReadonly(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeInputElement.setReadonly.value");
+      attribute(context, realEl, "readonly", primitive ? "" : null, () => {
+        requireReadonlyInputState(context.platform, realEl, "SafeInputElement.setReadonly.state");
+      });
+    },
+    setRequired(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeInputElement.setRequired.value");
+      attribute(context, realEl, "required", primitive ? "" : null, () => {
+        requireRequiredInputState(context.platform, realEl, "SafeInputElement.setRequired.state");
+      });
+    },
     setChecked(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeInputElement.setChecked.value");
       context.nodeOperation(realEl, () => {
-        context.platform.setInputChecked(realEl, !!value);
+        requireCheckableInputState(context.platform, realEl, "SafeInputElement.setChecked.state");
+        context.platform.setInputChecked(realEl, primitive);
       });
     },
     getChecked(): boolean {
-      return context.nodeOperation(realEl, () => context.platform.getInputChecked(realEl));
+      return context.nodeOperation(realEl, () => {
+        requireCheckableInputState(context.platform, realEl, "SafeInputElement.getChecked.state");
+        return context.platform.getInputChecked(realEl);
+      });
     },
-    setMin(value: string): void { attribute(context, realEl, "min", String(value)); },
-    setMax(value: string): void { attribute(context, realEl, "max", String(value)); },
-    setStep(value: string): void { attribute(context, realEl, "step", String(value)); },
+    setMin(value: string): void {
+      const primitive = requireString(value, "SafeInputElement.setMin.value");
+      attribute(context, realEl, "min", primitive, () => {
+        const type = requireRangeInputState(context.platform, realEl, "SafeInputElement.setMin.state");
+        const candidate = parseInputRangeValue(type, primitive, "SafeInputElement.setMin.value");
+        const currentMaximum = context.platform.getAttribute(realEl, "max");
+        if (currentMaximum !== null) {
+          const maximum = parseInputRangeValue(type, currentMaximum, "SafeInputElement.setMin.range");
+          if (type !== "time" && compareInputRangeValues(candidate, maximum) > 0) {
+            throw invalidArgument("SafeInputElement.setMin.range");
+          }
+        }
+      });
+    },
+    setMax(value: string): void {
+      const primitive = requireString(value, "SafeInputElement.setMax.value");
+      attribute(context, realEl, "max", primitive, () => {
+        const type = requireRangeInputState(context.platform, realEl, "SafeInputElement.setMax.state");
+        const candidate = parseInputRangeValue(type, primitive, "SafeInputElement.setMax.value");
+        const currentMinimum = context.platform.getAttribute(realEl, "min");
+        if (currentMinimum !== null) {
+          const minimum = parseInputRangeValue(type, currentMinimum, "SafeInputElement.setMax.range");
+          if (type !== "time" && compareInputRangeValues(minimum, candidate) > 0) {
+            throw invalidArgument("SafeInputElement.setMax.range");
+          }
+        }
+      });
+    },
+    setStep(value: string): void {
+      const primitive = requireString(value, "SafeInputElement.setStep.value");
+      const normalized = asciiLowercase(primitive);
+      const serialized = normalized === "any" ? normalized : primitive;
+      attribute(context, realEl, "step", serialized, () => {
+        requireRangeInputState(context.platform, realEl, "SafeInputElement.setStep.state");
+        parseInputStep(serialized, "SafeInputElement.setStep.value");
+      });
+    },
     setMinLength(value: number): void {
-      attribute(context, realEl, "minlength", String(Number(value) | 0));
+      const candidate = requireIntegerInRange(value, 0, 2_147_483_647, "SafeInputElement.setMinLength.value");
+      context.setReflectedIDL(realEl, "minlength", `${candidate}`, () => {
+        requireTextInputState(context.platform, realEl, "SafeInputElement.setMinLength.state");
+        const maximum = context.platform.getInputMaxLength(realEl);
+        if (maximum >= 0 && candidate > maximum) throw invalidArgument("SafeInputElement.setMinLength.range");
+        context.platform.setInputMinLength(realEl, candidate);
+      });
     },
     setMaxLength(value: number): void {
-      attribute(context, realEl, "maxlength", String(Number(value) | 0));
+      const candidate = requireIntegerInRange(value, 0, 2_147_483_647, "SafeInputElement.setMaxLength.value");
+      context.setReflectedIDL(realEl, "maxlength", `${candidate}`, () => {
+        requireTextInputState(context.platform, realEl, "SafeInputElement.setMaxLength.state");
+        const minimum = context.platform.getInputMinLength(realEl);
+        if (minimum >= 0 && candidate < minimum) throw invalidArgument("SafeInputElement.setMaxLength.range");
+        context.platform.setInputMaxLength(realEl, candidate);
+      });
     },
-    setPattern(value: string): void { attribute(context, realEl, "pattern", String(value)); },
+    setPattern(value: string): void {
+      const primitive = requireString(value, "SafeInputElement.setPattern.value");
+      attribute(context, realEl, "pattern", primitive, () => {
+        requireTextInputState(context.platform, realEl, "SafeInputElement.setPattern.state");
+        if (!context.platform.isInputPatternValid(primitive)) throw invalidArgument("SafeInputElement.setPattern.value");
+      });
+    },
     setAutocomplete(value: string): void {
-      attribute(context, realEl, "autocomplete", String(value));
+      const primitive = requireExactKeyword(value, AUTOCOMPLETE_VALUES, "SafeInputElement.setAutocomplete.value");
+      attribute(context, realEl, "autocomplete", primitive, () => {
+        requireAutocompleteInputState(context.platform, realEl, "SafeInputElement.setAutocomplete.state");
+      });
     },
-    setAutofocus(value: boolean): void { booleanAttribute(context, realEl, "autofocus", value); },
-    setName(value: string): void { attribute(context, realEl, "name", String(value)); },
-    setInputMode(value: string): void { attribute(context, realEl, "inputmode", String(value)); },
+    setAutofocus(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeInputElement.setAutofocus.value");
+      if (primitive) throw invalidArgument("SafeInputElement.setAutofocus.value");
+      attribute(context, realEl, "autofocus", null);
+    },
+    setName(value: string): void {
+      const primitive = requireString(value, "SafeInputElement.setName.value");
+      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+    },
+    setInputMode(value: string): void {
+      attribute(context, realEl, "inputmode", requireAsciiKeyword(value, INPUT_MODE_VALUES, "SafeInputElement.setInputMode.value"));
+    },
     setEnterKeyHint(value: string): void {
-      attribute(context, realEl, "enterkeyhint", String(value));
+      attribute(context, realEl, "enterkeyhint", requireAsciiKeyword(value, ENTER_KEY_HINT_VALUES, "SafeInputElement.setEnterKeyHint.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler);
+      return addSafeEvent(context, realEl, "change", "input", handler, "SafeInputElement.onChange.handler");
     },
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "input", "input", handler);
+      return addSafeEvent(context, realEl, "input", "input", handler, "SafeInputElement.onInput.handler");
     },
-  }) as SafeInputElement, realEl);
+  }) as SafeInputElement;
+  if (initializeNonForm) {
+    return context.completeInitialized(wrapper, realEl, [
+      { name: "autocomplete", value: "off" },
+    ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
+  }
+  return context.complete(wrapper, realEl);
 }
 
-export function createSafeTextareaElement(context: DocumentContext, realEl: HTMLTextAreaElement): SafeTextareaElement {
+export function createSafeTextareaElement(
+  context: DocumentContext,
+  realEl: HTMLTextAreaElement,
+  initializeNonForm = false,
+): SafeTextareaElement {
   const known = context.registry.getWrapper<SafeTextareaElement>(realEl);
   if (known) return known;
   const base = buildSafeElement(context, realEl);
 
-  return context.complete(Object.assign(base, {
+  const wrapper = Object.assign(base, {
     setValue(value: string): void {
-      const text = String(value);
+      const text = requireString(value, "SafeTextareaElement.setValue.value");
       context.setText(realEl, "value", text, () => {
         context.platform.setTextareaValue(realEl, text);
       });
@@ -286,30 +506,73 @@ export function createSafeTextareaElement(context: DocumentContext, realEl: HTML
     getValue(): string {
       return context.nodeOperation(realEl, () => context.platform.getTextareaValue(realEl));
     },
-    setPlaceholder(value: string): void { attribute(context, realEl, "placeholder", String(value)); },
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-    setReadonly(value: boolean): void { booleanAttribute(context, realEl, "readonly", value); },
-    setRequired(value: boolean): void { booleanAttribute(context, realEl, "required", value); },
+    setPlaceholder(value: string): void {
+      attribute(context, realEl, "placeholder", requireLineBreakFreeString(value, "SafeTextareaElement.setPlaceholder.value"));
+    },
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeTextareaElement.setDisabled.value"));
+    },
+    setReadonly(value: boolean): void {
+      booleanAttribute(context, realEl, "readonly", requireBoolean(value, "SafeTextareaElement.setReadonly.value"));
+    },
+    setRequired(value: boolean): void {
+      booleanAttribute(context, realEl, "required", requireBoolean(value, "SafeTextareaElement.setRequired.value"));
+    },
     setMinLength(value: number): void {
-      attribute(context, realEl, "minlength", String(Number(value) | 0));
+      const candidate = requireIntegerInRange(value, 0, 2_147_483_647, "SafeTextareaElement.setMinLength.value");
+      context.setReflectedIDL(realEl, "minlength", `${candidate}`, () => {
+        const maximum = context.platform.getTextareaMaxLength(realEl);
+        if (maximum >= 0 && candidate > maximum) {
+          throw invalidArgument("SafeTextareaElement.setMinLength.range");
+        }
+        context.platform.setTextareaMinLength(realEl, candidate);
+      });
     },
     setMaxLength(value: number): void {
-      attribute(context, realEl, "maxlength", String(Number(value) | 0));
+      const candidate = requireIntegerInRange(value, 0, 2_147_483_647, "SafeTextareaElement.setMaxLength.value");
+      context.setReflectedIDL(realEl, "maxlength", `${candidate}`, () => {
+        const minimum = context.platform.getTextareaMinLength(realEl);
+        if (minimum >= 0 && candidate < minimum) {
+          throw invalidArgument("SafeTextareaElement.setMaxLength.range");
+        }
+        context.platform.setTextareaMaxLength(realEl, candidate);
+      });
     },
-    setRows(value: number): void { attribute(context, realEl, "rows", String(Number(value) | 0)); },
-    setCols(value: number): void { attribute(context, realEl, "cols", String(Number(value) | 0)); },
-    setWrap(value: string): void { attribute(context, realEl, "wrap", String(value)); },
-    setName(value: string): void { attribute(context, realEl, "name", String(value)); },
+    setRows(value: number): void {
+      const rows = requireIntegerInRange(value, 1, 4_294_967_295, "SafeTextareaElement.setRows.value");
+      context.setReflectedIDL(realEl, "rows", `${rows}`, () => {
+        context.platform.setTextareaRows(realEl, rows);
+      });
+    },
+    setCols(value: number): void {
+      const cols = requireIntegerInRange(value, 1, 4_294_967_295, "SafeTextareaElement.setCols.value");
+      context.setReflectedIDL(realEl, "cols", `${cols}`, () => {
+        context.platform.setTextareaCols(realEl, cols);
+      });
+    },
+    setWrap(value: string): void {
+      attribute(context, realEl, "wrap", requireAsciiKeyword(value, TEXTAREA_WRAP_VALUES, "SafeTextareaElement.setWrap.value"));
+    },
+    setName(value: string): void {
+      const primitive = requireString(value, "SafeTextareaElement.setName.value");
+      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+    },
     setAutocomplete(value: string): void {
-      attribute(context, realEl, "autocomplete", String(value));
+      attribute(context, realEl, "autocomplete", requireExactKeyword(value, AUTOCOMPLETE_VALUES, "SafeTextareaElement.setAutocomplete.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler);
+      return addSafeEvent(context, realEl, "change", "input", handler, "SafeTextareaElement.onChange.handler");
     },
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "input", "input", handler);
+      return addSafeEvent(context, realEl, "input", "input", handler, "SafeTextareaElement.onInput.handler");
     },
-  }) as SafeTextareaElement, realEl);
+  }) as SafeTextareaElement;
+  if (initializeNonForm) {
+    return context.completeInitialized(wrapper, realEl, [
+      { name: "autocomplete", value: "off" },
+    ], () => context.platform.setAttribute(realEl, "autocomplete", "off"));
+  }
+  return context.complete(wrapper, realEl);
 }
 
 export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSelectElement): SafeSelectElement {
@@ -319,7 +582,7 @@ export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSe
 
   return context.complete(Object.assign(base, {
     setValue(value: string): void {
-      const text = String(value);
+      const text = requireString(value, "SafeSelectElement.setValue.value");
       context.setText(realEl, "value", text, () => {
         context.platform.setSelectValue(realEl, text);
       });
@@ -327,12 +590,21 @@ export function createSafeSelectElement(context: DocumentContext, realEl: HTMLSe
     getValue(): string {
       return context.nodeOperation(realEl, () => context.platform.getSelectValue(realEl));
     },
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-    setRequired(value: boolean): void { booleanAttribute(context, realEl, "required", value); },
-    setMultiple(value: boolean): void { booleanAttribute(context, realEl, "multiple", value); },
-    setName(value: string): void { attribute(context, realEl, "name", String(value)); },
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeSelectElement.setDisabled.value"));
+    },
+    setRequired(value: boolean): void {
+      booleanAttribute(context, realEl, "required", requireBoolean(value, "SafeSelectElement.setRequired.value"));
+    },
+    setMultiple(value: boolean): void {
+      booleanAttribute(context, realEl, "multiple", requireBoolean(value, "SafeSelectElement.setMultiple.value"));
+    },
+    setName(value: string): void {
+      const primitive = requireString(value, "SafeSelectElement.setName.value");
+      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+    },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler);
+      return addSafeEvent(context, realEl, "change", "input", handler, "SafeSelectElement.onChange.handler");
     },
   }) as SafeSelectElement, realEl);
 }
@@ -343,30 +615,57 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setValue(value: string): void { attribute(context, realEl, "value", String(value)); },
+    setValue(value: string): void {
+      attribute(context, realEl, "value", requireString(value, "SafeOptionElement.setValue.value"));
+    },
     setSelected(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeOptionElement.setSelected.value");
       context.nodeOperation(realEl, () => {
-        context.platform.setOptionSelected(realEl, !!value);
+        context.platform.setOptionSelected(realEl, primitive);
       });
     },
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-    setLabel(value: string): void { attribute(context, realEl, "label", String(value)); },
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeOptionElement.setDisabled.value"));
+    },
+    setLabel(value: string): void {
+      attribute(context, realEl, "label", requireString(value, "SafeOptionElement.setLabel.value"));
+    },
   }) as SafeOptionElement, realEl);
 }
 
-export function createSafeButtonElement(context: DocumentContext, realEl: HTMLButtonElement): SafeButtonElement {
+export function createSafeButtonElement(
+  context: DocumentContext,
+  realEl: HTMLButtonElement,
+  initializeNonForm = false,
+): SafeButtonElement {
   const known = context.registry.getWrapper<SafeButtonElement>(realEl);
   if (known) return known;
   const base = buildSafeElement(context, realEl);
 
-  return context.complete(Object.assign(base, {
+  const wrapper = Object.assign(base, {
     setType(type: string): void {
-      attribute(context, realEl, "type", isButtonTypeAllowed(type) ? type.toLowerCase() : undefined);
+      const normalized = requireAsciiKeyword(type, BUTTON_TYPES, "SafeButtonElement.setType.type");
+      context.setReflectedIDL(realEl, "type", normalized, () => {
+        context.platform.setButtonType(realEl, normalized);
+      });
     },
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
-    setName(value: string): void { attribute(context, realEl, "name", String(value)); },
-    setValue(value: string): void { attribute(context, realEl, "value", String(value)); },
-  }) as SafeButtonElement, realEl);
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeButtonElement.setDisabled.value"));
+    },
+    setName(value: string): void {
+      const primitive = requireString(value, "SafeButtonElement.setName.value");
+      attribute(context, realEl, "name", primitive === "" ? null : primitive);
+    },
+    setValue(value: string): void {
+      attribute(context, realEl, "value", requireString(value, "SafeButtonElement.setValue.value"));
+    },
+  }) as SafeButtonElement;
+  if (initializeNonForm) {
+    return context.completeInitialized(wrapper, realEl, [
+      { name: "type", value: "button" },
+    ], () => context.platform.setButtonType(realEl, "button"));
+  }
+  return context.complete(wrapper, realEl);
 }
 
 export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLabelElement): SafeLabelElement {
@@ -375,7 +674,9 @@ export function createSafeLabelElement(context: DocumentContext, realEl: HTMLLab
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setFor(value: string): void { attribute(context, realEl, "for", String(value)); },
+    setFor(value: string): void {
+      attribute(context, realEl, "for", requireString(value, "SafeLabelElement.setFor.value"));
+    },
   }) as SafeLabelElement, realEl);
 }
 
@@ -385,7 +686,9 @@ export function createSafeFieldsetElement(context: DocumentContext, realEl: HTML
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setDisabled(value: boolean): void { booleanAttribute(context, realEl, "disabled", value); },
+    setDisabled(value: boolean): void {
+      booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeFieldsetElement.setDisabled.value"));
+    },
   }) as SafeFieldsetElement, realEl);
 }
 
@@ -406,12 +709,24 @@ export function createSafeImageElement(
         () => context.urlPolicy.decide("image.src", url),
       );
     },
-    setAlt(value: string): void { attribute(context, realEl, "alt", String(value)); },
-    setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
-    setHeight(value: number): void {
-      attribute(context, realEl, "height", String(Number(value) | 0));
+    setAlt(value: string): void {
+      attribute(context, realEl, "alt", requireString(value, "SafeImageElement.setAlt.value"));
     },
-    setLoading(value: string): void { attribute(context, realEl, "loading", String(value)); },
+    setWidth(value: number): void {
+      const width = requireIntegerInRange(value, 0, 4_294_967_295, "SafeImageElement.setWidth.value");
+      context.setReflectedIDL(realEl, "width", `${width}`, () => {
+        context.platform.setImageWidth(realEl, width);
+      });
+    },
+    setHeight(value: number): void {
+      const height = requireIntegerInRange(value, 0, 4_294_967_295, "SafeImageElement.setHeight.value");
+      context.setReflectedIDL(realEl, "height", `${height}`, () => {
+        context.platform.setImageHeight(realEl, height);
+      });
+    },
+    setLoading(value: string): void {
+      attribute(context, realEl, "loading", requireAsciiKeyword(value, IMAGE_LOADING_VALUES, "SafeImageElement.setLoading.value"));
+    },
   }) as SafeImageElement, realEl);
 }
 
@@ -452,14 +767,40 @@ export function createSafeVideoElement(
         () => context.urlPolicy.decide("video.src", url),
       );
     },
-    setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
-    setHeight(value: number): void {
-      attribute(context, realEl, "height", String(Number(value) | 0));
+    setWidth(value: number): void {
+      const width = requireIntegerInRange(value, 0, 4_294_967_295, "SafeVideoElement.setWidth.value");
+      context.setReflectedIDL(realEl, "width", `${width}`, () => {
+        context.platform.setVideoWidth(realEl, width);
+      });
     },
-    setControls(value: boolean): void { booleanAttribute(context, realEl, "controls", value); },
-    setAutoplay(value: boolean): void { booleanAttribute(context, realEl, "autoplay", value); },
-    setLoop(value: boolean): void { booleanAttribute(context, realEl, "loop", value); },
-    setMuted(value: boolean): void { booleanAttribute(context, realEl, "muted", value); },
+    setHeight(value: number): void {
+      const height = requireIntegerInRange(value, 0, 4_294_967_295, "SafeVideoElement.setHeight.value");
+      context.setReflectedIDL(realEl, "height", `${height}`, () => {
+        context.platform.setVideoHeight(realEl, height);
+      });
+    },
+    setControls(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeVideoElement.setControls.value");
+      context.setReflectedIDL(realEl, "controls", primitive ? "" : null, () => {
+        context.platform.setMediaControls(realEl, primitive);
+      });
+    },
+    setAutoplay(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeVideoElement.setAutoplay.value");
+      context.setReflectedIDL(realEl, "autoplay", primitive ? "" : null, () => {
+        context.platform.setMediaAutoplay(realEl, primitive);
+      });
+    },
+    setLoop(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeVideoElement.setLoop.value");
+      context.setReflectedIDL(realEl, "loop", primitive ? "" : null, () => {
+        context.platform.setMediaLoop(realEl, primitive);
+      });
+    },
+    setMuted(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeVideoElement.setMuted.value");
+      context.nodeOperation(realEl, () => context.platform.setMediaMuted(realEl, primitive));
+    },
     setPoster(url: string): SafeURLDecision {
       return applyURLDecision(
         context,
@@ -488,10 +829,28 @@ export function createSafeAudioElement(
         () => context.urlPolicy.decide("audio.src", url),
       );
     },
-    setControls(value: boolean): void { booleanAttribute(context, realEl, "controls", value); },
-    setAutoplay(value: boolean): void { booleanAttribute(context, realEl, "autoplay", value); },
-    setLoop(value: boolean): void { booleanAttribute(context, realEl, "loop", value); },
-    setMuted(value: boolean): void { booleanAttribute(context, realEl, "muted", value); },
+    setControls(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeAudioElement.setControls.value");
+      context.setReflectedIDL(realEl, "controls", primitive ? "" : null, () => {
+        context.platform.setMediaControls(realEl, primitive);
+      });
+    },
+    setAutoplay(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeAudioElement.setAutoplay.value");
+      context.setReflectedIDL(realEl, "autoplay", primitive ? "" : null, () => {
+        context.platform.setMediaAutoplay(realEl, primitive);
+      });
+    },
+    setLoop(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeAudioElement.setLoop.value");
+      context.setReflectedIDL(realEl, "loop", primitive ? "" : null, () => {
+        context.platform.setMediaLoop(realEl, primitive);
+      });
+    },
+    setMuted(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeAudioElement.setMuted.value");
+      context.nodeOperation(realEl, () => context.platform.setMediaMuted(realEl, primitive));
+    },
   }) as SafeAudioElement, realEl);
 }
 
@@ -512,7 +871,9 @@ export function createSafeSourceElement(
         () => context.urlPolicy.decide("source.src", url),
       );
     },
-    setType(value: string): void { attribute(context, realEl, "type", String(value)); },
+    setType(value: string): void {
+      attribute(context, realEl, "type", requireMimeType(value, "SafeSourceElement.setType.value"));
+    },
   }) as SafeSourceElement, realEl);
 }
 
@@ -522,9 +883,23 @@ export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCa
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setWidth(value: number): void { attribute(context, realEl, "width", String(Number(value) | 0)); },
+    setWidth(value: number): void {
+      const width = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setWidth.value");
+      context.setReflectedIDL(realEl, "width", `${width}`, () => {
+        if (width * context.platform.getCanvasHeight(realEl) > MAX_CANVAS_PIXELS) {
+          throw invalidArgument("SafeCanvasElement.setWidth.pixels");
+        }
+        context.platform.setCanvasWidth(realEl, width);
+      });
+    },
     setHeight(value: number): void {
-      attribute(context, realEl, "height", String(Number(value) | 0));
+      const height = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setHeight.value");
+      context.setReflectedIDL(realEl, "height", `${height}`, () => {
+        if (context.platform.getCanvasWidth(realEl) * height > MAX_CANVAS_PIXELS) {
+          throw invalidArgument("SafeCanvasElement.setHeight.pixels");
+        }
+        context.platform.setCanvasHeight(realEl, height);
+      });
     },
   }) as SafeCanvasElement, realEl);
 }
@@ -536,13 +911,23 @@ export function createSafeTableCellElement(context: DocumentContext, realEl: HTM
 
   return context.complete(Object.assign(base, {
     setColspan(value: number): void {
-      attribute(context, realEl, "colspan", String(Number(value) | 0));
+      const span = requireIntegerInRange(value, 1, 1_000, "SafeTableCellElement.setColspan.value");
+      context.setReflectedIDL(realEl, "colspan", `${span}`, () => {
+        context.platform.setTableColSpan(realEl, span);
+      });
     },
     setRowspan(value: number): void {
-      attribute(context, realEl, "rowspan", String(Number(value) | 0));
+      const span = requireIntegerInRange(value, 0, 65_534, "SafeTableCellElement.setRowspan.value");
+      context.setReflectedIDL(realEl, "rowspan", `${span}`, () => {
+        context.platform.setTableRowSpan(realEl, span);
+      });
     },
-    setScope(value: string): void { attribute(context, realEl, "scope", String(value)); },
-    setHeaders(value: string): void { attribute(context, realEl, "headers", String(value)); },
+    setScope(value: string): void {
+      attribute(context, realEl, "scope", requireAsciiKeyword(value, TABLE_SCOPE_VALUES, "SafeTableCellElement.setScope.value"));
+    },
+    setHeaders(value: string): void {
+      attribute(context, realEl, "headers", requireString(value, "SafeTableCellElement.setHeaders.value"));
+    },
   }) as SafeTableCellElement, realEl);
 }
 
@@ -552,7 +937,12 @@ export function createSafeDetailsElement(context: DocumentContext, realEl: HTMLD
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setOpen(value: boolean): void { booleanAttribute(context, realEl, "open", value); },
+    setOpen(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeDetailsElement.setOpen.value");
+      context.setReflectedIDL(realEl, "open", primitive ? "" : null, () => {
+        context.platform.setDetailsOpen(realEl, primitive);
+      });
+    },
   }) as SafeDetailsElement, realEl);
 }
 
@@ -562,7 +952,12 @@ export function createSafeDialogElement(context: DocumentContext, realEl: HTMLDi
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setOpen(value: boolean): void { booleanAttribute(context, realEl, "open", value); },
+    setOpen(value: boolean): void {
+      const primitive = requireBoolean(value, "SafeDialogElement.setOpen.value");
+      context.setReflectedIDL(realEl, "open", primitive ? "" : null, () => {
+        context.platform.setDialogOpen(realEl, primitive);
+      });
+    },
   }) as SafeDialogElement, realEl);
 }
 
@@ -572,8 +967,25 @@ export function createSafeProgressElement(context: DocumentContext, realEl: HTML
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setValue(value: number): void { attribute(context, realEl, "value", String(Number(value))); },
-    setMax(value: number): void { attribute(context, realEl, "max", String(Number(value))); },
+    setValue(value: number): void {
+      const candidate = requireFinite(value, "SafeProgressElement.setValue.value");
+      context.setReflectedIDL(realEl, "value", `${candidate}`, () => {
+        const maximum = context.platform.getProgressMax(realEl);
+        if (candidate < 0 || candidate > maximum) {
+          throw invalidArgument("SafeProgressElement.setValue.range");
+        }
+        context.platform.setProgressValue(realEl, candidate);
+      });
+    },
+    setMax(value: number): void {
+      const candidate = requireFinite(value, "SafeProgressElement.setMax.value");
+      context.setReflectedIDL(realEl, "max", `${candidate}`, () => {
+        if (candidate <= 0 || candidate < context.platform.getProgressValue(realEl)) {
+          throw invalidArgument("SafeProgressElement.setMax.range");
+        }
+        context.platform.setProgressMax(realEl, candidate);
+      });
+    },
   }) as SafeProgressElement, realEl);
 }
 
@@ -583,9 +995,39 @@ export function createSafeMeterElement(context: DocumentContext, realEl: HTMLMet
   const base = buildSafeElement(context, realEl);
 
   return context.complete(Object.assign(base, {
-    setValue(value: number): void { attribute(context, realEl, "value", String(Number(value))); },
-    setMin(value: number): void { attribute(context, realEl, "min", String(Number(value))); },
-    setMax(value: number): void { attribute(context, realEl, "max", String(Number(value))); },
+    setValue(value: number): void {
+      const candidate = requireFinite(value, "SafeMeterElement.setValue.value");
+      context.setReflectedIDL(realEl, "value", `${candidate}`, () => {
+        const minimum = context.platform.getMeterMin(realEl);
+        const maximum = context.platform.getMeterMax(realEl);
+        if (candidate < minimum || candidate > maximum) {
+          throw invalidArgument("SafeMeterElement.setValue.range");
+        }
+        context.platform.setMeterValue(realEl, candidate);
+      });
+    },
+    setMin(value: number): void {
+      const candidate = requireFinite(value, "SafeMeterElement.setMin.value");
+      context.setReflectedIDL(realEl, "min", `${candidate}`, () => {
+        const maximum = context.platform.getMeterMax(realEl);
+        const currentValue = context.platform.getMeterValue(realEl);
+        if (candidate >= maximum || candidate > currentValue) {
+          throw invalidArgument("SafeMeterElement.setMin.range");
+        }
+        context.platform.setMeterMin(realEl, candidate);
+      });
+    },
+    setMax(value: number): void {
+      const candidate = requireFinite(value, "SafeMeterElement.setMax.value");
+      context.setReflectedIDL(realEl, "max", `${candidate}`, () => {
+        const minimum = context.platform.getMeterMin(realEl);
+        const currentValue = context.platform.getMeterValue(realEl);
+        if (candidate <= minimum || candidate < currentValue) {
+          throw invalidArgument("SafeMeterElement.setMax.range");
+        }
+        context.platform.setMeterMax(realEl, candidate);
+      });
+    },
   }) as SafeMeterElement, realEl);
 }
 

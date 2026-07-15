@@ -57,6 +57,7 @@ test("keyboard event is an immutable primitive snapshot despite hostile own gett
   const safeInput = safeDocument.createInput();
   safeInput.setId("control");
   safeInput.setValue("trusted-value");
+  safeInput.setType("checkbox");
   safeInput.setChecked(true);
   safeDocument.appendChild(safeInput);
   const input = root.querySelector("input");

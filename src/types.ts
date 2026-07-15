@@ -1,5 +1,37 @@
 import type { SafeURLDecision, SafeURLPolicy } from "./url-policy.ts";
 import type { SafeStylePolicy } from "./style-policy.ts";
+import type {
+  AriaRole,
+  AutocompleteValue,
+  ButtonType,
+  DirValue,
+  EnterKeyHintValue,
+  FormattingTag,
+  HeadingLevel,
+  ImageLoadingValue,
+  InputModeValue,
+  InputType,
+  ListType,
+  TableScopeValue,
+  TextareaWrapValue,
+} from "./vocabularies.ts";
+
+export type {
+  AriaRole,
+  AutocompleteValue,
+  ButtonType,
+  DirValue,
+  EnterKeyHintValue,
+  FormattingTag,
+  HeadingLevel,
+  ImageLoadingValue,
+  InputModeValue,
+  InputType,
+  ListType,
+  SpecializedElementKind,
+  TableScopeValue,
+  TextareaWrapValue,
+} from "./vocabularies.ts";
 
 export type SafeEventKind =
   | "generic"
@@ -156,7 +188,7 @@ export type Hardener = <Value>(value: Value) => Value;
 export interface SafeDocumentQuotas {
   readonly nodes: number;
   readonly listeners: number;
-  /** Metered guest operations attempted over the lifetime of the document. */
+  /** Calls entering the context; ordinary precondition failures are excluded. */
   readonly operations: number;
   /** Aggregate live UTF-8 bytes in guest-written text/value slots. */
   readonly textBytes: number;
@@ -166,7 +198,7 @@ export interface SafeDocumentQuotas {
   readonly styleBytes: number;
   /** Aggregate live URL-bearing request/navigation attribute slots. */
   readonly requests: number;
-  /** All request/navigation setter calls attempted over the document lifetime. */
+  /** Every URL setter attempt, including non-primitive, malformed and denied input. */
   readonly requestAttempts: number;
 }
 
@@ -214,11 +246,11 @@ export interface SafeElement {
   setId(value: string): void;
   getId(): string;
   setTitle(value: string): void;
-  setRole(value: string): void;
+  setRole(value: AriaRole): void;
   setTabIndex(value: number): void;
   setHidden(value: boolean): void;
   setLang(value: string): void;
-  setDir(value: string): void;
+  setDir(value: DirValue): void;
   setSpellcheck(value: boolean): void;
 
   setData(key: string, value: string): void;
@@ -254,7 +286,7 @@ export interface SafeElement {
 }
 
 export interface SafeInputElement extends SafeElement {
-  setType(type: string): void;
+  setType(type: InputType): void;
   setValue(value: string): void;
   getValue(): string;
   setPlaceholder(value: string): void;
@@ -269,11 +301,11 @@ export interface SafeInputElement extends SafeElement {
   setMinLength(value: number): void;
   setMaxLength(value: number): void;
   setPattern(value: string): void;
-  setAutocomplete(value: string): void;
-  setAutofocus(value: boolean): void;
+  setAutocomplete(value: AutocompleteValue): void;
+  setAutofocus(value: false): void;
   setName(value: string): void;
-  setInputMode(value: string): void;
-  setEnterKeyHint(value: string): void;
+  setInputMode(value: InputModeValue): void;
+  setEnterKeyHint(value: EnterKeyHintValue): void;
   onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
   onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
 }
@@ -289,9 +321,9 @@ export interface SafeTextareaElement extends SafeElement {
   setMaxLength(value: number): void;
   setRows(value: number): void;
   setCols(value: number): void;
-  setWrap(value: string): void;
+  setWrap(value: TextareaWrapValue): void;
   setName(value: string): void;
-  setAutocomplete(value: string): void;
+  setAutocomplete(value: AutocompleteValue): void;
   onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
   onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
 }
@@ -314,7 +346,7 @@ export interface SafeOptionElement extends SafeElement {
 }
 
 export interface SafeButtonElement extends SafeElement {
-  setType(type: string): void;
+  setType(type: ButtonType): void;
   setDisabled(value: boolean): void;
   setName(value: string): void;
   setValue(value: string): void;
@@ -333,7 +365,7 @@ export interface SafeImageElement extends SafeElement {
   setAlt(value: string): void;
   setWidth(value: number): void;
   setHeight(value: number): void;
-  setLoading(value: string): void;
+  setLoading(value: ImageLoadingValue): void;
 }
 
 export interface SafeAnchorElement extends SafeElement {
@@ -372,7 +404,7 @@ export interface SafeCanvasElement extends SafeElement {
 export interface SafeTableCellElement extends SafeElement {
   setColspan(value: number): void;
   setRowspan(value: number): void;
-  setScope(value: string): void;
+  setScope(value: TableScopeValue): void;
   setHeaders(value: string): void;
 }
 
@@ -395,8 +427,6 @@ export interface SafeMeterElement extends SafeElement {
   setMax(value: number): void;
 }
 
-export type ListType = "unordered" | "ordered" | "description";
-
 export interface SafeListElement extends SafeElement {
   createItem(): SafeElement;
 }
@@ -405,13 +435,6 @@ export interface SafeDescriptionListElement extends SafeElement {
   createTerm(): SafeElement;
   createDescription(): SafeElement;
 }
-
-export type FormattingTag =
-  | "strong" | "em" | "small" | "b" | "i" | "u"
-  | "code" | "kbd" | "samp" | "var"
-  | "sub" | "sup" | "mark" | "abbr" | "cite";
-
-export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface SafeDocument {
   /** Mount operations target the claimed ShadowRoot without exposing a root wrapper. */

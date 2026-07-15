@@ -7,7 +7,7 @@ import {
   type RegistryEntry,
   type SafeNode,
 } from "./registry.ts";
-import type { Hardener, SafeDocumentOptions, SafeDocumentQuotas } from "./types.ts";
+import type { Hardener, SafeDocumentOptions, SafeDocumentQuotas, SafeElement } from "./types.ts";
 import {
   createStylePolicy,
   type SafeStylePolicy,
@@ -203,6 +203,12 @@ export interface DocumentContext {
   readonly platform: PlatformOps;
   complete<Value>(value: Value): Value;
   complete<Node extends SafeNode>(value: Node, real: RealNode): Node;
+  completeInitialized<Node extends SafeElement>(
+    value: Node,
+    real: Element,
+    attributes: readonly InitialAttribute[],
+    initialize: () => void,
+  ): Node;
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
@@ -210,11 +216,17 @@ export interface DocumentContext {
   nodeOperation<T>(real: RealNode, action: () => T): T;
   requireRealNode(wrapper: SafeNode): RealNode;
   setText(real: RealNode, slot: string, value: string, action: () => void): void;
+  updateContentResources(
+    real: Element,
+    prepare: () => ContentResourceTransaction,
+  ): void;
   setAttribute(
     real: Element,
     name: string,
     value: string | null | undefined,
+    validate?: () => void,
   ): void;
+  setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
   setURLAttribute(
     real: Element,
     name: string,
@@ -231,6 +243,11 @@ export interface DocumentContext {
   disposeNode(real: RealNode): void;
   disposeDocument(): void;
   abandonInitialization(): void;
+}
+
+export interface InitialAttribute {
+  readonly name: string;
+  readonly value: string;
 }
 
 function getNativeRoot(value: unknown): {
@@ -317,6 +334,17 @@ class DocumentContextImplementation implements DocumentContext {
     return completed;
   }
 
+  completeInitialized<Node extends SafeElement>(
+    value: Node,
+    real: Element,
+    attributes: readonly InitialAttribute[],
+    initialize: () => void,
+  ): Node {
+    const completed = completeWithHardener(this.#harden, value);
+    this.#registerInitialized(completed, real, attributes, initialize);
+    return completed;
+  }
+
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
   createElement(tag: string): HTMLElement {
@@ -335,6 +363,45 @@ class DocumentContextImplementation implements DocumentContext {
     } catch (error) {
       this.#usage.nodes -= 1;
       throw error;
+    }
+  }
+
+  #registerInitialized(
+    wrapper: SafeNode,
+    real: Element,
+    attributes: readonly InitialAttribute[],
+    initialize: () => void,
+  ): void {
+    this.#assertDocumentActive();
+    const resources = new Map<string, number>();
+    for (const { name, value } of attributes) {
+      resources.set(name, utf8ByteLength(name) + utf8ByteLength(value));
+    }
+    let attributeBytes = 0;
+    for (const amount of resources.values()) attributeBytes += amount;
+
+    let nodesReserved = false;
+    let attributesReserved = false;
+    try {
+      this.#reserve("nodes", 1);
+      nodesReserved = true;
+      this.#reserve("attributeBytes", attributeBytes);
+      attributesReserved = true;
+      initialize();
+      const entry = this.registry.register(wrapper, real);
+      for (const [name, amount] of resources) entry.resources.attribute.set(name, amount);
+    } catch (error) {
+      if (attributesReserved) this.#usage.attributeBytes -= attributeBytes;
+      if (nodesReserved) this.#usage.nodes -= 1;
+      for (const name of resources.keys()) {
+        try {
+          this.platform.removeAttribute(real, name);
+        } catch {
+          // The unregistered node is discarded even if best-effort cleanup fails.
+        }
+      }
+      if (isSafeDOMError(error)) throw error;
+      throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.initializeElement");
     }
   }
 
@@ -373,10 +440,29 @@ class DocumentContextImplementation implements DocumentContext {
     });
   }
 
+  updateContentResources(
+    real: Element,
+    prepare: () => ContentResourceTransaction,
+  ): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      const { changes, action } = prepare();
+      this.#updateResources(entry, changes.map((change): ResourceChange => ({
+        resource: change.resource,
+        slot: change.slot,
+        amount: change.value === null
+          ? 0
+          : utf8ByteLength(change.value)
+            + (change.resource === "attribute" ? utf8ByteLength(change.slot) : 0),
+      })), action);
+    });
+  }
+
   setAttribute(
     real: Element,
     name: string,
     value: string | null | undefined,
+    validate?: () => void,
   ): void {
     this.nodeOperation(real, () => {
       if (value === undefined) return;
@@ -387,9 +473,21 @@ class DocumentContextImplementation implements DocumentContext {
         amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }];
       this.#updateResources(entry, changes, () => {
+        validate?.();
         if (value === null) this.platform.removeAttribute(real, name);
         else this.platform.setAttribute(real, name, value);
       });
+    });
+  }
+
+  setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      this.#updateResources(entry, [{
+        resource: "attribute",
+        slot: name,
+        amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
+      }], action);
     });
   }
 
@@ -747,6 +845,17 @@ interface ResourceChange {
   readonly resource: AccountedResource;
   readonly slot: string;
   readonly amount: number;
+}
+
+export interface ContentResourceChange {
+  readonly resource: "attribute" | "text";
+  readonly slot: string;
+  readonly value: string | null;
+}
+
+export interface ContentResourceTransaction {
+  readonly changes: readonly ContentResourceChange[];
+  readonly action: () => void;
 }
 
 export function createDocumentContext(

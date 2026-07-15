@@ -26,6 +26,7 @@ test("denied image, link, media, and form actions leave the host and browser led
     const audio = safeDocument.createAudio();
     const button = safeDocument.createButton();
     const input = safeDocument.createInput();
+    const textarea = safeDocument.createTextarea();
 
     const decisions = [
       image.setSrc("/unapproved/image.png"),
@@ -40,13 +41,32 @@ test("denied image, link, media, and form actions leave the host and browser led
 
     anchor.setText("denied navigation");
     button.setText("guest submit");
-    input.setName("shared-name");
-    input.setValue("guest-value");
-    for (const node of [image, anchor, video, audio, button, input]) {
+    for (const node of [image, anchor, video, audio, button, input, textarea]) {
       safeDocument.appendChild(node);
     }
+    const physicalInput = root.querySelector("input");
+    const physicalTextarea = root.querySelector("textarea");
+    const physicalButton = root.querySelector("button");
+    if (!(physicalInput instanceof HTMLInputElement) ||
+        !(physicalTextarea instanceof HTMLTextAreaElement) ||
+        !(physicalButton instanceof HTMLButtonElement)) {
+      throw new Error("safe form controls were not created");
+    }
+    const forbidden = ["form", "formaction", "formenctype", "formmethod", "formnovalidate", "formtarget", "name"];
+    const controlDefaults = {
+      inputAutocomplete: physicalInput.autocomplete,
+      textareaAutocomplete: physicalTextarea.autocomplete,
+      buttonType: physicalButton.type,
+      formsNull: [physicalInput.form, physicalTextarea.form, physicalButton.form].every((value) => value === null),
+      forbiddenAbsent: [physicalInput, physicalTextarea, physicalButton].every((control) => (
+        forbidden.every((name) => !control.hasAttribute(name))
+      )),
+    };
+    input.setName("shared-name");
+    input.setValue("guest-value");
 
     return {
+      controlDefaults,
       decisions,
       outsideHTML: outside.outerHTML,
       rootHTML: root.innerHTML,
@@ -79,6 +99,13 @@ test("denied image, link, media, and form actions leave the host and browser led
     { allowed: false, code: "ERR_URL_DENIED" },
     { allowed: false, code: "ERR_URL_DENIED" },
   ]);
+  expect(before.controlDefaults).toEqual({
+    inputAutocomplete: "off",
+    textareaAutocomplete: "off",
+    buttonType: "button",
+    formsNull: true,
+    forbiddenAbsent: true,
+  });
   expect(before.rootHTML).not.toContain("/unapproved/");
   expect(after.outsideHTML).toBe(before.outsideHTML);
   expect(after.formValues).toEqual(["host-value"]);

@@ -1,3 +1,5 @@
+import { BUTTON_TYPES, INPUT_TYPES } from "./vocabularies.ts";
+
 export type CSSNetworkRisk =
   | "invalid-input"
   | "malformed-comment"
@@ -139,21 +141,16 @@ export function hasCssUrl(value: unknown): boolean {
   return scanCSSNetworkRisk(value).risky;
 }
 
-const ALLOWED_INPUT_TYPES = new Set([
-  "text", "password", "number", "email", "tel", "url", "search",
-  "date", "time", "datetime-local", "month", "week",
-  "range", "color", "checkbox", "radio",
-  "hidden", "submit", "reset", "button",
-]);
+const ALLOWED_INPUT_TYPES: ReadonlySet<string> = new Set(INPUT_TYPES);
 
 export function isInputTypeAllowed(type: unknown): type is string {
-  return typeof type === "string" && ALLOWED_INPUT_TYPES.has(type.toLowerCase());
+  return typeof type === "string" && ALLOWED_INPUT_TYPES.has(type);
 }
 
-const ALLOWED_BUTTON_TYPES = new Set(["submit", "reset", "button"]);
+const ALLOWED_BUTTON_TYPES: ReadonlySet<string> = new Set(BUTTON_TYPES);
 
 export function isButtonTypeAllowed(type: unknown): type is string {
-  return typeof type === "string" && ALLOWED_BUTTON_TYPES.has(type.toLowerCase());
+  return typeof type === "string" && ALLOWED_BUTTON_TYPES.has(type);
 }
 
 const SAFE_ATTR_KEY = /^[a-z][a-z0-9-]*$/;

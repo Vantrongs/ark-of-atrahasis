@@ -1,5 +1,6 @@
 import type { SafeTextNode } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
+import { requireString } from "./attribute-contract.ts";
 
 export function createSafeTextNode(context: DocumentContext, realText: Text): SafeTextNode {
   const known = context.registry.getWrapper<SafeTextNode>(realText);
@@ -7,7 +8,7 @@ export function createSafeTextNode(context: DocumentContext, realText: Text): Sa
 
   const wrapper: SafeTextNode = {
     setText(value: string): void {
-      const text = String(value ?? "");
+      const text = requireString(value, "SafeTextNode.setText.value");
       context.setText(realText, "data", text, () => {
         context.platform.setTextContent(realText, text);
       });
