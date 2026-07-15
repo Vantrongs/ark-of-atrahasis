@@ -3,11 +3,13 @@ import type {
   HeadingLevel,
   ListType,
   SafeDocument,
+  SafeDocumentOptions,
   SafeElement,
   SafeTextNode,
 } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
 import { createDocumentContext } from "./context.ts";
+export { DEFAULT_SAFE_DOCUMENT_QUOTAS } from "./context.ts";
 import {
   createSafeAnchorElement,
   createSafeAudioElement,
@@ -68,6 +70,8 @@ export type {
   HeadingLevel,
   EventHandler,
   EventCleanup,
+  SafeDocumentOptions,
+  SafeDocumentQuotas,
 } from "./types.ts";
 
 const FORMATTING_TAGS = new Set<string>([
@@ -86,29 +90,34 @@ function simple(context: DocumentContext, tag: string): SafeElement {
  * The returned object deliberately exposes mount operations rather than a
  * wrapper for the ShadowRoot or its host element.
  */
-export function createSafeDocument(root: ShadowRoot): SafeDocument {
-  const context = createDocumentContext(root);
+export function createSafeDocument(root: ShadowRoot, options?: SafeDocumentOptions): SafeDocument {
+  const context = createDocumentContext(root, options);
   const { registry } = context;
 
   return {
     appendChild(child): void {
-      context.root.appendChild(registry.requireRealNode(child));
+      context.documentOperation(() => context.root.appendChild(context.requireRealNode(child)));
     },
     insertBefore(newChild, reference): void {
-      context.root.insertBefore(
-        registry.requireRealNode(newChild),
-        registry.requireRealNode(reference),
-      );
+      context.documentOperation(() => {
+        context.root.insertBefore(
+          context.requireRealNode(newChild),
+          context.requireRealNode(reference),
+        );
+      });
     },
     removeChild(child): void {
-      context.root.removeChild(registry.requireRealNode(child));
+      context.documentOperation(() => context.root.removeChild(context.requireRealNode(child)));
     },
     replaceChild(newChild, oldChild): void {
-      context.root.replaceChild(
-        registry.requireRealNode(newChild),
-        registry.requireRealNode(oldChild),
-      );
+      context.documentOperation(() => {
+        context.root.replaceChild(
+          context.requireRealNode(newChild),
+          context.requireRealNode(oldChild),
+        );
+      });
     },
+    dispose(): void { context.disposeDocument(); },
 
     createDiv(): SafeElement { return simple(context, "div"); },
     createSpan(): SafeElement { return simple(context, "span"); },
@@ -201,9 +210,11 @@ export function createSafeDocument(root: ShadowRoot): SafeDocument {
     },
 
     getElement(id: string): SafeElement | null {
-      const real = context.root.getElementById(id);
-      if (!real) return null;
-      return registry.getWrapper<SafeElement>(real) ?? null;
+      return context.documentOperation(() => {
+        const real = context.root.getElementById(id);
+        if (!real) return null;
+        return registry.getWrapper<SafeElement>(real) ?? null;
+      });
     },
   };
 }

@@ -12,18 +12,26 @@ export function createSafeStyleSheet(
   const wrapper: SafeStyleSheet = {
     setCSS(value: string): void {
       const css = String(value ?? "");
-      if (hasCssUrl(css)) return;
-      realStyle.textContent = css;
+      if (hasCssUrl(css)) {
+        context.nodeOperation(realStyle, () => undefined);
+        return;
+      }
+      context.setStyle(realStyle, "$stylesheet", css, () => { realStyle.textContent = css; });
     },
     getCSS(): string {
-      return realStyle.textContent ?? "";
+      return context.nodeOperation(realStyle, () => realStyle.textContent ?? "");
     },
-    remove(): void {
-      realStyle.remove();
-    },
+    detach(): void { context.detachNode(realStyle); },
+    remove(): void { context.detachNode(realStyle); },
+    dispose(): void { context.disposeNode(realStyle); },
   };
 
-  context.root.appendChild(realStyle);
-  context.registry.register(wrapper, realStyle);
+  context.register(wrapper, realStyle);
+  try {
+    context.root.appendChild(realStyle);
+  } catch (error) {
+    context.disposeNode(realStyle);
+    throw error;
+  }
   return wrapper;
 }

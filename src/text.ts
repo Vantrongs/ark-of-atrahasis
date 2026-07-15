@@ -7,16 +7,17 @@ export function createSafeTextNode(context: DocumentContext, realText: Text): Sa
 
   const wrapper: SafeTextNode = {
     setText(value: string): void {
-      realText.textContent = String(value ?? "");
+      const text = String(value ?? "");
+      context.setText(realText, "data", text, () => { realText.textContent = text; });
     },
     getText(): string {
-      return realText.textContent ?? "";
+      return context.nodeOperation(realText, () => realText.textContent ?? "");
     },
-    remove(): void {
-      realText.remove();
-    },
+    detach(): void { context.detachNode(realText); },
+    remove(): void { context.detachNode(realText); },
+    dispose(): void { context.disposeNode(realText); },
   };
 
-  context.registry.register(wrapper, realText);
+  context.register(wrapper, realText);
   return wrapper;
 }

@@ -1,0 +1,332 @@
+// @vitest-environment jsdom
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createSafeDocument } from "../src/index.ts";
+
+function makeRoot(documentValue: Document = document): ShadowRoot {
+  const host = documentValue.createElement("div");
+  documentValue.body.appendChild(host);
+  return host.attachShadow({ mode: "open" });
+}
+
+function expectCode(action: () => unknown, code: string): void {
+  expect(action).toThrowError(expect.objectContaining({ code }));
+}
+
+describe("placement enforcement", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("revokes a raw-host reparent without mutating the external DOM", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createDiv();
+    safeDocument.appendChild(wrapper);
+    const raw = root.firstElementChild!;
+    const outside = document.createElement("section");
+    document.body.appendChild(outside);
+    outside.appendChild(raw);
+
+    expectCode(() => wrapper.setText("guest mutation"), "PLACEMENT_VIOLATION");
+    expect(outside.firstElementChild).toBe(raw);
+    expect(raw.textContent).toBe("");
+
+    expectCode(() => wrapper.setTitle("again"), "NODE_REVOKED");
+    expect(raw.hasAttribute("title")).toBe(false);
+    safeDocument.dispose();
+    expect(outside.firstElementChild).toBe(raw);
+  });
+
+  it("treats a detached external parent as outside the owned tree", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createSpan();
+    safeDocument.appendChild(wrapper);
+    const raw = root.firstElementChild!;
+    const detachedExternalParent = document.createElement("div");
+    detachedExternalParent.appendChild(raw);
+
+    expectCode(() => wrapper.setId("escaped"), "PLACEMENT_VIOLATION");
+    expect(detachedExternalParent.firstElementChild).toBe(raw);
+    expect(raw.hasAttribute("id")).toBe(false);
+  });
+
+  it("revokes a node adopted into another document", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createDiv();
+    safeDocument.appendChild(wrapper);
+    const raw = root.firstElementChild!;
+    const foreignDocument = document.implementation.createHTMLDocument("foreign");
+    foreignDocument.adoptNode(raw);
+
+    expectCode(() => wrapper.setText("cross-realm"), "PLACEMENT_VIOLATION");
+    expect(raw.ownerDocument).toBe(foreignDocument);
+    expect(raw.textContent).toBe("");
+    expect(raw.parentNode).toBe(null);
+  });
+
+  it("suppresses callbacks after raw placement is compromised", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createButton();
+    const handler = vi.fn();
+    wrapper.onClick(handler);
+    safeDocument.appendChild(wrapper);
+    const raw = root.firstElementChild!;
+    const outside = document.createElement("div");
+    outside.appendChild(raw);
+
+    raw.dispatchEvent(new Event("click"));
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(outside.firstElementChild).toBe(raw);
+    expectCode(() => wrapper.getText(), "NODE_REVOKED");
+  });
+});
+
+describe("detach and disposal", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("keeps detach reversible and makes node disposal irreversible and idempotent", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createDiv();
+    safeDocument.appendChild(wrapper);
+
+    wrapper.detach();
+    expect(root.childNodes).toHaveLength(0);
+    wrapper.setText("still alive");
+    safeDocument.appendChild(wrapper);
+    expect(root.textContent).toBe("still alive");
+
+    wrapper.dispose();
+    wrapper.dispose();
+    expect(root.childNodes).toHaveLength(0);
+    expectCode(() => wrapper.getText(), "NODE_DISPOSED");
+  });
+
+  it("recursively disposes an owned subtree", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const parent = safeDocument.createDiv();
+    const child = safeDocument.createSpan();
+    parent.appendChild(child);
+    safeDocument.appendChild(parent);
+
+    parent.dispose();
+
+    expect(root.childNodes).toHaveLength(0);
+    expectCode(() => parent.getText(), "NODE_DISPOSED");
+    expectCode(() => child.setText("retained"), "NODE_DISPOSED");
+  });
+
+  it("disposes a document twice and gives stable post-dispose errors", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const wrapper = safeDocument.createDiv();
+    safeDocument.appendChild(wrapper);
+
+    safeDocument.dispose();
+    safeDocument.dispose();
+    wrapper.dispose();
+
+    expect(root.childNodes).toHaveLength(0);
+    expectCode(() => safeDocument.createSpan(), "DOCUMENT_DISPOSED");
+    expectCode(() => wrapper.getText(), "DOCUMENT_DISPOSED");
+    expectCode(() => wrapper.style.color, "DOCUMENT_DISPOSED");
+  });
+
+  it("aborts retained listeners and clears owned styles and request resources", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const button = safeDocument.createButton();
+    const image = safeDocument.createImage();
+    const sheet = safeDocument.createStyle();
+    const handler = vi.fn();
+    const cleanup = button.onClick(handler);
+    button.style.color = "red";
+    image.setSrc("https://example.test/image.png");
+    sheet.setCSS("button { color: red; }");
+    safeDocument.appendChild(button);
+    safeDocument.appendChild(image);
+    const rawButton = root.querySelector("button")!;
+    const rawImage = root.querySelector("img")!;
+    const rawStyle = root.querySelector("style")!;
+
+    rawButton.dispatchEvent(new Event("click"));
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    safeDocument.dispose();
+    cleanup();
+    cleanup();
+    rawButton.dispatchEvent(new Event("click"));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(root.childNodes).toHaveLength(0);
+    expect(rawButton.hasAttribute("style")).toBe(false);
+    expect(rawImage.hasAttribute("src")).toBe(false);
+    expect(rawStyle.textContent).toBe("");
+  });
+
+  it("allows cleanup and disposal after the operation budget is exhausted", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, { quotas: { operations: 2 } });
+    const wrapper = safeDocument.createDiv();
+    wrapper.setText("last metered operation");
+
+    expectCode(() => wrapper.getText(), "QUOTA_EXCEEDED");
+    expect(() => wrapper.dispose()).not.toThrow();
+    expect(() => safeDocument.dispose()).not.toThrow();
+  });
+
+  it("normalizes native mutation/listener failures without retaining their cause", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: { attributeBytes: 5, listeners: 1 },
+    });
+    const wrapper = safeDocument.createDiv();
+    safeDocument.appendChild(wrapper);
+    const raw = root.firstElementChild!;
+    const nativeSetAttribute = raw.setAttribute;
+    const nativeAddEventListener = raw.addEventListener;
+    raw.setAttribute = (() => { throw new DOMException("host secret"); }) as typeof raw.setAttribute;
+
+    expectCode(() => wrapper.setId("abc"), "DOM_OPERATION_FAILED");
+    raw.setAttribute = nativeSetAttribute;
+    wrapper.setId("abc"); // failed mutation rolled its attribute accounting back
+
+    raw.addEventListener = (() => {
+      throw new DOMException("another host secret");
+    }) as typeof raw.addEventListener;
+    expectCode(() => wrapper.onClick(() => undefined), "DOM_OPERATION_FAILED");
+    raw.addEventListener = nativeAddEventListener;
+    const cleanup = wrapper.onClick(() => undefined); // listener quota was rolled back too
+    cleanup();
+  });
+});
+
+describe("exact quota accounting", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("enforces and releases the node quota", () => {
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { nodes: 1 } });
+    const first = safeDocument.createDiv();
+
+    expectCode(() => safeDocument.createSpan(), "QUOTA_EXCEEDED");
+    first.dispose();
+    expect(() => safeDocument.createSpan()).not.toThrow();
+  });
+
+  it("enforces and releases the listener quota with idempotent cleanup", () => {
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { listeners: 1 } });
+    const wrapper = safeDocument.createDiv();
+    const cleanup = wrapper.onClick(() => undefined);
+
+    expectCode(() => wrapper.onClick(() => undefined), "QUOTA_EXCEEDED");
+    cleanup();
+    cleanup();
+    const replacement = wrapper.onClick(() => undefined);
+    wrapper.dispose();
+    expect(() => replacement()).not.toThrow();
+  });
+
+  it("counts UTF-8 aggregate text bytes at the exact threshold and releases them", () => {
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { textBytes: 4 } });
+    const first = safeDocument.createDiv();
+    const second = safeDocument.createDiv();
+
+    first.setText("éa"); // 3 UTF-8 bytes
+    second.setText("b");
+    expectCode(() => second.setText("bb"), "QUOTA_EXCEEDED");
+    expect(second.getText()).toBe("b");
+
+    first.dispose();
+    second.setText("bbbb");
+    expect(second.getText()).toBe("bbbb");
+  });
+
+  it("counts aggregate serialized attribute name and value bytes", () => {
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 5 } });
+    const first = safeDocument.createDiv();
+
+    first.setId("abc"); // `id` + `abc` = 5 UTF-8 bytes
+    expectCode(() => first.setId("abcd"), "QUOTA_EXCEEDED");
+    expect(first.getId()).toBe("abc");
+    expectCode(() => first.setTitle(""), "QUOTA_EXCEEDED");
+
+    first.dispose();
+    const replacement = safeDocument.createDiv();
+    replacement.setId("abc");
+    expect(replacement.getId()).toBe("abc");
+  });
+
+  it("accounts inline and sheet style bytes together and releases exact usage", () => {
+    const safeDocument = createSafeDocument(makeRoot(), { quotas: { styleBytes: 3 } });
+    const sheet = safeDocument.createStyle();
+    const wrapper = safeDocument.createDiv();
+
+    sheet.setCSS("a{}");
+    expectCode(() => { wrapper.style.color = "red"; }, "QUOTA_EXCEEDED");
+    sheet.dispose();
+    wrapper.style.color = "red";
+    expect(wrapper.style.color).toBe("red");
+    wrapper.style.color = "";
+    wrapper.style.opacity = "1";
+    expect(wrapper.style.opacity).toBe("1");
+  });
+
+  it("counts active request sinks and releases them on node disposal", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, { quotas: { requests: 1 } });
+    const image = safeDocument.createImage();
+    const anchor = safeDocument.createAnchor();
+    safeDocument.appendChild(image);
+    safeDocument.appendChild(anchor);
+    const rawAnchor = root.querySelector("a")!;
+
+    image.setSrc("https://example.test/image.png");
+    expectCode(() => anchor.setHref("https://example.test/next"), "QUOTA_EXCEEDED");
+    expect(rawAnchor.hasAttribute("href")).toBe(false);
+
+    image.dispose();
+    anchor.setHref("https://example.test/next");
+    expect(rawAnchor.getAttribute("href")).toBe("https://example.test/next");
+  });
+
+  it("limits cumulative approved request attempts even when one sink is reused", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: { requests: 1, requestAttempts: 2 },
+    });
+    const image = safeDocument.createImage();
+    safeDocument.appendChild(image);
+    const rawImage = root.querySelector("img")!;
+
+    image.setSrc("https://example.test/one.png");
+    image.setSrc("https://example.test/two.png");
+    expectCode(
+      () => image.setSrc("https://example.test/three.png"),
+      "QUOTA_EXCEEDED",
+    );
+    expect(rawImage.getAttribute("src")).toBe("https://example.test/two.png");
+
+    image.dispose(); // releases the active sink, not the lifetime attempt budget
+    const anchor = safeDocument.createAnchor();
+    expectCode(() => anchor.setHref("https://example.test/next"), "QUOTA_EXCEEDED");
+  });
+
+  it("rejects invalid quota configuration without claiming the root", () => {
+    const root = makeRoot();
+    expectCode(
+      () => createSafeDocument(root, { quotas: { nodes: -1 } }),
+      "INVALID_QUOTA",
+    );
+    expect(() => createSafeDocument(root)).not.toThrow();
+  });
+});

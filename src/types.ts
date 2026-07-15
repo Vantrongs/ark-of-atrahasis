@@ -22,16 +22,48 @@ export type SafeStyle = Record<string, string>;
 export type EventHandler = (event: SafeEvent) => void;
 export type EventCleanup = () => void;
 
+/** Per-document hard limits. Values are aggregate live usage, except operations. */
+export interface SafeDocumentQuotas {
+  readonly nodes: number;
+  readonly listeners: number;
+  /** Metered guest operations attempted over the lifetime of the document. */
+  readonly operations: number;
+  /** Aggregate live UTF-8 bytes in guest-written text/value slots. */
+  readonly textBytes: number;
+  /** Aggregate live UTF-8 bytes in serialized attribute names and values. */
+  readonly attributeBytes: number;
+  /** Aggregate live UTF-8 bytes in inline declarations and stylesheet text. */
+  readonly styleBytes: number;
+  /** Aggregate live URL-bearing request/navigation attribute slots. */
+  readonly requests: number;
+  /** Approved request/navigation sink writes attempted over the document lifetime. */
+  readonly requestAttempts: number;
+}
+
+export interface SafeDocumentOptions {
+  readonly quotas?: Partial<SafeDocumentQuotas>;
+}
+
 export interface SafeTextNode {
   setText(value: string): void;
   getText(): string;
+  /** Reversible DOM detach; the wrapper remains usable. */
+  detach(): void;
+  /** @deprecated Use detach(). */
   remove(): void;
+  /** Irreversible and idempotent wrapper/resource revocation. */
+  dispose(): void;
 }
 
 export interface SafeStyleSheet {
   setCSS(value: string): void;
   getCSS(): string;
+  /** Reversible DOM detach; the wrapper remains usable. */
+  detach(): void;
+  /** @deprecated Use detach(). */
   remove(): void;
+  /** Irreversible and idempotent wrapper/resource revocation. */
+  dispose(): void;
 }
 
 export interface SafeElement {
@@ -39,7 +71,12 @@ export interface SafeElement {
   insertBefore(newChild: SafeElement | SafeTextNode, reference: SafeElement | SafeTextNode): void;
   removeChild(child: SafeElement | SafeTextNode): void;
   replaceChild(newChild: SafeElement | SafeTextNode, oldChild: SafeElement | SafeTextNode): void;
+  /** Reversible DOM detach; the wrapper and its subtree remain usable. */
+  detach(): void;
+  /** @deprecated Use detach(). */
   remove(): void;
+  /** Irreversible and idempotent disposal of this wrapper and its owned subtree. */
+  dispose(): void;
 
   setText(value: string): void;
   getText(): string;
@@ -260,6 +297,8 @@ export interface SafeDocument {
     newChild: SafeElement | SafeTextNode,
     oldChild: SafeElement | SafeTextNode,
   ): void;
+  /** Irreversibly dispose every owned wrapper/resource. Idempotent. */
+  dispose(): void;
 
   createDiv(): SafeElement;
   createSpan(): SafeElement;

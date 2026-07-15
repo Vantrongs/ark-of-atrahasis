@@ -1,4 +1,5 @@
 import type { SafeStyle } from "./types.ts";
+import type { DocumentContext } from "./context.ts";
 import { hasCssUrl } from "./validation.ts";
 
 const ALLOWED_STYLE_PROPERTIES = new Set([
@@ -73,21 +74,26 @@ const ALLOWED_STYLE_PROPERTIES = new Set([
   "cursor",
 ]);
 
-export function createSafeStyle(realEl: HTMLElement): SafeStyle {
+export function createSafeStyle(context: DocumentContext, realEl: HTMLElement): SafeStyle {
   return new Proxy(Object.create(null) as SafeStyle, {
     get(_, prop) {
-      if (typeof prop !== "string") return undefined;
-      if (!ALLOWED_STYLE_PROPERTIES.has(prop)) return undefined;
-      return realEl.style[prop as keyof CSSStyleDeclaration];
+      return context.nodeOperation(realEl, () => {
+        if (typeof prop !== "string") return undefined;
+        if (!ALLOWED_STYLE_PROPERTIES.has(prop)) return undefined;
+        return realEl.style[prop as keyof CSSStyleDeclaration];
+      });
     },
     set(_, prop, value) {
-      if (typeof prop !== "string") return false;
-      if (!ALLOWED_STYLE_PROPERTIES.has(prop)) return false;
+      if (typeof prop !== "string" || !ALLOWED_STYLE_PROPERTIES.has(prop)) {
+        return context.nodeOperation(realEl, () => false);
+      }
 
       const stringValue = String(value ?? "");
-      if (hasCssUrl(stringValue)) return false;
+      if (hasCssUrl(stringValue)) return context.nodeOperation(realEl, () => false);
 
-      (realEl.style as unknown as Record<string, string>)[prop] = stringValue;
+      context.setStyle(realEl, prop, stringValue, () => {
+        (realEl.style as unknown as Record<string, string>)[prop] = stringValue;
+      });
       return true;
     },
   });
