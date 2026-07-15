@@ -1,8 +1,9 @@
 {
   "name": "ark-of-atrahasis",
   "version": "0.3.1",
-  "description": "Safe DOM wrapper made for the usage in Secure ECMAScript compartments",
+  "description": "Capability-oriented DOM wrapper for Secure ECMAScript integrations",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,11 +14,22 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "tsconfig.json",
+    "tsup.config.ts",
+    "RELEASING.md"
   ],
   "scripts": {
     "build": "tsup",
-    "prepublishOnly": "tsup"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome lint src test scripts tsup.config.ts",
+    "test": "npm run build && node --test test/api.test.mjs",
+    "test:package": "node scripts/test-package.mjs",
+    "pack:verified": "node scripts/test-package.mjs --output .artifacts",
+    "check": "npm run lint && npm run typecheck && npm test && npm run test:package",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
   },
   "keywords": [
     "sandbox",
@@ -33,11 +45,21 @@
     "ark-of-atrahasis"
   ],
   "license": "GPL-3.0-only",
-  "devDependencies": {
-    "@types/bun": "latest",
-    "tsup": "^8.0.0"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vantrongs/ark-of-atrahasis.git"
   },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+  "homepage": "https://github.com/Vantrongs/ark-of-atrahasis#readme",
+  "bugs": {
+    "url": "https://github.com/Vantrongs/ark-of-atrahasis/issues"
+  },
+  "packageManager": "npm@11.9.0",
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "esbuild": "0.27.2"
   }
 }
