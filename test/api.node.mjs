@@ -103,7 +103,7 @@ test("requires paint containment on the host boundary", () => {
   );
 });
 
-test("exports the strict text factories and detached list-local helpers", () => {
+test("exports compatible text factories and detached list-local helpers", () => {
   const { root } = createRoot();
   const safeDocument = createSafeDocument(root, options);
   const paragraph = safeDocument.createParagraph();
@@ -111,14 +111,56 @@ test("exports the strict text factories and detached list-local helpers", () => 
   const list = safeDocument.createList("unordered");
   const item = list.createItem();
 
-  assert.equal("createText" in safeDocument, false);
-  assert.equal("createRawText" in safeDocument, false);
+  assert.equal(safeDocument.createText, safeDocument.createParagraph);
+  assert.equal(safeDocument.createRawText, safeDocument.createTextNode);
+  assert.equal(safeDocument.createText().getText(), "");
+  assert.equal(safeDocument.createRawText().getText(), "");
   assert.equal(paragraph.getText(), "");
   assert.equal(text.getText(), "");
   assert.equal(root.childNodes.length, 0);
   list.appendChild(item);
   safeDocument.appendChild(list);
   assert.equal(root.querySelector("ul")?.children.length, 1);
+});
+
+test("preferred and deprecated casing aliases are identical capabilities", () => {
+  const { root } = createRoot();
+  const safeDocument = createSafeDocument(root, formControlOptions);
+  const input = safeDocument.createInput();
+  const textarea = safeDocument.createTextarea();
+  const cell = safeDocument.createTd();
+
+  assert.equal(input.setReadOnly, input.setReadonly);
+  assert.equal(input.setAutoFocus, input.setAutofocus);
+  assert.equal(textarea.setReadOnly, textarea.setReadonly);
+  assert.equal(cell.setColSpan, cell.setColspan);
+  assert.equal(cell.setRowSpan, cell.setRowspan);
+
+  input.setReadOnly(true);
+  input.setAutoFocus(false);
+  textarea.setReadonly(true);
+  cell.setColSpan(2);
+  cell.setRowspan(3);
+  safeDocument.appendChild(input);
+  safeDocument.appendChild(textarea);
+  safeDocument.appendChild(cell);
+
+  assert.equal(root.querySelector("input")?.readOnly, true);
+  assert.equal(root.querySelector("input")?.autofocus, false);
+  assert.equal(root.querySelector("textarea")?.readOnly, true);
+  assert.equal(root.querySelector("td")?.colSpan, 2);
+  assert.equal(root.querySelector("td")?.rowSpan, 3);
+
+  safeDocument.dispose();
+  for (const invoke of [
+    () => input.setReadonly(false),
+    () => input.setAutoFocus(false),
+    () => textarea.setReadOnly(false),
+    () => cell.setColspan(1),
+    () => cell.setRowSpan(1),
+  ]) {
+    assert.throws(invoke, (error) => error?.code === "DOCUMENT_DISPOSED");
+  }
 });
 
 test("strict default denies guest-readable native values and opt-in still rejects passwords", () => {

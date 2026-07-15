@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import {
   copyFileSync,
   existsSync,
@@ -12,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractReadmeFences } from "./readme-examples.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputFlag = process.argv.indexOf("--output");
@@ -66,6 +68,109 @@ function parseTarballName(packOutput) {
   }
 
   return tarballName;
+}
+
+async function runPackedReadmeBrowserExamples({
+  examples,
+  installedPackageDirectory,
+  sourceDirectory,
+}) {
+  const { chromium } = await import("@playwright/test");
+  const sesBundle = join(sourceDirectory, "node_modules", "ses", "dist", "ses.mjs");
+  const packageBundle = join(installedPackageDirectory, "dist", "index.js");
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    try {
+      if (url.pathname === "/") {
+        const index = Number(url.searchParams.get("example"));
+        if (!Number.isSafeInteger(index) || index < 0 || index >= examples.length) {
+          throw new Error("README example index is invalid");
+        }
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        response.end(`<!doctype html>
+<html><head><meta charset="utf-8"><title>packed README example</title></head>
+<body><div id="plugin-a-root"></div>
+<script type="importmap">${JSON.stringify({ imports: {
+  "ark-of-atrahasis": "/package/index.js",
+  ses: "/ses.mjs",
+} })}</script>
+<script type="module" src="/readme-example-${index}.mjs"></script></body></html>`);
+        return;
+      }
+      if (url.pathname === "/package/index.js") {
+        response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+        response.end(readFileSync(packageBundle));
+        return;
+      }
+      const exampleMatch = /^\/readme-example-(\d+)\.mjs$/u.exec(url.pathname);
+      if (exampleMatch) {
+        const index = Number(exampleMatch[1]);
+        const example = examples[index];
+        if (!example) throw new Error("README example module is missing");
+        response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+        response.end(
+          `${example.code}\nglobalThis.__arkReadmeExampleCompleted = ${index + 1};\n`,
+        );
+        return;
+      }
+      if (url.pathname === "/ses.mjs") {
+        response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+        response.end(readFileSync(sesBundle));
+        return;
+      }
+      response.writeHead(404).end("not found");
+    } catch (error) {
+      response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.message : "README example server failure");
+    }
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("README example server failed");
+
+  let browser;
+  try {
+    browser = await chromium.launch();
+    for (let index = 0; index < examples.length; index += 1) {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      page.on("requestfailed", (request) => {
+        errors.push(`${request.url()}: ${request.failure()?.errorText ?? "request failed"}`);
+      });
+      await page.goto(`http://127.0.0.1:${address.port}/?example=${index}`);
+      try {
+        await page.waitForFunction(
+          (expected) => globalThis.__arkReadmeExampleCompleted === expected,
+          index + 1,
+          { timeout: 5_000 },
+        );
+      } catch (error) {
+        throw new Error(
+          `packed README executable fence at line ${examples[index].line} failed in Chromium: ${
+            errors.join("; ") || (error instanceof Error ? error.message : "unknown failure")
+          }`,
+        );
+      } finally {
+        await page.close();
+      }
+      if (errors.length > 0) {
+        throw new Error(
+          `packed README executable fence at line ${examples[index].line} emitted browser errors: ${errors.join("; ")}`,
+        );
+      }
+    }
+  } finally {
+    await browser?.close();
+    server.closeAllConnections();
+    await new Promise((resolveClose, rejectClose) => {
+      server.close((error) => error ? rejectClose(error) : resolveClose());
+    });
+  }
 }
 
 const sourceManifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
@@ -323,6 +428,24 @@ try {
     throw new Error("packed JavaScript source map must contain complete, relative source content");
   }
 
+  const packedReadme = readArchiveEntry(
+    tarballPath,
+    "package/README.md",
+    sourceDirectory,
+  );
+  const packedReadmeFences = extractReadmeFences(packedReadme);
+  const executableReadmeFences = packedReadmeFences.filter((fence) => fence.executable);
+  if (executableReadmeFences.length === 0) {
+    throw new Error("packed README must retain at least one executable fence");
+  }
+  for (const fence of executableReadmeFences) {
+    if (fence.language !== "js" && fence.language !== "javascript") {
+      throw new Error(
+        `packed README executable fence at line ${fence.line} uses unsupported language ${fence.language}`,
+      );
+    }
+  }
+
   writeFileSync(
     join(consumerDirectory, "package.json"),
     `${JSON.stringify({ name: "package-smoke-consumer", private: true, type: "module" }, null, 2)}\n`,
@@ -392,6 +515,39 @@ if (!resolved.includes("/node_modules/ark-of-atrahasis/dist/index.js")) {
     { directory: "typescript-current", label: "current", version: "7.0.2" },
   ];
 
+  const readmeExampleFiles = executableReadmeFences.map((fence, index) => {
+    const name = `readme-example-${index}.mjs`;
+    writeFileSync(join(consumerDirectory, name), fence.code);
+    return name;
+  });
+  writeFileSync(
+    join(consumerDirectory, "readme-example-globals.d.ts"),
+    `declare module "ses";
+declare function lockdown(): void;
+declare const harden: <Value>(value: Value) => Value;
+declare class Compartment {
+  constructor(endowments?: Record<string, unknown>);
+}
+`,
+  );
+  writeFileSync(
+    join(consumerDirectory, "readme-examples-tsconfig.json"),
+    `${JSON.stringify({
+      compilerOptions: {
+        allowJs: true,
+        checkJs: true,
+        lib: ["ES2022", "DOM"],
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        target: "ES2022",
+        types: [],
+      },
+      files: ["readme-example-globals.d.ts", ...readmeExampleFiles],
+    }, null, 2)}\n`,
+  );
+
   for (const compiler of compilers) {
     const compilerPath = join(sourceDirectory, "node_modules", compiler.directory, "bin", "tsc");
     const reportedVersion = run(process.execPath, [compilerPath, "--version"], consumerDirectory, {
@@ -411,7 +567,19 @@ if (!resolved.includes("/node_modules/ark-of-atrahasis/dist/index.js")) {
       consumerDirectory,
       { env: offlineConsumerEnvironment },
     );
+    run(
+      process.execPath,
+      [compilerPath, "--project", join(consumerDirectory, "readme-examples-tsconfig.json")],
+      consumerDirectory,
+      { env: offlineConsumerEnvironment },
+    );
   }
+
+  await runPackedReadmeBrowserExamples({
+    examples: executableReadmeFences,
+    installedPackageDirectory: join(consumerDirectory, "node_modules", packedManifest.name),
+    sourceDirectory,
+  });
 
   run("tar", ["--extract", "--file", tarballPath, "--directory", rebuildDirectory], sourceDirectory);
   const rebuildPackageDirectory = join(rebuildDirectory, "package");

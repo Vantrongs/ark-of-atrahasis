@@ -157,9 +157,15 @@ jobs:
             throw new Error("tarball identity does not match the release tag");
           }
           NODE
-          tar --extract --to-stdout --file ".artifacts/$artifact_base.tgz" \
-            package/scripts/release-recovery.mjs > "$RUNNER_TEMP/release-recovery.mjs"
-          echo "RELEASE_RECOVERY_SCRIPT=$RUNNER_TEMP/release-recovery.mjs" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/release-scripts"
+          tar --extract --file ".artifacts/$artifact_base.tgz" \
+            --directory "$RUNNER_TEMP/release-scripts" \
+            --strip-components=2 \
+            package/scripts/release-recovery.mjs \
+            package/scripts/stable-version.mjs
+          test -f "$RUNNER_TEMP/release-scripts/release-recovery.mjs"
+          test -f "$RUNNER_TEMP/release-scripts/stable-version.mjs"
+          echo "RELEASE_RECOVERY_SCRIPT=$RUNNER_TEMP/release-scripts/release-recovery.mjs" >> "$GITHUB_ENV"
           echo "artifact-base=$artifact_base" >> "$GITHUB_OUTPUT"
 
       - name: Verify the recoverable npm registry state before GitHub mutation

@@ -56,6 +56,14 @@ All public `create*` factories return detached wrappers, including
 children; wrappers for those detached descendants remain active and may be
 explicitly reattached until they are disposed or revoked.
 
+The `0.4.0` declarations retain additive transition aliases: `createText()` is
+the exact same function as `createParagraph()`, `createRawText()` is the exact
+same function as `createTextNode()`, and the former casing of `setReadonly()`,
+`setAutofocus()`, `setColspan()`, and `setRowspan()` delegates to the preferred
+`setReadOnly()`, `setAutoFocus()`, `setColSpan()`, and `setRowSpan()` functions.
+The aliases are deprecated but preserve the same owner, lifecycle, validation,
+and error behavior; they do not create a second authority path.
+
 The emitted declarations enumerate the complete `SafeDocument`, specialized
 wrapper, event, policy, error, vocabulary, and readonly/container-versus-void
 type surface. `test/types/positive.ts` and `test/types/negative.ts` check that
@@ -74,6 +82,7 @@ lockdown();
 
 const { createSafeDocument } = await import("ark-of-atrahasis");
 const hostElement = document.querySelector("#plugin-a-root");
+if (!(hostElement instanceof HTMLElement)) throw new Error("plugin host is missing");
 hostElement.style.contain = "paint";
 const root = hostElement.attachShadow({ mode: "closed" });
 const safeDocument = createSafeDocument(root, {
@@ -172,6 +181,11 @@ states and does not promise autofill or PII confidentiality.
   earlier ancestor have already run before the event reaches the root. Trusted
   integrations must keep capture handlers capability-safe and filter plugin
   origins there when capture observation itself matters.
+  One authoritative catalog defines all 21 public handler methods, native event
+  types, snapshot families, and root/target fence placement. Unit registration
+  checks and post-lockdown Chromium, Firefox, and WebKit dispatch tests consume
+  that catalog directly, so an advertised handler cannot silently drift from
+  its runtime fence or snapshot kind.
 - **SES pass style:** copied event target/touch records, URL decisions, and
   `SafeDOMError` records are pass-by-copy. A whole `SafeEvent` is deliberately a
   hardened synchronous local control record, not SES pass-by-copy and not an
@@ -239,17 +253,20 @@ and cannot reopen that document's rate window.
 ## Availability boundary
 
 Same-agent SES code can block its JavaScript agent indefinitely. The browser
-acceptance test proves that the host terminates one indefinitely progressing,
-scheduled dedicated Worker while the page remains responsive in Chromium,
-Firefox, and WebKit. The Node `worker_threads` test separately proves termination
-of an unyielding CPU/`Atomics.add` loop after observable shared-memory progress.
+acceptance test proves that the host terminates an unyielding dedicated Worker
+that continuously mutates shared memory without yielding while the page remains
+responsive in Chromium, Firefox, and WebKit. It returns control to the browser
+harness after `terminate()`, waits outside the inspected page evaluation, and
+then proves through fresh observations that shared effects stopped. The Node
+`worker_threads` test separately proves termination of an unyielding
+CPU/`Atomics.add` loop after observable shared-memory progress.
 
-Those are different claims. Playwright 1.61.1's bundled Chromium did not preempt
-the tested unyielding loops (tight `Atomics.add`, infinite Promise microtasks, or
-one-millisecond `Atomics.wait` interruption points). Therefore this project does
-not claim arbitrary same-agent browser preemption. Choose and test a
-Worker/process/RPC boundary whose termination semantics match the hostile
-workload.
+The browser test must not hold one long inspector evaluation open while waiting
+for termination: in Chromium that harness shape delays the parent-thread forced
+termination task and can falsely look like a Worker guarantee failure. This
+dedicated-Worker result still does not claim arbitrary same-agent page-main-
+thread preemption. Choose and test a Worker/process/RPC boundary whose
+termination semantics match the hostile workload.
 
 ## Compatibility
 
@@ -268,13 +285,15 @@ workload.
   and the [CDP Autofill domain](https://chromedevtools.github.io/devtools-protocol/tot/Autofill/)
   seeds address/card data, not a browser password store. This is not
   password-manager proof.
-- Post-lockdown browser event tests cover generic, keyboard, mouse, pointer,
-  touch, focus, and input snapshots, every public field, hostile getters,
-  cancellation lifetime, and reentrancy in every engine. Chromium and Firefox
-  use full synthetic `Touch`/`TouchEvent` records under touch emulation. WebKit
-  26.5 rejects those constructors, so its explicit substitute uses Playwright
-  trusted touch injection and checks all public touch fields; malicious
-  pre-dispatch touch getters are not claimed for that engine path.
+- Post-lockdown browser event tests dispatch every one of the 21 advertised
+  public event types from the authoritative source catalog and cover generic,
+  keyboard, mouse, pointer, touch, focus, and input snapshots, every public
+  field, hostile getters, cancellation lifetime, and reentrancy in every
+  engine. Chromium and Firefox use full synthetic `Touch`/`TouchEvent` records
+  under touch emulation. WebKit 26.5 rejects those constructors, so its explicit
+  substitute uses Playwright trusted touch injection and checks all public
+  touch fields; malicious pre-dispatch touch getters are not claimed for that
+  engine path.
 - Real SES checks use SES 2.2.0, `@endo/pass-style` 1.8.1, and
   `@endo/eventual-send` 1.5.0.
 - Packed declarations are checked with TypeScript 5.0.4 (consumer minimum) and
@@ -288,13 +307,9 @@ workload.
 ## Development
 
 The exact CI/release toolchain is Node.js 22.22.2, npm 11.18.0, and Playwright
-1.61.1. Install the frozen `npm-shrinkwrap.json` without dependency lifecycle
-scripts:
-
-```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npm run check
-```
+1.61.1. First run `npm ci --ignore-scripts --no-audit --no-fund` to install the
+frozen `npm-shrinkwrap.json` without dependency lifecycle scripts. Then run
+`npm run check`.
 
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with
@@ -306,10 +321,10 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run typecheck` | Check source and property/model commands with TypeScript 6.0.3 and 7.0.2 |
 | `npm test` | Run unit/property/model tests, built ESM/API smoke, and release-contract tests |
 | `npm run test:property` | Run only the fixed-seed generated security and lifecycle suites (already discovered by `test:unit`) |
-| `npm run test:browser` | Run boundary, SES, and scheduled-Worker tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
+| `npm run test:browser` | Run boundary, SES, and unyielding-Worker termination tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
-| `npm run test:package` | Build and test a tarball from a pristine Git archive |
+| `npm run test:package` | Build and test a tarball from a pristine Git archive, including literal typecheck/browser execution of every executable packed README fence |
 | `npm run check` | Run the complete CI gate |
 | `npm run pack:verified` | Test and write the exact tarball, CycloneDX SBOM, and SHA-256 checksums |
 

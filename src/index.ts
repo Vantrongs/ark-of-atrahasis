@@ -217,6 +217,11 @@ export function createSafeDocument(
     return context.lookupLocalId(primitiveId, primitiveKind);
   }
 
+  const createParagraph = (): SafeContainerElement => container(context, "p");
+  const createTextNode = (): SafeTextNode => {
+    return createSafeTextNode(context, context.createTextNode(""));
+  };
+
   const document: SafeDocument = {
     appendChild(child): void {
       context.documentOperation(() => {
@@ -270,7 +275,8 @@ export function createSafeDocument(
     createFigure(): SafeContainerElement { return container(context, "figure"); },
     createFigcaption(): SafeContainerElement { return container(context, "figcaption"); },
 
-    createParagraph(): SafeContainerElement { return container(context, "p"); },
+    createParagraph,
+    createText: createParagraph,
     createHeading(level: HeadingLevel): SafeContainerElement {
       const numericLevel = requireIntegerInRange(level, 1, 6, "SafeDocument.createHeading.level");
       return container(context, `h${numericLevel}`);
@@ -364,9 +370,8 @@ export function createSafeDocument(
     createRt(): SafeContainerElement { return container(context, "rt"); },
     createRp(): SafeContainerElement { return container(context, "rp"); },
 
-    createTextNode(): SafeTextNode {
-      return createSafeTextNode(context, context.createTextNode(""));
-    },
+    createTextNode,
+    createRawText: createTextNode,
 
     getElement,
   };

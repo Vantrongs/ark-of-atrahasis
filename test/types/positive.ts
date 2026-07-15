@@ -200,6 +200,7 @@ const containerFactories: readonly SafeContainerElement[] = [
 	safeDocument.createFigure(),
 	safeDocument.createFigcaption(),
 	safeDocument.createParagraph(),
+	safeDocument.createText(),
 	safeDocument.createHeading(1),
 	safeDocument.createFormatting("strong"),
 	safeDocument.createBlockquote(),
@@ -257,11 +258,22 @@ const voidFactories: readonly SafeVoidElement[] = [
 
 const container = safeDocument.createDiv();
 container.appendChild(safeDocument.createTextNode());
+container.appendChild(safeDocument.createRawText());
 container.setText("container text");
 const containerText: string = container.getText();
 const voidElement = safeDocument.createBr();
 voidElement.setClass("void-common-capability");
 const voidClass: string = voidElement.getClass();
+safeDocument.createInput().setReadOnly(false);
+safeDocument.createInput().setReadonly(false);
+safeDocument.createInput().setAutoFocus(false);
+safeDocument.createInput().setAutofocus(false);
+safeDocument.createTextarea().setReadOnly(false);
+safeDocument.createTextarea().setReadonly(false);
+safeDocument.createTd().setColSpan(1);
+safeDocument.createTd().setColspan(1);
+safeDocument.createTd().setRowSpan(1);
+safeDocument.createTd().setRowspan(1);
 
 const inputLookup: SafeInputElement | null = safeDocument.getElement(
 	"input",
