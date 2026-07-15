@@ -297,6 +297,7 @@ export interface SafeContainerElement extends SafeElement {
     newChild: SafeElement | SafeTextNode,
     oldChild: SafeElement | SafeTextNode,
   ) => void;
+  /** Replace DOM descendants; their detached wrappers remain independently usable. */
   readonly setText: (value: string) => void;
   readonly getText: () => string;
 }
@@ -448,11 +449,14 @@ export interface SafeMeterElement extends SafeContainerElement {
 }
 
 export interface SafeListElement extends SafeContainerElement {
+  /** Create a detached list item; append it explicitly. */
   readonly createItem: () => SafeContainerElement;
 }
 
 export interface SafeDescriptionListElement extends SafeContainerElement {
+  /** Create a detached term; append it explicitly. */
   readonly createTerm: () => SafeContainerElement;
+  /** Create a detached description; append it explicitly. */
   readonly createDescription: () => SafeContainerElement;
 }
 
@@ -521,7 +525,7 @@ export interface SafeDocument {
   readonly createFigure: () => SafeContainerElement;
   readonly createFigcaption: () => SafeContainerElement;
 
-  readonly createText: () => SafeContainerElement;
+  readonly createParagraph: () => SafeContainerElement;
   readonly createHeading: (level: HeadingLevel) => SafeContainerElement;
   readonly createFormatting: (format: FormattingTag) => SafeContainerElement;
 
@@ -578,7 +582,7 @@ export interface SafeDocument {
   readonly createRt: () => SafeContainerElement;
   readonly createRp: () => SafeContainerElement;
 
-  readonly createRawText: () => SafeTextNode;
+  readonly createTextNode: () => SafeTextNode;
 
   readonly getElement: GetElement;
 }

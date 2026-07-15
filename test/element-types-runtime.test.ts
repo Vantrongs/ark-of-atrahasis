@@ -75,7 +75,7 @@ const CONTAINER_FACTORIES: readonly [
 		"figcaption",
 		(safeDocument) => safeDocument.createFigcaption(),
 	],
-	["text", "p", (safeDocument) => safeDocument.createText()],
+	["paragraph", "p", (safeDocument) => safeDocument.createParagraph()],
 	["heading", "h2", (safeDocument) => safeDocument.createHeading(2)],
 	[
 		"formatting",
@@ -165,6 +165,7 @@ const SPECIALIZED_FACTORIES: Readonly<
 
 function makeRoot(): ShadowRoot {
 	const host = document.createElement("div");
+	host.style.contain = "paint";
 	document.body.appendChild(host);
 	return host.attachShadow({ mode: "open" });
 }
@@ -197,7 +198,7 @@ describe("public element runtime families", () => {
 		const root = makeRoot();
 		const safeDocument = createSafeDocument(root);
 		const wrapper = create(safeDocument);
-		const child = safeDocument.createRawText();
+		const child = safeDocument.createTextNode();
 		child.setText(`child:${name}`);
 
 		for (const method of CHILD_TEXT_METHODS) {
@@ -271,6 +272,42 @@ describe("public element runtime families", () => {
 		expect(safeDocument.getElement("stable-input", "input")).toBe(input);
 		input.dispose();
 		expect(safeDocument.getElement("stable-input", "input")).toBeNull();
+	});
+
+	it("keeps list-local factories detached until the caller appends explicitly", () => {
+		const root = makeRoot();
+		const safeDocument = createSafeDocument(root);
+		const list = safeDocument.createList("unordered");
+		const descriptionList = safeDocument.createList("description");
+		const item = list.createItem();
+		const term = descriptionList.createTerm();
+		const description = descriptionList.createDescription();
+
+		safeDocument.appendChild(list);
+		safeDocument.appendChild(descriptionList);
+		expect(root.querySelectorAll("li, dt, dd")).toHaveLength(0);
+
+		list.appendChild(item);
+		descriptionList.appendChild(term);
+		descriptionList.appendChild(description);
+		expect(root.querySelectorAll("li, dt, dd")).toHaveLength(3);
+	});
+
+	it("keeps descendants reusable after parent setText detaches them", () => {
+		const root = makeRoot();
+		const safeDocument = createSafeDocument(root);
+		const parent = safeDocument.createDiv();
+		const child = safeDocument.createSpan();
+		child.setText("reappend me");
+		parent.appendChild(child);
+		safeDocument.appendChild(parent);
+
+		parent.setText("replacement");
+		expect(parent.getText()).toBe("replacement");
+		expect(() => child.getText()).not.toThrow();
+
+		parent.appendChild(child);
+		expect(parent.getText()).toBe("replacementreappend me");
 	});
 
 	it("hardens document, common, container, void, style, and function capabilities", () => {

@@ -179,7 +179,7 @@ const containerFactories: readonly SafeContainerElement[] = [
 	safeDocument.createAside(),
 	safeDocument.createFigure(),
 	safeDocument.createFigcaption(),
-	safeDocument.createText(),
+	safeDocument.createParagraph(),
 	safeDocument.createHeading(1),
 	safeDocument.createFormatting("strong"),
 	safeDocument.createBlockquote(),
@@ -236,7 +236,7 @@ const voidFactories: readonly SafeVoidElement[] = [
 ];
 
 const container = safeDocument.createDiv();
-container.appendChild(safeDocument.createRawText());
+container.appendChild(safeDocument.createTextNode());
 container.setText("container text");
 const containerText: string = container.getText();
 const voidElement = safeDocument.createBr();

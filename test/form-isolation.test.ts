@@ -5,6 +5,7 @@ import { createTestSafeDocument as createSafeDocument } from "./support/create-s
 
 function makeRoot(): ShadowRoot {
   const host = document.createElement("div");
+  host.style.contain = "paint";
   document.body.append(host);
   return host.attachShadow({ mode: "open" });
 }
@@ -44,6 +45,7 @@ describe("strict non-form controls", () => {
   test("created buttons are non-submitting and reject submit/reset states", () => {
     const form = document.createElement("form");
     const host = document.createElement("div");
+    host.style.contain = "paint";
     form.append(host);
     document.body.append(form);
     const root = host.attachShadow({ mode: "open" });

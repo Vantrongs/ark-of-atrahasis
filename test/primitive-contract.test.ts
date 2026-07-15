@@ -19,6 +19,7 @@ import { createTestSafeDocument as createSafeDocument } from "./support/create-s
 
 function makeRoot(): ShadowRoot {
   const host = document.createElement("div");
+  host.style.contain = "paint";
   document.body.append(host);
   return host.attachShadow({ mode: "open" });
 }
@@ -255,7 +256,7 @@ describe("keyword and operation contracts", () => {
     ];
     for (const vocabulary of vocabularies) expect(Object.isFrozen(vocabulary)).toBe(true);
     expect(INPUT_TYPES).toEqual([
-      "text", "search", "tel", "url", "email", "password", "date", "month", "week",
+      "text", "search", "tel", "url", "email", "date", "month", "week",
       "time", "datetime-local", "number", "range", "color", "checkbox", "radio",
     ]);
     expect(BUTTON_TYPES).toEqual(["button"]);
@@ -290,7 +291,7 @@ describe("keyword and operation contracts", () => {
     expect(physicalTextarea?.getAttribute("wrap")).toBe("hard");
     expect(physicalButton?.getAttribute("type")).toBe("button");
 
-    for (const forbidden of ["hidden", "file", "submit", "image", "reset", "button"]) {
+    for (const forbidden of ["hidden", "file", "password", "submit", "image", "reset", "button"]) {
       expect(() => input.setType(forbidden as "text")).toThrowError(expect.objectContaining({
         code: "ERR_INVALID_ARGUMENT",
         operation: "SafeInputElement.setType.type",

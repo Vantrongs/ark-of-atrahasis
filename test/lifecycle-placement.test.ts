@@ -18,6 +18,7 @@ const STYLE_POLICY = {
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
+  host.style.contain = "paint";
   documentValue.body.appendChild(host);
   return host.attachShadow({ mode: "open" });
 }

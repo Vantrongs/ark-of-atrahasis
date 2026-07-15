@@ -6,6 +6,7 @@ import { createTestSafeDocument as createSafeDocument } from "./support/create-s
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
+  host.style.contain = "paint";
   documentValue.body.appendChild(host);
   return host.attachShadow({ mode: "open" });
 }
@@ -113,6 +114,82 @@ describe("owner-realm platform boundary", () => {
     expect(() => safeDocument.appendChild(wrapper)).not.toThrow();
     expect(safeDocument.getElement("owned")).toBe(wrapper);
     expect(() => safeDocument.removeChild(wrapper)).not.toThrow();
+  });
+
+  it("uses captured owner-realm CSSOM and the native ShadowRoot host accessor", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    if (foreignDocument === null) throw new Error("expected an iframe document");
+    const root = makeRoot(foreignDocument);
+    Object.defineProperty(root, "host", {
+      configurable: true,
+      get: () => { throw document.body; },
+    });
+    const ambientDescriptor = Object.getOwnPropertyDescriptor(window, "getComputedStyle");
+    Object.defineProperty(window, "getComputedStyle", {
+      configurable: true,
+      get: () => { throw document.documentElement; },
+    });
+
+    try {
+      expect(() => createSafeDocument(root)).not.toThrow();
+    } finally {
+      if (ambientDescriptor === undefined) delete (window as { getComputedStyle?: unknown }).getComputedStyle;
+      else Object.defineProperty(window, "getComputedStyle", ambientDescriptor);
+    }
+  });
+
+  it("normalizes a hostile owner-realm computed-style failure and leaves the root unclaimed", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const root = makeRoot(foreignDocument);
+    const descriptor = Object.getOwnPropertyDescriptor(foreignWindow, "getComputedStyle");
+    Object.defineProperty(foreignWindow, "getComputedStyle", {
+      configurable: true,
+      value: () => { throw foreignDocument.body; },
+    });
+
+    try {
+      expect(() => createSafeDocument(root)).toThrowError(expect.objectContaining({
+        code: "DOM_OPERATION_FAILED",
+        operation: "Window.getComputedStyle",
+      }));
+    } finally {
+      if (descriptor === undefined) delete (foreignWindow as { getComputedStyle?: unknown }).getComputedStyle;
+      else Object.defineProperty(foreignWindow, "getComputedStyle", descriptor);
+    }
+
+    expect(() => createSafeDocument(root)).not.toThrow();
+  });
+
+  it("normalizes a hostile owner-realm computed-style getter during capture", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const root = makeRoot(foreignDocument);
+    const descriptor = Object.getOwnPropertyDescriptor(foreignWindow, "getComputedStyle");
+    Object.defineProperty(foreignWindow, "getComputedStyle", {
+      configurable: true,
+      get: () => { throw foreignDocument.documentElement; },
+    });
+
+    try {
+      expect(() => createSafeDocument(root)).toThrowError(expect.objectContaining({
+        code: "DOM_OPERATION_FAILED",
+        operation: "PlatformOps.capture",
+      }));
+    } finally {
+      if (descriptor === undefined) delete (foreignWindow as { getComputedStyle?: unknown }).getComputedStyle;
+      else Object.defineProperty(foreignWindow, "getComputedStyle", descriptor);
+    }
+
+    expect(() => createSafeDocument(root)).not.toThrow();
   });
 
   it("bypasses malicious own node accessors and methods across placement, tree, text, and attributes", () => {

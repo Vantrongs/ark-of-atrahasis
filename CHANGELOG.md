@@ -7,7 +7,25 @@ the tag, npm package, or GitHub release exists.
 
 ## [Unreleased]
 
-No changes recorded after the `0.4.0` release candidate.
+### Added
+
+- Enforced computed paint containment on the `ShadowRoot` host and added
+  Chromium, Firefox, and WebKit geometry/hit-test coverage for explicitly
+  granted fixed, viewport-sized, high-z-index guest styles.
+- Expanded real-browser SES coverage across the browser-relevant issue #1
+  authority, event/error, policy, form, owner, lifecycle, numeric, and quota
+  seams.
+
+### Changed
+
+- Renamed the paragraph and text-node factories to `createParagraph()` and
+  `createTextNode()`, made list-local creation helpers consistently detached,
+  and documented that descendants replaced by `setText()` remain reusable.
+- Removed `password` from the public input vocabulary and runtime state machine;
+  credential-confidentiality deployments now explicitly require a separately
+  trusted origin/iframe or process boundary.
+- Consolidated UTF-8 quota accounting and enabled TypeScript unused-local and
+  unused-parameter diagnostics.
 
 ## [0.4.0] - 2026-07-15
 

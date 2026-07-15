@@ -143,6 +143,7 @@ function createModel(quotas: SafeDocumentQuotas): Model {
 
 function createReal(quotas: SafeDocumentQuotas): Real {
   const host = document.createElement("div");
+  host.style.contain = "paint";
   const outsideSentinel = document.createElement("p");
   const external = document.createElement("section");
   outsideSentinel.id = "model-outside-sentinel";
@@ -508,7 +509,7 @@ function factoryForKind(safeDocument: SafeDocument, kind: NodeKind): ModelWrappe
     case "container": return safeDocument.createDiv();
     case "image": return safeDocument.createImage();
     case "button": return safeDocument.createButton();
-    case "text": return safeDocument.createRawText();
+    case "text": return safeDocument.createTextNode();
     case "list": return safeDocument.createList("unordered");
     case "label": return safeDocument.createLabel();
   }

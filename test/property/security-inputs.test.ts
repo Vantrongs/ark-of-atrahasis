@@ -34,6 +34,7 @@ const SENSITIVE_IDENTIFIERS = [
 
 function makeRoot(documentValue: Document = document): ShadowRoot {
   const host = documentValue.createElement("div");
+  host.style.contain = "paint";
   documentValue.body.append(host);
   return host.attachShadow({ mode: "open" });
 }

@@ -210,6 +210,13 @@ test("opaque identifier and form namespace leaves host form, named access, and a
     const described = safeDocument.createDiv();
     const cell = safeDocument.createTh();
 
+    let passwordError = null;
+    try {
+      Reflect.apply(input.setType, undefined, ["password"]);
+    } catch (error) {
+      passwordError = { code: error?.code ?? null, operation: error?.operation ?? null };
+    }
+
     input.setId("shared-key");
     textarea.setId("textarea-key");
     select.setId("select-key");
@@ -241,6 +248,7 @@ test("opaque identifier and form namespace leaves host form, named access, and a
     }
 
     const secondMount = document.createElement("div");
+    secondMount.style.contain = "paint";
     document.body.append(secondMount);
     const secondRoot = secondMount.attachShadow({ mode: "open" });
     const secondDocument = globalThis.arkPublicAPI.createSafeDocument(secondRoot);
@@ -325,6 +333,7 @@ test("opaque identifier and form namespace leaves host form, named access, and a
       formsNull: [physicalInput, physicalTextarea, physicalSelect, physicalButton]
         .every((control) => control.form === null),
       buttonType: physicalButton.type,
+      inputType: physicalInput.type,
     };
 
     document.body.append(physicalInput);
@@ -358,6 +367,7 @@ test("opaque identifier and form namespace leaves host form, named access, and a
         aria: described.getAria("controls"),
       },
       autofillFacing,
+      passwordError,
       reparentCleanup,
     };
   });
@@ -383,6 +393,11 @@ test("opaque identifier and form namespace leaves host form, named access, and a
       idsAreOpaque: true,
       formsNull: true,
       buttonType: "button",
+      inputType: "text",
+    },
+    passwordError: {
+      code: "ERR_INVALID_ARGUMENT",
+      operation: "SafeInputElement.setType.type",
     },
     reparentCleanup: {
       idRemoved: true,
@@ -550,6 +565,7 @@ test("raw host reparent, adopt, and detach-to-external placement revoke before g
 
     const runCase = (kind) => {
       const host = document.createElement("div");
+      host.style.contain = "paint";
       const external = kind === "adopt"
         ? foreignDocument.createElement("section")
         : document.createElement("section");

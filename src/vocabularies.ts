@@ -12,7 +12,7 @@ export const LIST_TYPES = Object.freeze(["unordered", "ordered", "description"] 
 export type ListType = (typeof LIST_TYPES)[number];
 
 export const INPUT_TYPES = Object.freeze([
-  "text", "search", "tel", "url", "email", "password", "date", "month", "week",
+  "text", "search", "tel", "url", "email", "date", "month", "week",
   "time", "datetime-local", "number", "range", "color", "checkbox", "radio",
 ] as const);
 export type InputType = (typeof INPUT_TYPES)[number];

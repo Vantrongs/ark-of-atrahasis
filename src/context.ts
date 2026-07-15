@@ -29,6 +29,7 @@ import {
 } from "./url-policy.ts";
 import { createPlatformOps, type PlatformOps } from "./platform.ts";
 import type { SpecializedElementKind } from "./vocabularies.ts";
+import { utf8ByteLength } from "./utf8.ts";
 
 const claimedRoots = new WeakSet<object>();
 const objectIsPrototypeOf = Function.call.bind(Object.prototype.isPrototypeOf) as (
@@ -165,18 +166,6 @@ function completeWithHardener<Value>(harden: Hardener, value: Value): Value {
     // A bad/stateful hardener never gets to choose the thrown boundary value.
     throw invalidHardener();
   }
-}
-
-function utf8ByteLength(value: string): number {
-  let length = 0;
-  for (const character of value) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint <= 0x7f) length += 1;
-    else if (codePoint <= 0x7ff) length += 2;
-    else if (codePoint <= 0xffff) length += 3;
-    else length += 4;
-  }
-  return length;
 }
 
 function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeDocumentQuotas {
@@ -377,6 +366,7 @@ class DocumentContextImplementation implements DocumentContext {
     this.ownerRealm = view;
     this.#quotas = resolveQuotas(normalizedOptions.quotas);
     this.platform = createPlatformOps(ownerDocument, view);
+    this.platform.assertPaintContainedRoot(root);
     this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
     this.#identifierNamespace = createIdentifierNamespace(root, this.registry, this.platform);
     this.urlPolicy = createURLPolicy(normalizedOptions.urlPolicy, this.platform.URL);

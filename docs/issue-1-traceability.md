@@ -3,7 +3,7 @@
 This document maps the live umbrella security-hardening
 [issue #1](https://github.com/Vantrongs/ark-of-atrahasis/issues/1) to source,
 tests, CI, and release-owner evidence. The audited integration base for this
-evidence pass is `f5097879cf21c1ee53d9a354ee4bcc4180ae8974`; that is a historical
+evidence pass is `4cb4da143ad2deb0be34c50a9b70d95e1bb54ef4`; that is a historical
 base, not a claim that the commit containing this document has the same SHA. A
 criterion is marked satisfied only where a committed test or artifact check
 directly exercises the claim. Repository-complete release machinery is kept
@@ -39,12 +39,14 @@ with TypeScript 5.0.4 and 7.0.2 during the package gate.
 ### Root, ownership, placement, and lifecycle
 
 - `src/context.ts` validates a native `ShadowRoot` through its owner realm,
-  claims it once, owns per-document policies/quotas/registry/namespace, audits
+  requires effective paint containment on a host with a principal box, claims
+  the root once, owns per-document policies/quotas/registry/namespace, audits
   every placement, and implements wrapper/document disposal.
 - `src/registry.ts` gives each document a private owner brand, one wrapper per
   real node, stable active/disposed/revoked states, and cross-owner rejection.
-- `src/platform.ts` captures root-owner-realm DOM/Web IDL methods and accessors;
-  platform or attacker-thrown values are normalized before crossing the API.
+- `src/platform.ts` captures root-owner-realm DOM/Web IDL and CSSOM methods and
+  accessors; containment checks and platform or attacker-thrown values are
+  normalized before crossing the API.
 - `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`,
   `test/platform-boundary.test.ts`, and
   `test/property/lifecycle-model.test.ts` cover root guessing, aliases,
@@ -73,8 +75,8 @@ field; that stricter interpretation is an open scope/contract risk.
   methods over a fixed property ceiling and fail-closed request-grammar scan.
 - `src/identifier-namespace.ts`, `src/attribute-contract.ts`, and
   `src/input-state-contract.ts` map guest IDs/names/IDREFs to per-document opaque
-  tokens, force non-form defaults, and validate primitive/vocabulary/state
-  relations before reflected IDL mutation.
+  tokens, force non-form defaults, exclude password/submit/file-like states, and
+  validate primitive/vocabulary/state relations before reflected IDL mutation.
 - `src/event.ts` snapshots captured standard getters into frozen discriminated
   primitive records and closes cancellation cells in handler `finally` blocks.
   `src/errors.ts` exposes only frozen four-field `SafeDOMError` copy records.
@@ -99,10 +101,14 @@ is made.
   request/navigation interception, opaque identifier/form isolation, raw-host
   placement cases, one explicitly approved image request, and owner-realm
   iframe behavior in Chromium, Firefox, and WebKit.
-- `test/browser/ses.spec.mjs` runs a representative lifecycle after SES 2.2.0
-  lockdown in a real Compartment in all three engines and proves hardening,
-  lookup, style, denied URL, detach/reattach, event closure, disposal, and a
-  zero-unapproved-activity ledger.
+- `test/browser/containment.spec.mjs` grants fixed, viewport-sized, high-z-index,
+  pointer-active styles and proves geometry clipping and outside hit testing at
+  a bounded paint-contained host in all three engines.
+- `test/browser/ses.spec.mjs` runs after SES 2.2.0 lockdown in a real Compartment
+  in all three engines. Its matrix covers absent raw/global authority, hostile
+  event snapshots and normalized errors, URL/style policy with a zero-activity
+  ledger, form/password rejection, cross-owner failure, placement cleanup and
+  terminal state, finite numeric rejection, and exact quota failure/release.
 - `test/ses.node.mjs` runs two mutually distrusting compartments with independent
   roots and checks copied records with `@endo/pass-style` 1.8.1.
 - `test/browser/worker-termination.spec.mjs` proves host termination of a
@@ -122,22 +128,24 @@ Same-thread SES denial of service remains an explicit non-goal.
 
 | # | Status | Direct source and test evidence | Limits / outstanding authority |
 | ---: | --- | --- | --- |
-| 1 | **Satisfied** | `src/index.ts` accepts only a native `ShadowRoot` and returns mount operations without root/host access; `src/context.ts` claims it once. `test/capability-core.test.ts`, `test/api.node.mjs`, and `test/ses.node.mjs` reject string IDs and show the guest has no factory/root/document/window endowment. | The trusted host still owns and can mutate the outer host; immutability is from the guest boundary. |
+| 1 | **Satisfied** | `src/index.ts` accepts only a native `ShadowRoot` and returns mount operations without root/host access; `src/context.ts` claims it once and requires computed paint containment on a host with a principal box. Capability, built-package, containment, and SES tests reject string IDs/uncontained roots and show the guest has no factory/root/document/window endowment. | The trusted host still owns the outer host and must maintain containment and controlled bounds for the capability lifetime; immutability is from the guest boundary. |
 | 2 | **Satisfied** | `DocumentContextImplementation.#auditPlacements()` revokes before each operation and `#clearOwnedResources()` removes tracked effects. `test/lifecycle-placement.test.ts` and `test/browser/boundary.spec.mjs` cover raw reparent, adopt, and detach-to-external cases without later guest mutation of external DOM. | Ordinary inert DOM state may remain on a raw node already retained externally; see disposal ambiguity above. |
 | 3 | **Satisfied for the documented boundary values** | `src/platform.ts`, `src/event.ts`, and `src/errors.ts` replace platform exceptions and event graphs with frozen primitive records. `test/platform-boundary.test.ts`, `test/event-membrane.test.ts`, `test/completion-boundary.test.ts`, and `test/ses.node.mjs` check no DOM/global/function/native exception escapes and copied nested data has the documented pass style. | A whole `SafeEvent` is a local hardened control record, deliberately not pass-by-copy/eventual-send. |
 | 4 | **Satisfied** | `src/event.ts` uses captured branded accessors, primitive defaults, deep completion, independent native-event cells, and dispatch-scoped cancellation. `test/event-membrane.test.ts` covers malicious value/type/modifier getters, all event families, reentrancy, callback throws, and closed controls. | Cancellation is synchronous only by design. |
 | 5 | **Satisfied for all public URL sinks** | `src/url-policy.ts` is default-deny and per-sink; element URL setters apply only an allowed canonical string. `test/browser/boundary.spec.mjs` intercepts request/navigation/form activity and observes exactly one explicitly approved image request in the grant case and none for denied sinks/actions. | The host remains responsible for policy selection and defense-in-depth CSP/navigation controls. |
-| 6 | **Satisfied** | `src/identifier-namespace.ts` isolates physical names/IDs; form factories force safe defaults. `test/form-isolation.test.ts`, `test/identifier-namespace.test.ts`, and the three-engine form/namespace browser case prove host submission, named access, radio grouping, labels, IDREFs, and autocomplete state remain unchanged. | Host raw-DOM authority remains outside the wrapper contract. |
+| 6 | **Satisfied for the non-credential strict surface** | `src/identifier-namespace.ts` isolates physical names/IDs; form factories force safe defaults and `INPUT_TYPES` excludes `password`. Unit, type, built-package, three-engine form/namespace, and browser SES cases prove password rejection plus unchanged host submission, named access, radio grouping, labels, IDREFs, and structural autocomplete state. | `autocomplete="off"` is not credential confidentiality. Credential-bearing deployments require a separately trusted origin/iframe or process boundary and deployment-specific autofill testing. |
 | 7 | **Satisfied under the documented disposal contract** | `src/registry.ts` enforces canonical owner identity; `src/context.ts` implements idempotent terminal states and effect cleanup. `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and browser SES tests cover cross-owner failure, cleanup, accounting release, repeated dispose, and stable post-dispose errors. | Disposal removes wrapper-owned capabilities/tracked effects, not every ordinary attribute/text/IDL field on externally retained raw nodes. Issue wording may require owner clarification. |
-| 8 | **Satisfied** | `src/context.ts` resolves the supplied root's `ownerDocument/defaultView`; `src/platform.ts` captures that realm without ambient `instanceof`. `test/platform-boundary.test.ts` and the browser iframe case poison ambient constructors/methods while owner-realm operations continue. | No claim is made for non-standard DOM implementations outside the checked contracts. |
+| 8 | **Satisfied** | `src/context.ts` resolves the supplied root's `ownerDocument/defaultView`; `src/platform.ts` captures that realm without ambient `instanceof`, including native host and computed-style access. Platform tests poison ambient constructors, root getters, and computed-style operations while proving owner-realm operation or normalized failure; the browser iframe case covers a second realm. | No claim is made for non-standard DOM implementations outside the checked contracts. |
 | 9 | **Satisfied** | `src/attribute-contract.ts`, `src/input-state-contract.ts`, `src/primitives.ts`, `src/platform.ts`, and `src/errors.ts` enforce primitive, finite/integer/range/relation rules and one stable error-record policy. Numeric/input/platform/property tests cover hostile inputs, atomic failures, media IDL, and native exception replacement. | The stable rejection value is a record, not an `Error` subclass. |
-| 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. `test/types/{positive,negative}.ts` and `test/element-types-runtime.test.ts` align declarations with runtime; package tests compile fixtures with TypeScript 5.0.4 and 7.0.2. | Source/property-model typecheck itself runs TypeScript 6.0.3 and 7.0.2; the minimum compiler check is on packed declarations. |
+| 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. Runtime and package fixtures require `createParagraph()`/`createTextNode()`, uniformly detached list helpers, reusable descendants after `setText()`, and password rejection; package tests compile fixtures with TypeScript 5.0.4 and 7.0.2. | Source/property-model typecheck itself runs TypeScript 6.0.3 and 7.0.2; the minimum compiler check is on packed declarations. |
 | 11 | **Satisfied with platform-specific termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven limits; property/lifecycle tests exercise exact 0–8 limits, release, shrinking, and replay. Browser Worker tests prove scheduled Worker termination in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser preemption claim; bundled Chromium failed the tested unyielding variants. `operations` and `requestAttempts` are cumulative rather than released. |
-| 12 | **Partially satisfied** | `test/browser/boundary.spec.mjs`, `test/browser/ses.spec.mjs`, and `test/browser/worker-termination.spec.mjs` pass 8 cases per engine under Playwright 1.61.1 and SES 2.2.0. | The three-engine suite is a committed representative boundary corpus, not a per-engine repetition of every Node/jsdom property, numeric, lifecycle-model, type, and packaging invariant in criteria 1–11. The broad literal wording “these invariants pass” is not fully proven for every invariant in every engine. |
+| 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm behavior; the real-Compartment SES matrix exercises browser-relevant criteria 1–12; the Worker suite covers the documented browser termination scope. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | This is the documented layered matrix rather than a browser repetition of compiler, Node Worker, or tarball tooling. Arbitrary same-agent browser preemption remains excluded by criterion 11. |
 | 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, frozen-installs, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, rebuilds packed `dist` from included source/lock, and emits the tested tarball/SBOM/checksums. `scripts/release-recovery.mjs`, `test/release.test.mjs`, and `.github/workflows/release.yml` execute first-run, interrupted upload (including an exact empty `starter`), exact-rerun, npm provenance identity, conflict, and no-duplicate-publication behavior while preserving the exact artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
 
-Because criteria 12 and 13 retain the gaps above, this document does not claim
-issue #1 is closed.
+The repository strict runtime/type/browser contract in criteria 1–12 is covered
+by committed gates. Criterion 13 still requires external owner configuration,
+tagging, and publication, so this document does not claim that issue #1 or the
+release is externally complete.
 
 ## Property/model and reproducibility details
 
@@ -194,7 +202,12 @@ integrated into PR #7 and then completed by these merged PRs to
 - [#16](https://github.com/Vantrongs/ark-of-atrahasis/pull/16) property/model and
   hard Worker coverage, merged at `cc8df22`; and
 - [#17](https://github.com/Vantrongs/ark-of-atrahasis/pull/17) final evidence
-  documentation, merged into the audited integration base `f509787`.
+  documentation (`f509787`);
+- [#18](https://github.com/Vantrongs/ark-of-atrahasis/pull/18) transactional
+  rollback and cleanup reporting (`26487e0`); and
+- [#19](https://github.com/Vantrongs/ark-of-atrahasis/pull/19) interrupted
+  release recovery hardening, merged into the audited integration base
+  `4cb4da1`.
 
 A historical [check job](https://github.com/Vantrongs/ark-of-atrahasis/actions/runs/29410388350/job/87335805917)
 completed successfully on 2026-07-15 for exact SHA `cc8df22`: Node 22.22.2,
@@ -203,7 +216,13 @@ TypeScript 6.0.3 and 7.0.2, 545 Vitest tests, 4 built API tests, 7 release tests
 24 browser tests (8 per engine), 2 Node SES tests, zero audit findings, and a
 verified pristine `ark-of-atrahasis-0.4.0.tgz` with SHA-256
 `b8930b3c17af7bbe7f0c26fb89f3a07a3b13108a5f43cb1eae6388dfae8fe078`.
-Those counts and that digest describe only `cc8df22`, not later commits.
+A later exact-base [check run](https://github.com/Vantrongs/ark-of-atrahasis/actions/runs/29416611292)
+completed successfully on 2026-07-15 for `4cb4da1`: 56 linted files, 552
+Vitest tests, 4 built API tests, 28 release tests, 27 browser tests (9 per
+engine), 2 Node SES tests, zero audit findings, and verified tarball SHA-256
+`bc73391afe8e85782c432604b6dbe4f74e57a3d1a7ffab0ec27959b4bf650310`.
+Those counts and digests are historical per-commit evidence, not claims about
+the later strict-contract commit containing this document.
 
 ## External owner and legal status
 
