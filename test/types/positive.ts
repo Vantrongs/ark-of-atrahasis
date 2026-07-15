@@ -16,6 +16,7 @@ import type {
 	SPECIALIZED_ELEMENT_KINDS,
 	TABLE_SCOPE_VALUES,
 	TEXTAREA_WRAP_VALUES,
+	TRACK_KINDS,
 	AriaIdRefListName,
 	AriaIdRefName,
 	AriaRole,
@@ -62,10 +63,12 @@ import type {
 	SafeMeterElement,
 	SafeMouseEvent,
 	SafeOptionElement,
+	SafeOptgroupElement,
 	SafePointerEvent,
 	SafeProgressElement,
 	SafeSelectElement,
 	SafeSourceElement,
+	SafeTrackElement,
 	SafeStyle,
 	SafeTableCellElement,
 	SafeTextareaElement,
@@ -79,6 +82,7 @@ import type {
 	StylePolicyEngine,
 	TableScopeValue,
 	TextareaWrapValue,
+	TrackKind,
 	URLPolicyEngine,
 	URLSink,
 } from "ark-of-atrahasis";
@@ -144,6 +148,9 @@ type _EnterKeyHintVocabulary = Expect<
 type _TextareaWrapVocabulary = Expect<
 	Equal<TextareaWrapValue, (typeof TEXTAREA_WRAP_VALUES)[number]>
 >;
+type _TrackKindVocabulary = Expect<
+	Equal<TrackKind, (typeof TRACK_KINDS)[number]>
+>;
 type _ImageLoadingVocabulary = Expect<
 	Equal<ImageLoadingValue, (typeof IMAGE_LOADING_VALUES)[number]>
 >;
@@ -182,6 +189,14 @@ const broadList: SafeListElement | SafeDescriptionListElement =
 	safeDocument.createList(broadListType);
 const createListCapability: CreateList = safeDocument.createList;
 const getElementCapability: GetElement = safeDocument.getElement;
+const specializedOptgroup: SafeOptgroupElement = safeDocument.createOptgroup();
+const specializedTrack: SafeTrackElement = safeDocument.createTrack();
+specializedOptgroup.setLabel("Localized group");
+specializedTrack.setKind("captions");
+specializedTrack.setSrcLang("en");
+specializedTrack.setLabel("English");
+specializedTrack.setDefault(true);
+safeDocument.createDiv().setTranslate(false);
 
 const listItem: SafeContainerElement = unordered.createItem();
 const term: SafeContainerElement = description.createTerm();
@@ -241,6 +256,7 @@ const containerFactories: readonly SafeContainerElement[] = [
 	safeDocument.createRuby(),
 	safeDocument.createRt(),
 	safeDocument.createRp(),
+	safeDocument.createBdi(),
 	unordered,
 	ordered,
 	description,

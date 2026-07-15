@@ -189,6 +189,30 @@ describe("fixed-window request-attempt rates", () => {
     }
   });
 
+  it("meters the track URL sink at the exact request-attempt boundary", () => {
+    const clock = createControlledOwnerClock(0);
+    try {
+      const safeDocument = createSafeDocument(clock.root, {
+        quotas: { requestAttempts: 10 },
+        rates: {
+          operations: { limit: 10, windowMs: 1_000 },
+          requestAttempts: { limit: 1, windowMs: 1_000 },
+        },
+      });
+      const track = safeDocument.createTrack();
+      expect(track.setSrc("https://denied.example/one.vtt").allowed).toBe(false);
+      expectSafeRateError(
+        () => track.setSrc("https://denied.example/two.vtt"),
+        "SafeDocument rate exceeded: requestAttempts",
+      );
+
+      clock.set(1_000);
+      expect(track.setSrc("https://denied.example/reset.vtt").allowed).toBe(false);
+    } finally {
+      clock.restore();
+    }
+  });
+
   it("rejects accessors, non-records, missing fields, and invalid rate primitives without claiming the root", () => {
     const invalidRates: readonly unknown[] = [
       undefined,

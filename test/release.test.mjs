@@ -14,6 +14,15 @@ import {
   publishOrResumeNpm,
 } from "../scripts/release-recovery.mjs";
 import {
+  CYCLONEDX_LIBRARY_VERSION,
+  CYCLONEDX_SCHEMA,
+  CYCLONEDX_SPEC_VERSION,
+  collectShrinkwrapComponentInventory,
+  normalizeReleaseSbom,
+  validateReleaseSbomInventory,
+  validateReleaseSbomContents,
+} from "../scripts/sbom.mjs";
+import {
   inspectVersionForRelease,
   verifyAnnotatedTagAtHead,
   verifyReleaseMetadata,
@@ -24,6 +33,7 @@ import {
   parseStableVersion,
 } from "../scripts/stable-version.mjs";
 import { extractReadmeFences } from "../scripts/readme-examples.mjs";
+import { EXPECTED_RUNTIME_EXPORTS } from "../scripts/runtime-export-contract.mjs";
 
 const manifest = {
   name: "ark-of-atrahasis",
@@ -39,6 +49,159 @@ const releaseRecoverySource = readFileSync(
   new URL("../scripts/release-recovery.mjs", import.meta.url),
   "utf8",
 );
+
+test("release SBOM normalization is reproducible, current, and bound to the tarball", () => {
+  const digest = "a".repeat(64);
+  const raw = {
+    $schema: "http://cyclonedx.org/schema/bom-1.5.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.5",
+    serialNumber: "urn:uuid:09f55116-97e1-49cf-b3b8-44d0207e7730",
+    version: 1,
+    metadata: {
+      timestamp: "2026-07-15T00:00:00.000Z",
+      tools: [{ vendor: "npm", name: "cli", version: "11.18.0" }],
+      component: {
+        "bom-ref": "ark-of-atrahasis@0.4.0",
+        type: "library",
+        name: "temporary-directory-name",
+        version: "0.4.0",
+      },
+    },
+    components: [],
+    dependencies: [{ ref: "ark-of-atrahasis@0.4.0", dependsOn: [] }],
+  };
+
+  const normalized = normalizeReleaseSbom(raw, {
+    name: "ark-of-atrahasis",
+    npmVersion: "11.18.0",
+    tarballSha256: digest,
+    version: "0.4.0",
+  });
+
+  assert.equal(normalized.$schema, CYCLONEDX_SCHEMA);
+  assert.equal(normalized.specVersion, CYCLONEDX_SPEC_VERSION);
+  assert.equal(normalized.serialNumber, undefined);
+  assert.equal(normalized.metadata.timestamp, undefined);
+  assert.equal(normalized.metadata.component.name, "ark-of-atrahasis");
+  assert.deepEqual(normalized.metadata.component.hashes, [{ alg: "SHA-256", content: digest }]);
+  assert.deepEqual(normalized.metadata.properties, [{ name: "cdx:reproducible", value: "true" }]);
+  assert.deepEqual(normalized.metadata.tools.at(-2), {
+    vendor: "ark-of-atrahasis",
+    name: "scripts/sbom.mjs",
+    version: "0.4.0",
+  });
+  assert.deepEqual(normalized.metadata.tools.at(-1), {
+    vendor: "OWASP Foundation",
+    name: "@cyclonedx/cyclonedx-library",
+    version: CYCLONEDX_LIBRARY_VERSION,
+  });
+  assert.equal(raw.specVersion, "1.5");
+  assert.equal(raw.metadata.component.name, "temporary-directory-name");
+  assert.throws(
+    () => normalizeReleaseSbom(raw, {
+      name: "ark-of-atrahasis",
+      npmVersion: "11.18.0",
+      tarballSha256: "not-a-digest",
+      version: "0.4.0",
+    }),
+    /lowercase SHA-256 digest/u,
+  );
+  assert.throws(
+    () => normalizeReleaseSbom({ ...raw, metadata: {
+      ...raw.metadata,
+      tools: [{ vendor: "npm", name: "cli", version: "11.17.0" }],
+    } }, {
+      name: "ark-of-atrahasis",
+      npmVersion: "11.18.0",
+      tarballSha256: digest,
+      version: "0.4.0",
+    }),
+    /tool identity drifted/u,
+  );
+  assert.throws(
+    () => normalizeReleaseSbom({ ...raw, metadata: {
+      ...raw.metadata,
+      component: { ...raw.metadata.component, "bom-ref": "another-package@0.4.0" },
+    } }, {
+      name: "ark-of-atrahasis",
+      npmVersion: "11.18.0",
+      tarballSha256: digest,
+      version: "0.4.0",
+    }),
+    /structure/u,
+  );
+});
+
+test("release SBOM strict validation rejects invalid CycloneDX 1.7 bytes", async () => {
+  const invalid = JSON.stringify({
+    $schema: CYCLONEDX_SCHEMA,
+    bomFormat: "CycloneDX",
+    specVersion: CYCLONEDX_SPEC_VERSION,
+    version: "not-an-integer",
+  });
+  await assert.rejects(
+    validateReleaseSbomContents(invalid),
+    /CycloneDX 1\.7 validation failed/u,
+  );
+});
+
+test("release SBOM inventory rejects an internally closed but truncated shrinkwrap graph", () => {
+  const shrinkwrap = {
+    packages: {
+      "": { name: "fixture", version: "1.0.0" },
+      "node_modules/alias": { name: "actual-package", version: "2.0.0" },
+      "node_modules/dep": { version: "1.0.0" },
+      "node_modules/parent/node_modules/dep": { version: "1.0.0" },
+      "node_modules/workspace": { link: true, resolved: "packages/workspace" },
+    },
+  };
+  const complete = {
+    components: [
+      { "bom-ref": "dep@1.0.0", name: "dep", version: "1.0.0" },
+      {
+        "bom-ref": "actual-package@2.0.0",
+        name: "alias",
+        version: "2.0.0",
+      },
+    ],
+    dependencies: [
+      { ref: "fixture@1.0.0", dependsOn: ["dep@1.0.0", "actual-package@2.0.0"] },
+      { ref: "dep@1.0.0", dependsOn: [] },
+      { ref: "actual-package@2.0.0", dependsOn: [] },
+    ],
+  };
+
+  assert.deepEqual(collectShrinkwrapComponentInventory(shrinkwrap), [
+    "alias@2.0.0",
+    "dep@1.0.0",
+  ]);
+  assert.doesNotThrow(() => validateReleaseSbomInventory(complete, shrinkwrap));
+
+  const truncated = {
+    components: complete.components.slice(0, 1),
+    dependencies: [
+      { ref: "fixture@1.0.0", dependsOn: ["dep@1.0.0"] },
+      { ref: "dep@1.0.0", dependsOn: [] },
+    ],
+  };
+  assert.throws(
+    () => validateReleaseSbomInventory(truncated, shrinkwrap),
+    /component inventory differs.*alias@2\.0\.0/u,
+  );
+});
+
+test("README enumerates the exact root runtime-export contract", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const enumeration = readme.match(
+    /Its runtime exports\nare exactly[^:]+:\n\n(?<list>[\s\S]*?)\n\nOnly `createSafeDocument/u,
+  )?.groups?.list;
+  assert.ok(enumeration, "README runtime-export enumeration is missing");
+  const documented = [...enumeration.matchAll(/`([A-Za-z][A-Za-z0-9_]*)`/gu)]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(documented, EXPECTED_RUNTIME_EXPORTS);
+});
 
 function createRecoveryFixture() {
   const directory = mkdtempSync(join(tmpdir(), "ark-release-recovery-test-"));

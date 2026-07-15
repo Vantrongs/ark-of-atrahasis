@@ -50,6 +50,7 @@ import type {
 	StylePolicyEngine,
 	TableScopeValue,
 	TextareaWrapValue,
+	TrackKind,
 	URLPolicyEngine,
 } from "ark-of-atrahasis";
 
@@ -208,6 +209,8 @@ const invalidTextareaWrap: TextareaWrapValue = "off";
 const invalidImageLoading: ImageLoadingValue = "auto";
 // @ts-expect-error invalid table-scope literal
 const invalidTableScope: TableScopeValue = "column";
+// @ts-expect-error invalid media-track kind literal
+const _invalidTrackKind: TrackKind = "karaoke";
 // @ts-expect-error invalid single ARIA IDREF name
 const invalidAriaIdRef: AriaIdRefName = "labelledby";
 // @ts-expect-error invalid list ARIA IDREF name
@@ -244,6 +247,8 @@ safeDocument.createTextarea().setWrap(broadString);
 image.setLoading(broadString);
 // @ts-expect-error broad strings are not table-scope values
 safeDocument.createTh().setScope(broadString);
+// @ts-expect-error broad strings are not media-track kinds
+track.setKind(broadString);
 // @ts-expect-error broad strings are not ARIA roles
 child.setRole(broadString);
 

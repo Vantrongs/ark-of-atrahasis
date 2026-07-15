@@ -12,6 +12,7 @@ import {
   INPUT_TYPES,
   LIST_TYPES,
   TEXTAREA_WRAP_VALUES,
+  TRACK_KINDS,
   type EventHandler,
   type SafeDocument,
 } from "../src/index.ts";
@@ -104,6 +105,7 @@ const COMMON_CASES: readonly PrimitiveCase[] = [
   { operation: "SafeElement.setHidden.value", invoke: (doc, value) => doc.createDiv().setHidden(asBoolean(value)) },
   { operation: "SafeElement.setLang.value", invoke: (doc, value) => doc.createDiv().setLang(asString(value)) },
   { operation: "SafeElement.setDir.value", invoke: (doc, value) => doc.createDiv().setDir(asString(value)) },
+  { operation: "SafeElement.setTranslate.value", invoke: (doc, value) => doc.createDiv().setTranslate(asBoolean(value)) },
   { operation: "SafeElement.setSpellcheck.value", invoke: (doc, value) => doc.createDiv().setSpellcheck(asBoolean(value)) },
   { operation: "SafeElement.setData.key", invoke: (doc, value) => doc.createDiv().setData(asString(value), "value") },
   { operation: "SafeElement.setData.value", invoke: (doc, value) => doc.createDiv().setData("key", asString(value)) },
@@ -161,6 +163,7 @@ const FORM_CASES: readonly PrimitiveCase[] = [
   { operation: "SafeOptionElement.setSelected.value", invoke: (doc, value) => doc.createOption().setSelected(asBoolean(value)) },
   { operation: "SafeOptionElement.setDisabled.value", invoke: (doc, value) => doc.createOption().setDisabled(asBoolean(value)) },
   { operation: "SafeOptionElement.setLabel.value", invoke: (doc, value) => doc.createOption().setLabel(asString(value)) },
+  { operation: "SafeOptgroupElement.setLabel.value", invoke: (doc, value) => doc.createOptgroup().setLabel(asString(value)) },
   { operation: "SafeButtonElement.setDisabled.value", invoke: (doc, value) => doc.createButton().setDisabled(asBoolean(value)) },
   { operation: "SafeButtonElement.setName.value", invoke: (doc, value) => doc.createButton().setName(asString(value)) },
   { operation: "SafeButtonElement.setValue.value", invoke: (doc, value) => doc.createButton().setValue(asString(value)) },
@@ -188,6 +191,10 @@ const REMAINING_SIMPLE_CASES: readonly PrimitiveCase[] = [
   { operation: "SafeAudioElement.setLoop.value", invoke: (doc, value) => doc.createAudio().setLoop(asBoolean(value)) },
   { operation: "SafeAudioElement.setMuted.value", invoke: (doc, value) => doc.createAudio().setMuted(asBoolean(value)) },
   { operation: "SafeSourceElement.setType.value", invoke: (doc, value) => doc.createSource().setType(asString(value)) },
+  { operation: "SafeTrackElement.setKind.value", invoke: (doc, value) => doc.createTrack().setKind(asString(value) as "subtitles") },
+  { operation: "SafeTrackElement.setSrcLang.value", invoke: (doc, value) => doc.createTrack().setSrcLang(asString(value)) },
+  { operation: "SafeTrackElement.setLabel.value", invoke: (doc, value) => doc.createTrack().setLabel(asString(value)) },
+  { operation: "SafeTrackElement.setDefault.value", invoke: (doc, value) => doc.createTrack().setDefault(asBoolean(value)) },
   { operation: "SafeCanvasElement.setWidth.value", invoke: (doc, value) => doc.createCanvas().setWidth(asNumber(value)) },
   { operation: "SafeCanvasElement.setHeight.value", invoke: (doc, value) => doc.createCanvas().setHeight(asNumber(value)) },
   { operation: "SafeTableCellElement.setColspan.value", invoke: (doc, value) => doc.createTd().setColspan(asNumber(value)) },
@@ -247,6 +254,7 @@ describe("keyword and operation contracts", () => {
       INPUT_TYPES,
       LIST_TYPES,
       TEXTAREA_WRAP_VALUES,
+      TRACK_KINDS,
     ];
     for (const vocabulary of vocabularies) expect(Object.isFrozen(vocabulary)).toBe(true);
     expect(INPUT_TYPES).toEqual([

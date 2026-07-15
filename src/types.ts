@@ -15,6 +15,7 @@ import type {
   SpecializedElementKind,
   TableScopeValue,
   TextareaWrapValue,
+  TrackKind,
 } from "./vocabularies.ts";
 
 export type {
@@ -32,6 +33,7 @@ export type {
   SpecializedElementKind,
   TableScopeValue,
   TextareaWrapValue,
+  TrackKind,
 } from "./vocabularies.ts";
 
 export type SafeEventKind =
@@ -277,7 +279,20 @@ export interface SafeElement {
   readonly setTabIndex: (value: number) => void;
   readonly setHidden: (value: boolean) => void;
   readonly setLang: (value: string) => void;
+  /** Remove the local language declaration and return to HTML inheritance. */
+  readonly clearLang: () => void;
+  /** Local language declaration; undefined means inherited, empty means unknown. */
+  readonly getLang: () => string | undefined;
   readonly setDir: (value: DirValue) => void;
+  /** Remove the local direction declaration and return to HTML inheritance. */
+  readonly clearDir: () => void;
+  /** Local direction declaration; undefined means inherited. */
+  readonly getDir: () => DirValue | undefined;
+  readonly setTranslate: (value: boolean) => void;
+  /** Remove the local translation instruction and return to HTML inheritance. */
+  readonly clearTranslate: () => void;
+  /** Local translation instruction; undefined means inherited. */
+  readonly getTranslate: () => boolean | undefined;
   readonly setSpellcheck: (value: boolean) => void;
 
   readonly setData: (key: string, value: string) => void;
@@ -396,6 +411,11 @@ export interface SafeOptionElement extends SafeContainerElement {
   readonly setLabel: (value: string) => void;
 }
 
+export interface SafeOptgroupElement extends SafeContainerElement {
+  /** Required non-empty, localized label when no child legend supplies it. */
+  readonly setLabel: (value: string) => void;
+}
+
 export interface SafeButtonElement extends SafeContainerElement {
   readonly setType: (type: ButtonType) => void;
   readonly setDisabled: (value: boolean) => void;
@@ -446,6 +466,14 @@ export interface SafeAudioElement extends SafeContainerElement {
 export interface SafeSourceElement extends SafeVoidElement {
   readonly setSrc: (url: string) => SafeURLDecision;
   readonly setType: (value: string) => void;
+}
+
+export interface SafeTrackElement extends SafeVoidElement {
+  readonly setKind: (value: TrackKind) => void;
+  readonly setSrc: (url: string) => SafeURLDecision;
+  readonly setSrcLang: (value: string) => void;
+  readonly setLabel: (value: string) => void;
+  readonly setDefault: (value: boolean) => void;
 }
 
 export interface SafeCanvasElement extends SafeContainerElement {
@@ -501,6 +529,7 @@ export interface SafeElementByKind {
   readonly textarea: SafeTextareaElement;
   readonly select: SafeSelectElement;
   readonly option: SafeOptionElement;
+  readonly optgroup: SafeOptgroupElement;
   readonly button: SafeButtonElement;
   readonly label: SafeLabelElement;
   readonly fieldset: SafeFieldsetElement;
@@ -509,6 +538,7 @@ export interface SafeElementByKind {
   readonly video: SafeVideoElement;
   readonly audio: SafeAudioElement;
   readonly source: SafeSourceElement;
+  readonly track: SafeTrackElement;
   readonly canvas: SafeCanvasElement;
   readonly th: SafeTableCellElement;
   readonly td: SafeTableCellElement;
@@ -566,6 +596,8 @@ export interface SafeDocument {
   readonly createText: () => SafeContainerElement;
   readonly createHeading: (level: HeadingLevel) => SafeContainerElement;
   readonly createFormatting: (format: FormattingTag) => SafeContainerElement;
+  /** Bidirectional isolation for caller text whose direction is not known in advance. */
+  readonly createBdi: () => SafeContainerElement;
 
   readonly createBlockquote: () => SafeContainerElement;
   readonly createPre: () => SafeContainerElement;
@@ -590,7 +622,7 @@ export interface SafeDocument {
   readonly createInput: () => SafeInputElement;
   readonly createSelect: () => SafeSelectElement;
   readonly createOption: () => SafeOptionElement;
-  readonly createOptgroup: () => SafeContainerElement;
+  readonly createOptgroup: () => SafeOptgroupElement;
   readonly createTextarea: () => SafeTextareaElement;
   readonly createLabel: () => SafeLabelElement;
   readonly createFieldset: () => SafeFieldsetElement;
@@ -600,7 +632,7 @@ export interface SafeDocument {
   readonly createVideo: () => SafeVideoElement;
   readonly createAudio: () => SafeAudioElement;
   readonly createSource: () => SafeSourceElement;
-  readonly createTrack: () => SafeVoidElement;
+  readonly createTrack: () => SafeTrackElement;
   readonly createPicture: () => SafeContainerElement;
   readonly createCanvas: () => SafeCanvasElement;
 

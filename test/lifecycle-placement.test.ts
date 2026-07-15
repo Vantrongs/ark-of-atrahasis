@@ -10,6 +10,7 @@ const REQUEST_POLICY: SafeURLPolicy = {
   sinks: {
     "image.src": { allowedOrigins: ["https://example.test"] },
     "anchor.href": { allowedOrigins: ["https://example.test"] },
+    "track.src": { allowedOrigins: ["https://example.test"] },
   },
 };
 
@@ -279,6 +280,51 @@ describe("placement enforcement", () => {
     } finally {
       Object.defineProperty(prototype, "removeAttribute", descriptor);
     }
+  });
+
+  it("revokes an externally moved track without removing its physical VTT source", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: { requests: 1 },
+      urlPolicy: REQUEST_POLICY,
+    });
+    const video = safeDocument.createVideo();
+    const track = safeDocument.createTrack();
+    expect(track.setSrc("https://example.test/captions.vtt").allowed).toBe(true);
+    video.appendChild(track);
+    safeDocument.appendChild(video);
+
+    const rawVideo = requireElement(root.querySelector("video"));
+    const rawTrack = requireElement(rawVideo.querySelector("track"));
+    const outside = document.createElement("section");
+    document.body.appendChild(outside);
+    outside.appendChild(rawVideo);
+
+    expectCode(() => video.getText(), "PLACEMENT_VIOLATION");
+    expect(rawTrack.getAttribute("src")).toBe("https://example.test/captions.vtt");
+    expectCode(() => track.setSrc("https://example.test/revoked.vtt"), "NODE_REVOKED");
+
+    const replacement = safeDocument.createTrack();
+    expect(replacement.setSrc("https://example.test/replacement.vtt").allowed).toBe(true);
+  });
+
+  it("removes an owned track source on disposal and releases its request slot", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, {
+      quotas: { requests: 1 },
+      urlPolicy: REQUEST_POLICY,
+    });
+    const track = safeDocument.createTrack();
+    expect(track.setSrc("https://example.test/captions.vtt").allowed).toBe(true);
+    safeDocument.appendChild(track);
+    const rawTrack = requireElement(root.querySelector("track"));
+
+    track.dispose();
+    expect(rawTrack.hasAttribute("src")).toBe(false);
+    expect(rawTrack.isConnected).toBe(false);
+
+    const replacement = safeDocument.createTrack();
+    expect(replacement.setSrc("https://example.test/replacement.vtt").allowed).toBe(true);
   });
 
   it("treats a detached external parent as outside the owned tree", () => {

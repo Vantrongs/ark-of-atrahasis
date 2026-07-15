@@ -9,7 +9,9 @@ import type {
   SafeElement,
   SafeElementByKind,
   SafeListElement,
+  SafeOptgroupElement,
   SafeTextNode,
+  SafeTrackElement,
   SafeVoidElement,
   SpecializedElementKind,
 } from "./types.ts";
@@ -32,11 +34,13 @@ import {
   createSafeListElement,
   createSafeMeterElement,
   createSafeOptionElement,
+  createSafeOptgroupElement,
   createSafeProgressElement,
   createSafeSelectElement,
   createSafeSourceElement,
   createSafeTableCellElement,
   createSafeTextareaElement,
+  createSafeTrackElement,
   createSafeVideoElement,
   createSafeVoidElement,
 } from "./element.ts";
@@ -71,6 +75,7 @@ export type {
   SafeTextareaElement,
   SafeSelectElement,
   SafeOptionElement,
+  SafeOptgroupElement,
   SafeButtonElement,
   SafeLabelElement,
   SafeFieldsetElement,
@@ -79,6 +84,7 @@ export type {
   SafeVideoElement,
   SafeAudioElement,
   SafeSourceElement,
+  SafeTrackElement,
   SafeCanvasElement,
   SafeTableCellElement,
   SafeDetailsElement,
@@ -115,6 +121,7 @@ export {
   SPECIALIZED_ELEMENT_KINDS,
   TABLE_SCOPE_VALUES,
   TEXTAREA_WRAP_VALUES,
+  TRACK_KINDS,
   type AriaIdRefListName,
   type AriaIdRefName,
   type AriaRole,
@@ -131,6 +138,7 @@ export {
   type SpecializedElementKind,
   type TableScopeValue,
   type TextareaWrapValue,
+  type TrackKind,
 } from "./vocabularies.ts";
 
 export {
@@ -173,7 +181,7 @@ function voidElement(context: DocumentContext, tag: string): SafeVoidElement {
 
 function formContainer(
   context: DocumentContext,
-  tag: "legend" | "optgroup" | "output",
+  tag: "legend" | "output",
   operation: string,
 ): SafeContainerElement {
   return createSafeContainerElement(context, context.createFormElement(tag, operation));
@@ -293,6 +301,7 @@ export function createSafeDocument(
       const primitiveFormat = requireExactKeyword(format, FORMATTING_TAGS, "SafeDocument.createFormatting.format");
       return container(context, primitiveFormat);
     },
+    createBdi(): SafeContainerElement { return container(context, "bdi"); },
 
     createBlockquote(): SafeContainerElement { return container(context, "blockquote"); },
     createPre(): SafeContainerElement { return container(context, "pre"); },
@@ -337,8 +346,11 @@ export function createSafeDocument(
         context.createFormElement("option", "SafeDocument.createOption.policy"),
       );
     },
-    createOptgroup(): SafeContainerElement {
-      return formContainer(context, "optgroup", "SafeDocument.createOptgroup.policy");
+    createOptgroup(): SafeOptgroupElement {
+      return createSafeOptgroupElement(
+        context,
+        context.createFormElement("optgroup", "SafeDocument.createOptgroup.policy"),
+      );
     },
     createTextarea() {
       const element = context.createFormElement(
@@ -378,7 +390,9 @@ export function createSafeDocument(
     createSource() {
       return createSafeSourceElement(context, context.createElement("source"));
     },
-    createTrack(): SafeVoidElement { return voidElement(context, "track"); },
+    createTrack(): SafeTrackElement {
+      return createSafeTrackElement(context, context.createElement("track"));
+    },
     createPicture(): SafeContainerElement { return container(context, "picture"); },
     createCanvas() { return createSafeCanvasElement(context, context.createElement("canvas")); },
 

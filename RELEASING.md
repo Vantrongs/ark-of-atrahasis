@@ -50,7 +50,21 @@ installed tarball. Unsupported executable fence languages and unclosed fences
 fail the package gate.
 
 `pack:verified` copies that same, already-tested tarball to `.artifacts/` and
-also writes a CycloneDX SBOM and a SHA-256 checksum file covering both assets.
+also writes a CycloneDX 1.7 SBOM and a SHA-256 checksum file covering both
+assets. The SBOM starts from npm 11.18.0's frozen-lock dependency graph, removes
+random UUID and timestamp fields, records its deterministic transform, and
+binds the root component to the exact tested tarball's SHA-256. Two consecutive
+generations must be byte-identical. The pinned
+`@cyclonedx/cyclonedx-library` 10.1.0 strict JSON validator and its pinned Ajv
+peers validate the final bytes against the CycloneDX 1.7 schema before output.
+Its components describe the shipped shrinkwrap/source build closure, not a
+per-file tarball inventory: this package has zero runtime dependencies, while
+the included source, tests, scripts, and lockfile retain the reproducible build
+toolchain. The gate requires exact set equality between SBOM components and
+every non-root, non-link packed-shrinkwrap entry. Identity is the installed
+alias from the final `node_modules/` path segment plus its version; repeated
+placements with the same alias/version collapse to one component. The root
+component digest is the exact-artifact link.
 These local artifacts are for inspection; do not publish from the worktree or a
 developer credential.
 

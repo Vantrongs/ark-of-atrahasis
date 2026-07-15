@@ -12,6 +12,7 @@ lockdown();
 const api = await import("../dist/index.js");
 const {
   DEFAULT_SAFE_DOCUMENT_RATES,
+  TRACK_KINDS,
   createSafeDocument,
 } = api;
 
@@ -35,6 +36,10 @@ function createRoot() {
 
 test("exports exactly the documented sorted runtime namespace", () => {
   assert.deepEqual(Object.keys(api).sort(), EXPECTED_RUNTIME_EXPORTS);
+  assert.deepEqual(TRACK_KINDS, [
+    "subtitles", "captions", "descriptions", "chapters", "metadata",
+  ]);
+  assert.equal(Object.isFrozen(TRACK_KINDS), true);
 });
 
 test("fails closed without a native ShadowRoot capability", () => {

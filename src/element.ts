@@ -7,6 +7,7 @@ import type {
   SafeTextareaElement,
   SafeSelectElement,
   SafeOptionElement,
+  SafeOptgroupElement,
   SafeButtonElement,
   SafeLabelElement,
   SafeFieldsetElement,
@@ -15,6 +16,7 @@ import type {
   SafeVideoElement,
   SafeAudioElement,
   SafeSourceElement,
+  SafeTrackElement,
   SafeCanvasElement,
   SafeTableCellElement,
   SafeDetailsElement,
@@ -82,6 +84,9 @@ import {
   INPUT_TYPES,
   TABLE_SCOPE_VALUES,
   TEXTAREA_WRAP_VALUES,
+  TRACK_KINDS,
+  type DirValue,
+  type TrackKind,
 } from "./vocabularies.ts";
 
 const MAX_CANVAS_PIXELS = 16_777_216;
@@ -199,11 +204,53 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
       booleanAttribute(context, realEl, "hidden", requireBoolean(value, "SafeElement.setHidden.value"));
     },
     setLang(value: string): void {
-      const primitive = requireString(value, "SafeElement.setLang.value");
-      attribute(context, realEl, "lang", primitive === "" ? null : primitive);
+      attribute(context, realEl, "lang", requireString(value, "SafeElement.setLang.value"));
+    },
+    clearLang(): void {
+      attribute(context, realEl, "lang", null);
+    },
+    getLang(): string | undefined {
+      return context.nodeOperation(
+        realEl,
+        () => context.platform.getAttribute(realEl, "lang") ?? undefined,
+      );
     },
     setDir(value: string): void {
       attribute(context, realEl, "dir", requireAsciiKeyword(value, DIR_VALUES, "SafeElement.setDir.value"));
+    },
+    clearDir(): void {
+      attribute(context, realEl, "dir", null);
+    },
+    getDir(): DirValue | undefined {
+      return context.nodeOperation(realEl, () => {
+        const value = context.platform.getAttribute(realEl, "dir");
+        if (value === null) return undefined;
+        const normalized = asciiLowercase(value);
+        return (DIR_VALUES as readonly string[]).includes(normalized)
+          ? normalized as DirValue
+          : undefined;
+      });
+    },
+    setTranslate(value: boolean): void {
+      attribute(
+        context,
+        realEl,
+        "translate",
+        requireBoolean(value, "SafeElement.setTranslate.value") ? "yes" : "no",
+      );
+    },
+    clearTranslate(): void {
+      attribute(context, realEl, "translate", null);
+    },
+    getTranslate(): boolean | undefined {
+      return context.nodeOperation(realEl, () => {
+        const value = context.platform.getAttribute(realEl, "translate");
+        if (value === null) return undefined;
+        const normalized = asciiLowercase(value);
+        if (normalized === "" || normalized === "yes") return true;
+        if (normalized === "no") return false;
+        return undefined;
+      });
     },
     setSpellcheck(value: boolean): void {
       const primitive = requireBoolean(value, "SafeElement.setSpellcheck.value");
@@ -713,6 +760,23 @@ export function createSafeOptionElement(context: DocumentContext, realEl: HTMLOp
   }) as SafeOptionElement, realEl, "option");
 }
 
+export function createSafeOptgroupElement(
+  context: DocumentContext,
+  realEl: HTMLOptGroupElement,
+): SafeOptgroupElement {
+  const known = context.registry.getWrapper<SafeOptgroupElement>(realEl);
+  if (known) return known;
+  const base = buildSafeContainerElement(context, realEl);
+
+  return context.complete(Object.assign(base, {
+    setLabel(value: string): void {
+      const primitive = requireString(value, "SafeOptgroupElement.setLabel.value");
+      if (primitive.length === 0) throw invalidArgument("SafeOptgroupElement.setLabel.value");
+      attribute(context, realEl, "label", primitive);
+    },
+  }), realEl, "optgroup");
+}
+
 export function createSafeButtonElement(
   context: DocumentContext,
   realEl: HTMLButtonElement,
@@ -972,6 +1036,52 @@ export function createSafeSourceElement(
       attribute(context, realEl, "type", requireMimeType(value, "SafeSourceElement.setType.value"));
     },
   }) as SafeSourceElement, realEl, "source");
+}
+
+export function createSafeTrackElement(
+  context: DocumentContext,
+  realEl: HTMLTrackElement,
+): SafeTrackElement {
+  const known = context.registry.getWrapper<SafeTrackElement>(realEl);
+  if (known) return known;
+  const base = buildSafeElement(context, realEl);
+
+  return context.complete(Object.assign(base, {
+    setKind(value: TrackKind): void {
+      attribute(
+        context,
+        realEl,
+        "kind",
+        requireAsciiKeyword(value, TRACK_KINDS, "SafeTrackElement.setKind.value"),
+      );
+    },
+    setSrc(url: string): SafeURLDecision {
+      return applyURLDecision(
+        context,
+        realEl,
+        "src",
+        () => context.urlPolicy.decide("track.src", url),
+      );
+    },
+    setSrcLang(value: string): void {
+      const primitive = requireString(value, "SafeTrackElement.setSrcLang.value");
+      if (primitive.length === 0) throw invalidArgument("SafeTrackElement.setSrcLang.value");
+      attribute(context, realEl, "srclang", primitive);
+    },
+    setLabel(value: string): void {
+      const primitive = requireString(value, "SafeTrackElement.setLabel.value");
+      if (primitive.length === 0) throw invalidArgument("SafeTrackElement.setLabel.value");
+      attribute(context, realEl, "label", primitive);
+    },
+    setDefault(value: boolean): void {
+      booleanAttribute(
+        context,
+        realEl,
+        "default",
+        requireBoolean(value, "SafeTrackElement.setDefault.value"),
+      );
+    },
+  }), realEl, "track");
 }
 
 export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCanvasElement): SafeCanvasElement {

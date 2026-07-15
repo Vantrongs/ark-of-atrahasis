@@ -32,8 +32,8 @@ are exactly the sorted allowlist in `scripts/runtime-export-contract.mjs`:
   `ARIA_ROLES`, `AUTOCOMPLETE_VALUES`, `BUTTON_TYPES`, `DIR_VALUES`,
   `ENTER_KEY_HINT_VALUES`, `FORMATTING_TAGS`, `HEADING_LEVELS`,
   `IMAGE_LOADING_VALUES`, `INPUT_MODE_VALUES`, `INPUT_TYPES`, `LIST_TYPES`,
-  `SPECIALIZED_ELEMENT_KINDS`, `TABLE_SCOPE_VALUES`, and
-  `TEXTAREA_WRAP_VALUES`.
+  `SPECIALIZED_ELEMENT_KINDS`, `TABLE_SCOPE_VALUES`, `TEXTAREA_WRAP_VALUES`, and
+  `TRACK_KINDS`.
 
 Only `createSafeDocument(root, options)` grants DOM authority. The returned
 `SafeDocument` has mount operations, fixed `create*` factories, logical local-ID
@@ -116,7 +116,7 @@ table-cell, flex, grid, list-item, flow-root, and table boxes. The host must
 establish containment before calling `createSafeDocument()` and maintain it,
 together with controlled host bounds, for the lifetime of the `SafeDocument`.
 
-Omitting `urlPolicy` denies all six URL sinks. An omitted sink is denied;
+Omitting `urlPolicy` denies all seven URL sinks. An omitted sink is denied;
 enabled sinks separately constrain canonical origin (including port), protocol,
 credentials, query, fragment, and maximum length. Omitting `stylePolicy` denies
 all inline-style properties. A style grant selects from the library's fixed
@@ -279,12 +279,111 @@ dedicated-Worker result still does not claim arbitrary same-agent page-main-
 thread preemption. Choose and test a Worker/process/RPC boundary whose
 termination semantics match the hostile workload.
 
+## Internationalization contract
+
+The library has no built-in user interface or locale catalog. The host owns the
+page/default language and locale selection; the guest application owns its
+rendered and accessible localized strings. Guest text,
+titles, ARIA values, form values, and other natural-language content come from
+the caller and are preserved as primitive JavaScript/DOM strings. The wrapper
+does not apply Unicode normalization: canonically equivalent strings such as
+NFC `é` and NFD `e` plus a combining acute accent remain distinct logical IDs.
+This preserves exact caller data and avoids hidden identifier remapping. Live
+text, attribute, style, and identifier quotas count their deterministic UTF-8
+size, including four-byte supplementary characters.
+
+`setLang()` writes the HTML `lang` attribute unchanged. The empty string remains
+present and means that the language is explicitly unknown; `clearLang()` removes
+the local declaration and returns to inheritance, including inheritance from a
+shadow host. `getLang()` distinguishes those states as `""` and `undefined`.
+Non-empty values are caller-selected [BCP 47](https://www.rfc-editor.org/rfc/rfc5646)
+language tags; the library deliberately does not freeze a copy of the evolving
+IANA language-subtag registry or rewrite unknown future/private-use tags.
+`setDir()` accepts only the HTML keywords `ltr`, `rtl`, and `auto` (ASCII
+case-insensitively); `clearDir()` removes the local declaration and `getDir()`
+reports only the local state. Ordinary elements then participate in
+inheritance, while `<bdi>` returns to its intrinsic `auto` directionality. The
+browser applies the Unicode bidirectional algorithm;
+`auto` is suitable only when the caller cannot supply the direction explicitly.
+These behaviors follow the
+[HTML language and direction contract](https://html.spec.whatwg.org/multipage/dom.html#the-lang-and-xml:lang-attributes).
+`setTranslate(boolean)` writes the local HTML `yes`/`no` translation
+instruction; `clearTranslate()` restores inheritance and `getTranslate()`
+reports `true`, `false`, or `undefined` for the local state. This supports
+localization tooling without granting an arbitrary attribute setter, following
+the [HTML translation-mode contract](https://html.spec.whatwg.org/multipage/dom.html#the-translate-attribute).
+`createBdi()` provides
+[semantic bidirectional isolation](https://html.spec.whatwg.org/multipage/text-level-semantics.html#the-bdi-element)
+for caller/user text
+whose direction is not known in advance; no `bdo`, raw `unicode-bidi`, or
+direction-override escape hatch is exposed.
+The fixed style ceiling includes
+[CSS logical](https://drafts.csswg.org/css-logical-1/) block/inline size, inset,
+margin, padding, border-side, and corner-radius longhands so a host can grant
+direction-neutral layout without granting raw CSS; every property remains
+deny-by-default. It deliberately excludes CSS `direction`, `unicode-bidi`,
+`writing-mode`, logical shorthands, and broader logical modules.
+
+Public `SafeDOMError.code` is the stable locale-independent localization and
+control-flow key. `operation` is diagnostic context, not a translation key.
+The English `message` is a fixed authenticated developer diagnostic, not text
+that consumers should parse or present without their own translation.
+
+Accessible names remain host/guest content: use `setLang()`, `setDir()`, and
+the fixed `setAria()` surface together, and localize those values in the
+integration rather than in this security boundary. The role and IDREF
+vocabularies use WAI-ARIA 1.2 as their current baseline. `setAria()` constrains
+boundary shape and local ID references; it does not prove that a role/attribute
+combination is semantically valid. Prefer visible native labels or
+`aria-labelledby` where possible, and localize `aria-roledescription` sparingly
+because it replaces assistive technology's localized role name. Localize the
+human-readable ARIA value, not the structural role/state vocabulary or logical
+IDREF token.
+`createOptgroup()` exposes a required non-empty localized `setLabel()` under
+the [HTML optgroup contract](https://html.spec.whatwg.org/multipage/form-elements.html#the-optgroup-element).
+`createTrack()` exposes fixed `kind`, non-empty `srclang` and
+localized label, `default`, and a separate `track.src` URL sink. That sink is
+denied unless the host grants it explicitly and uses the same request-attempt,
+request-resource, quota, rollback, and disposal accounting as every other URL
+sink. The wrapper intentionally does not enforce aggregate sibling/media
+invariants such as a required `src`, `srclang` for `kind="subtitles"`, or unique
+`default` tracks; it also exposes no WebVTT parser, cue, `TextTrack`, or
+`TextTrackList` authority. Those limits follow the authority needed to expose
+the [HTML track metadata contract](https://html.spec.whatwg.org/multipage/media.html#the-track-element)
+without exposing the browser's live text-track objects.
+
+URL policy compares owner-realm canonical origins. Internationalized hostnames
+therefore become ASCII punycode and non-ASCII paths become UTF-8 percent-encoded
+before allow/deny and `maxLength` checks. Hosts should review and log canonical
+ASCII origins and must not present a raw guest URL as trusted identity;
+confusable detection is an integration/UI responsibility.
+
+Keyboard and input snapshots preserve the primitive `isComposing` state.
+Composition start/update/end and `beforeinput` lifecycle control are not
+currently advertised or root-fenced, so an IME-aware editor that requires that
+lifecycle needs a separately reviewed event-surface extension and
+deployed-browser testing.
+
 ## Compatibility
 
 - ESM only; CommonJS `require()` is not provided.
 - Source and output target ES2022 plus standard DOM APIs.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
+- In that pinned matrix, Chromium and WebKit make an attribute-free shadow child
+  match the shadow host's `:lang(en)`, while Firefox does not. The wrapper keeps
+  the standards-level absent/local distinction and does not copy the host
+  language into descendants; integrations requiring uniform Firefox behavior
+  should set the local language explicitly.
+- In that matrix, an initially attribute-free Arabic `<bdi>` computes its
+  intrinsic RTL direction in all three engines and `clearDir()` removes the
+  local attribute in all three. WebKit 26.5 can retain the previous computed
+  direction after dynamically removing an explicit `dir`; the wrapper does not
+  rewrite or replace nodes to mask that browser behavior.
+- WebKit's VTT renderer issues same-origin UUID `blob:` image requests while
+  showing the Arabic cue. Only that exact request shape is exempted in the VTT
+  browser case; the shared zero-activity ledger still rejects all unnamed
+  `blob:` and `data:` requests.
 - The standard three-engine projects prove full eleven-factory strict default
   denial plus external
   host form/submission/named-access/label/radio isolation for the explicit
@@ -338,7 +437,7 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run test:package` | Build and test a tarball from a pristine Git archive, including the exact root runtime-export namespace and literal typecheck/browser execution of every executable packed README fence |
 | `npm run check` | Run the complete CI gate |
-| `npm run pack:verified` | Test and write the exact tarball, CycloneDX SBOM, and SHA-256 checksums |
+| `npm run pack:verified` | Test and write the exact tarball, strictly validated reproducible CycloneDX 1.7 SBOM bound to that tarball's SHA-256, and checksum manifest |
 
 See [RELEASING.md](./RELEASING.md) for immutable artifact handoff, protected
 publishing, and source-correspondence engineering notes. The complete mapping of

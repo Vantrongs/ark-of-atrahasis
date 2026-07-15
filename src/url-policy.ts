@@ -7,6 +7,7 @@ export const URL_SINKS = [
   "video.poster",
   "audio.src",
   "source.src",
+  "track.src",
 ] as const;
 
 export type URLSink = (typeof URL_SINKS)[number];

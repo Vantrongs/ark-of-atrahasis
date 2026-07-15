@@ -144,6 +144,7 @@ test("denied image, link, media, and form actions leave the host and browser led
     const anchor = safeDocument.createAnchor();
     const video = safeDocument.createVideo();
     const audio = safeDocument.createAudio();
+    const track = safeDocument.createTrack();
     const button = safeDocument.createButton();
     const input = safeDocument.createInput();
     const textarea = safeDocument.createTextarea();
@@ -154,6 +155,7 @@ test("denied image, link, media, and form actions leave the host and browser led
       video.setSrc("/unapproved/video.mp4"),
       video.setPoster("/unapproved/poster.png"),
       audio.setSrc("/unapproved/audio.mp3"),
+      track.setSrc("/unapproved/captions.vtt"),
     ].map((decision) => ({
       allowed: decision.allowed,
       code: decision.allowed ? null : decision.error.code,
@@ -161,6 +163,7 @@ test("denied image, link, media, and form actions leave the host and browser led
 
     anchor.setText("denied navigation");
     button.setText("guest submit");
+    video.appendChild(track);
     for (const node of [image, anchor, video, audio, button, input, textarea]) {
       safeDocument.appendChild(node);
     }
@@ -213,6 +216,7 @@ test("denied image, link, media, and form actions leave the host and browser led
   });
 
   expect(before.decisions).toEqual([
+    { allowed: false, code: "ERR_URL_DENIED" },
     { allowed: false, code: "ERR_URL_DENIED" },
     { allowed: false, code: "ERR_URL_DENIED" },
     { allowed: false, code: "ERR_URL_DENIED" },
