@@ -6,16 +6,20 @@ a matching heading.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
 ### Added
 
 - A single lint, typecheck, test, audit, and pristine-package CI gate.
 - Reproducible tarball verification from a clean Git archive, minimum/current
   TypeScript declaration checks, offline consumer installation, source rebuild
   comparison, SHA-256 checksums, and a CycloneDX SBOM.
-- A protected tag release workflow that publishes the verified tarball with npm
-  provenance and attaches the tarball, checksum, and SBOM to a GitHub release.
-- Host-bootstrap, threat-model, compatibility, and release-engineering
-  documentation.
+- A tag-triggered release workflow whose write/OIDC job targets the protected
+  `npm` environment, transfers only the verified tarball, checksum, and SBOM,
+  verifies their identity, uses npm trusted publishing, and publishes a
+  populated draft GitHub release.
+- Release-engineering documentation for reproducible packaging, external owner
+  controls, preferred source information, and historical package metadata risk.
 
 ### Changed
 
@@ -25,11 +29,19 @@ a matching heading.
   TypeScript 6.0.3 for tsup 8 declaration generation.
 - Removed the unnecessary consumer TypeScript peer dependency and enabled ESM
   source maps with embedded source content.
+- Replaced the legacy string-ID/light-DOM initializer with the breaking strict
+  profile: a host-owned `ShadowRoot`, root-realm DOM operations, canonical
+  owner-branded wrappers, placement checks, quotas, and idempotent disposal.
+- Replaced raw global stylesheet authority and allow-all network sinks with
+  root-scoped typed style operations and deny-by-default URL policies.
+- Replaced live/native event exposure with immutable primitive snapshots and
+  dispatch-scoped cancellation capabilities.
 
 ### Security
 
-- Documented that the legacy 0.3.1 API is not an adversarial SES capability
-  boundary and must not be endowed to untrusted code.
+- Added fail-closed handling for cross-owner, reparenting, active-element,
+  form-default, malformed primitive, and post-disposal behavior in the strict
+  profile.
 
 ## [0.3.1] - 2026-07-10
 
@@ -38,5 +50,6 @@ a matching heading.
 - Restored `createListItem()`, `createTerm()`, and `createDescription()` on
   `SafeDocument`.
 
-[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.3.1...v0.4.0
 [0.3.1]: https://www.npmjs.com/package/ark-of-atrahasis/v/0.3.1
