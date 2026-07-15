@@ -14,6 +14,12 @@ const {
 } = await import("../dist/index.js");
 
 const options = Object.freeze({ harden });
+const formControlOptions = Object.freeze({
+  harden,
+  formControlPolicy: Object.freeze({
+    allowGuestReadableNonCredentialValues: true,
+  }),
+});
 
 function createRoot() {
   const dom = new JSDOM("<!doctype html><div id=host></div>", {
@@ -115,9 +121,25 @@ test("exports the strict text factories and detached list-local helpers", () => 
   assert.equal(root.querySelector("ul")?.children.length, 1);
 });
 
-test("rejects password input state at the public runtime boundary", () => {
+test("strict default denies guest-readable native values and opt-in still rejects passwords", () => {
+  const strictFixture = createRoot();
+  const strictDocument = createSafeDocument(strictFixture.root, options);
+  for (const [factory, operation] of [
+    [() => strictDocument.createInput(), "SafeDocument.createInput.policy"],
+    [() => strictDocument.createTextarea(), "SafeDocument.createTextarea.policy"],
+    [() => strictDocument.createSelect(), "SafeDocument.createSelect.policy"],
+  ]) {
+    assert.throws(
+      factory,
+      (error) => error?.code === "FORM_CONTROL_POLICY_REQUIRED"
+        && error?.operation === operation
+        && Object.isFrozen(error),
+    );
+  }
+  assert.equal(strictFixture.root.childNodes.length, 0);
+
   const { root } = createRoot();
-  const safeDocument = createSafeDocument(root, options);
+  const safeDocument = createSafeDocument(root, formControlOptions);
   const input = safeDocument.createInput();
 
   assert.throws(

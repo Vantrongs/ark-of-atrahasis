@@ -83,8 +83,11 @@ field; that stricter interpretation is an open scope/contract risk.
   methods over a fixed property ceiling and fail-closed request-grammar scan.
 - `src/identifier-namespace.ts`, `src/attribute-contract.ts`, and
   `src/input-state-contract.ts` map guest IDs/names/IDREFs to per-document opaque
-  tokens, force non-form defaults, exclude password/submit/file-like states, and
-  validate primitive/vocabulary/state relations before reflected IDL mutation.
+  tokens, exclude password/submit/file-like states, and validate
+  primitive/vocabulary/state relations before reflected IDL mutation.
+  `src/context.ts` parses the exact own-data `formControlPolicy` once; the strict
+  default rejects `input`, `textarea`, and `select` before native node creation,
+  while the explicit non-credential grant retains structural non-form defaults.
 - `src/event.ts` snapshots captured standard getters into frozen discriminated
   primitive records and closes cancellation cells in handler `finally` blocks.
   `src/context.ts` installs an abortable root bubble fence plus owned-target
@@ -92,7 +95,8 @@ field; that stricter interpretation is an open scope/contract risk.
   document delegation is stopped.
   `src/errors.ts` exposes only frozen four-field `SafeDOMError` copy records.
 - `test/url-policy.test.ts`, `test/style-membrane.test.ts`,
-  `test/form-isolation.test.ts`, `test/identifier-namespace.test.ts`,
+  `test/form-control-policy.test.ts`, `test/form-isolation.test.ts`,
+  `test/identifier-namespace.test.ts`,
   `test/input-state-contract.test.ts`, `test/event-membrane.test.ts`,
   `test/numeric-media-contract.test.ts`, and
   `test/property/security-inputs.test.ts` directly cover those contracts,
@@ -116,8 +120,9 @@ is made.
 ### Browser, SES, and availability
 
 - `test/browser/boundary.spec.mjs` runs a committed CSS/URL/ID/lifecycle corpus,
-  request/navigation interception, opaque identifier/form isolation, raw-host
-  placement cases, one explicitly approved image request, fenced delegated
+  request/navigation interception, strict default form-value denial, opt-in
+  opaque identifier/form isolation, raw-host placement cases, one explicitly
+  approved image request, fenced delegated
   click/hotkey/action/form/focus gadgets, and owner-realm iframe behavior in
   Chromium, Firefox, and WebKit.
 - `test/browser/containment.spec.mjs` grants fixed, viewport-sized, high-z-index,
@@ -133,6 +138,13 @@ is made.
   and Firefox use full constructed touch records; WebKit's rejected constructors
   select an explicit trusted-touch injection substitute that still checks every
   public field without claiming pre-dispatch malicious touch getters.
+- `test/browser/autofill-limit.spec.mjs` runs only in a dedicated Playwright
+  1.61.1 Chrome-for-Testing `chromium` channel project. Chromium address
+  Autofill positively fills an opt-in safe email that remains readable through
+  `getValue()` despite `autocomplete="off"`, opaque IDs/names, `form === null`,
+  and Shadow DOM, while the external host value, FormData, and named state stay
+  unchanged. The strict default exposes no anchor/sink. This is a CDP address
+  Autofill limitation witness, not password-manager or credential-store proof.
 - `test/ses.node.mjs` runs two mutually distrusting compartments with independent
   roots and checks copied records with `@endo/pass-style` 1.8.1.
 - `test/browser/worker-termination.spec.mjs` proves host termination of a
@@ -157,13 +169,13 @@ Same-thread SES denial of service remains an explicit non-goal.
 | 3 | **Satisfied for the documented boundary values** | `src/platform.ts`, `src/event.ts`, and `src/errors.ts` replace platform exceptions and event graphs with frozen primitive records. `test/platform-boundary.test.ts`, `test/event-membrane.test.ts`, `test/completion-boundary.test.ts`, and `test/ses.node.mjs` check no DOM/global/function/native exception escapes and copied nested data has the documented pass style. | A whole `SafeEvent` is a local hardened control record, deliberately not pass-by-copy/eventual-send. |
 | 4 | **Satisfied** | `src/event.ts` uses captured branded accessors, primitive defaults, deep completion, independent native-event cells, and dispatch-scoped cancellation. Unit and post-lockdown three-engine tests cover malicious value/type/modifier/family getters, every public event field, reentrancy, callback throws, and closed controls. | Cancellation is synchronous only by design. WebKit touch construction is replaced by an explicit trusted-injection path, so pre-dispatch malicious touch getters are not claimed there. |
 | 5 | **Satisfied for all public URL sinks** | `src/url-policy.ts` is default-deny and per-sink; element URL setters apply only an allowed canonical string. `test/browser/boundary.spec.mjs` intercepts request/navigation/form activity and observes exactly one explicitly approved image request in the grant case and none for denied sinks/actions. | The host remains responsible for policy selection and defense-in-depth CSP/navigation controls. |
-| 6 | **Satisfied for the non-credential strict surface** | `src/identifier-namespace.ts` isolates physical names/IDs; form factories force safe defaults and `INPUT_TYPES` excludes `password`. Unit, type, built-package, three-engine form/namespace, and browser SES cases prove password rejection plus unchanged host submission, named access, radio grouping, labels, IDREFs, and structural autocomplete state. | `autocomplete="off"` is not credential confidentiality. Credential-bearing deployments require a separately trusted origin/iframe or process boundary and deployment-specific autofill testing. |
+| 6 | **Satisfied by strict default denial; opt-in limitation is explicit** | `src/context.ts` and `src/index.ts` deny `input`, `textarea`, and `select` factories before native node creation unless the host supplies the exact non-credential form-control grant. Unit, type, built-package, SES, and three-engine browser cases prove stable denial plus unchanged external host submission, FormData, named access, radio grouping, labels, and IDREFs for the opt-in profile. The dedicated Chromium address-Autofill test proves the strict profile has no sink and positively witnesses that an opt-in email can be filled/read without changing external host state. | Same-origin opt-in controls are not autofill/PII confidential. The Chromium address CDP witness is not password-manager proof. Credential UI requires a separately trusted cross-origin iframe/origin or process/RPC boundary plus deployment-browser and credential-agent testing. |
 | 7 | **Satisfied under the documented disposal contract** | `src/registry.ts` enforces canonical owner identity; `src/context.ts` implements idempotent terminal states and effect cleanup. `test/capability-core.test.ts`, `test/lifecycle-placement.test.ts`, `test/property/lifecycle-model.test.ts`, and browser SES tests cover cross-owner failure, cleanup, accounting release, repeated dispose, and stable post-dispose errors. | Disposal removes wrapper-owned capabilities/tracked effects, not every ordinary attribute/text/IDL field on externally retained raw nodes. Issue wording may require owner clarification. |
 | 8 | **Satisfied** | `src/context.ts` resolves the supplied root's `ownerDocument/defaultView`; `src/platform.ts` captures that realm without ambient `instanceof`, including native host and computed-style access. Platform tests poison ambient constructors, root getters, and computed-style operations while proving owner-realm operation or normalized failure; the browser iframe case covers a second realm. | No claim is made for non-standard DOM implementations outside the checked contracts. |
 | 9 | **Satisfied** | `src/attribute-contract.ts`, `src/input-state-contract.ts`, `src/primitives.ts`, `src/platform.ts`, and `src/errors.ts` enforce primitive, finite/integer/range/relation rules and one stable error-record policy. Numeric/input/platform/property tests cover hostile inputs, atomic failures, media IDL, and native exception replacement. | The stable rejection value is a record, not an `Error` subclass. |
 | 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, and container/void shapes. Runtime and package fixtures require `createParagraph()`/`createTextNode()`, uniformly detached list helpers, reusable descendants after `setText()`, and password rejection; package tests compile fixtures with TypeScript 5.0.4 and 7.0.2. | Source/property-model typecheck itself runs TypeScript 6.0.3 and 7.0.2; the minimum compiler check is on packed declarations. |
 | 11 | **Satisfied with platform-specific termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven lifetime limits. `DEFAULT_SAFE_DOCUMENT_RATES` adds real fixed owner-clock windows for operations and request attempts; unit/property/API/three-engine SES tests exercise exact `N`/`N+1`/reset, hostile configuration/clock failure, generated traces, lifetime separation, and stable errors. Browser Worker tests prove scheduled Worker termination in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser preemption claim; bundled Chromium failed the tested unyielding variants. Lifetime `operations`/`requestAttempts` ceilings remain cumulative while their independent rate windows reset. |
-| 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm and delegated-event behavior; the real-Compartment SES matrix covers every advertised event family/field plus rates and browser-relevant criteria 1–12; the Worker suite covers the documented browser termination scope. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | WebKit uses the documented trusted-touch substitute because scripted `Touch` construction is rejected. This is the layered matrix rather than a browser repetition of compiler, Node Worker, or tarball tooling. Arbitrary same-agent browser preemption remains excluded by criterion 11. |
+| 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm and delegated-event behavior; the real-Compartment SES matrix covers every advertised event family/field plus rates and browser-relevant criteria 1–12; the Worker suite covers the documented browser termination scope. The separate Chromium-channel project executes the non-portable CDP address-Autofill witness exactly once. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | Standard Firefox/WebKit/Chromium projects do not run a Chromium-only protocol test. WebKit uses the documented trusted-touch substitute because scripted `Touch` construction is rejected. No portable password-store coverage is claimed. Arbitrary same-agent browser preemption remains excluded by criterion 11. |
 | 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, frozen-installs, builds twice byte-identically, installs the exact tarball offline, checks ESM/declarations, rebuilds packed `dist` from included source/lock, and emits the tested tarball/SBOM/checksums. `scripts/release-recovery.mjs`, `test/release.test.mjs`, and `.github/workflows/release.yml` execute first-run, interrupted upload (including an exact empty `starter`), exact-rerun, npm provenance identity, conflict, and no-duplicate-publication behavior while preserving the exact artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
 
 The repository strict runtime/type/browser contract in criteria 1–12 is covered

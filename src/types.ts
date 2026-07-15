@@ -224,6 +224,16 @@ export interface SafeDocumentRates {
   readonly requestAttempts: SafeDocumentRateLimit;
 }
 
+/**
+ * Explicit host acknowledgement for same-origin, guest-readable form values.
+ *
+ * This grant does not provide autofill, PII, or credential confidentiality and
+ * does not widen the public input/button type vocabularies.
+ */
+export interface SafeFormControlPolicy {
+  readonly allowGuestReadableNonCredentialValues: true;
+}
+
 export interface SafeDocumentOptions {
   /**
    * The host must call SES lockdown before importing this package and pass its
@@ -237,6 +247,11 @@ export interface SafeDocumentOptions {
   readonly urlPolicy?: SafeURLPolicy;
   /** Missing policy means every inline style property is denied. */
   readonly stylePolicy?: SafeStylePolicy;
+  /**
+   * Missing policy denies factories whose native value may be autofilled and
+   * read by guest code: input, textarea, and select.
+   */
+  readonly formControlPolicy?: SafeFormControlPolicy;
 }
 
 export interface SafeTextNode {

@@ -8,7 +8,7 @@ beforeEach(() => {
   document.body.replaceChildren();
 });
 
-describe("strict non-form controls", () => {
+describe("opt-in structural non-credential form controls", () => {
   test.each([
     { factory: "input" as const, bytes: 15 },
     { factory: "textarea" as const, bytes: 15 },

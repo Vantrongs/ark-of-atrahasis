@@ -11,6 +11,7 @@ export type SafeDOMErrorCode =
   | "ERR_INVALID_HARDENER"
   | "ERR_INVALID_POLICY"
   | "ERR_URL_DENIED"
+  | "FORM_CONTROL_POLICY_REQUIRED"
   | "DOCUMENT_DISPOSED"
   | "NODE_DISPOSED"
   | "NODE_REVOKED"
@@ -39,6 +40,8 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   ERR_INVALID_HARDENER: "The host hardener is invalid",
   ERR_INVALID_POLICY: "The host security policy is invalid",
   ERR_URL_DENIED: "The URL was denied by host policy",
+  FORM_CONTROL_POLICY_REQUIRED:
+    "Guest-readable non-credential form controls require an explicit host policy",
   DOCUMENT_DISPOSED: "The safe document has been disposed",
   NODE_DISPOSED: "The node wrapper has been disposed",
   NODE_REVOKED: "The node wrapper has been revoked",

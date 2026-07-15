@@ -9,6 +9,12 @@ the tag, npm package, or GitHub release exists.
 
 ### Added
 
+- Added a strict-default policy denial for guest-readable native `input`,
+  `textarea`, and `select` values, an exact explicit non-credential host grant,
+  and unit/API/type/SES/three-engine coverage for stable pre-creation failure.
+- Added a dedicated Chrome-for-Testing Chromium address-Autofill limitation
+  witness: opted-in email remains guest-readable after autofill while external
+  host form/named state remains unchanged; no password-manager claim is made.
 - Added exported fixed-window operation and request-attempt rate defaults,
   captured owner-realm monotonic timing, exact boundary/reset/property tests,
   and stable fail-closed rate configuration/runtime errors alongside the

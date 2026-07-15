@@ -95,6 +95,7 @@ export type {
   SafeDocumentQuotas,
   SafeDocumentRateLimit,
   SafeDocumentRates,
+  SafeFormControlPolicy,
   Hardener,
 } from "./types.ts";
 export {
@@ -303,16 +304,26 @@ export function createSafeDocument(
       return createSafeButtonElement(context, element, true);
     },
     createInput() {
-      const element = context.createElement("input");
+      const element = context.createGuestReadableFormControl(
+        "input",
+        "SafeDocument.createInput.policy",
+      );
       return createSafeInputElement(context, element, true);
     },
     createSelect() {
-      return createSafeSelectElement(context, context.createElement("select"), true);
+      const element = context.createGuestReadableFormControl(
+        "select",
+        "SafeDocument.createSelect.policy",
+      );
+      return createSafeSelectElement(context, element, true);
     },
     createOption() { return createSafeOptionElement(context, context.createElement("option")); },
     createOptgroup(): SafeContainerElement { return container(context, "optgroup"); },
     createTextarea() {
-      const element = context.createElement("textarea");
+      const element = context.createGuestReadableFormControl(
+        "textarea",
+        "SafeDocument.createTextarea.policy",
+      );
       return createSafeTextareaElement(context, element, true);
     },
     createLabel() { return createSafeLabelElement(context, context.createElement("label")); },

@@ -37,6 +37,7 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   const firstDocument = createSafeDocument(firstRoot, {
     harden,
     stylePolicy: { allowedProperties: ["color"] },
+    formControlPolicy: { allowGuestReadableNonCredentialValues: true },
   });
   const secondDocument = createSafeDocument(secondRoot, {
     harden,
@@ -44,6 +45,19 @@ test("real SES completes capabilities for two mutually distrusting compartments"
   });
   const firstGuest = new Compartment({ safeDocument: firstDocument });
   const secondGuest = new Compartment({ safeDocument: secondDocument });
+
+  const strictFormError = secondGuest.evaluate(`(() => {
+    try {
+      safeDocument.createInput();
+      return null;
+    } catch (error) {
+      return error;
+    }
+  })()`);
+  assert.equal(isSafeDOMError(strictFormError), true);
+  assert.equal(Object.isFrozen(strictFormError), true);
+  assert.equal(strictFormError.code, "FORM_CONTROL_POLICY_REQUIRED");
+  assert.equal(strictFormError.operation, "SafeDocument.createInput.policy");
 
   assert.deepEqual(
     firstGuest.evaluate("[typeof createSafeDocument, typeof root, typeof document, typeof window]"),

@@ -113,6 +113,7 @@ test("real browser SES hardens the completed public capability graph", async ({
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
       stylePolicy: { allowedProperties: ["color"] },
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
     });
     const input = safeDocument.createInput();
     const guest = new Compartment({ safeDocument });
@@ -223,6 +224,7 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
       stylePolicy: { allowedProperties: ["color"] },
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
     });
 
     const foreignHost = document.createElement("div");
@@ -484,7 +486,9 @@ test("real browser SES snapshots every advertised event family and public field"
     });
     document.body.append(host);
     const root = host.attachShadow({ mode: "open" });
-    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    });
     const target = safeDocument.createInput();
     target.setId("event-target");
     target.setType("checkbox");
