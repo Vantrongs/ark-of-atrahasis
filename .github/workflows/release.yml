@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -157,67 +157,64 @@ jobs:
             throw new Error("tarball identity does not match the release tag");
           }
           NODE
+          tar --extract --to-stdout --file ".artifacts/$artifact_base.tgz" \
+            package/scripts/release-recovery.mjs > "$RUNNER_TEMP/release-recovery.mjs"
+          echo "RELEASE_RECOVERY_SCRIPT=$RUNNER_TEMP/release-recovery.mjs" >> "$GITHUB_ENV"
           echo "artifact-base=$artifact_base" >> "$GITHUB_OUTPUT"
 
-      - name: Create a draft GitHub release and upload the verified assets
-        id: draft
+      - name: Verify the recoverable npm registry state before GitHub mutation
+        id: registry
+        env:
+          ARTIFACT_BASE: ${{ steps.artifacts.outputs.artifact-base }}
+        run: |
+          node "$RELEASE_RECOVERY_SCRIPT" inspect-registry \
+            ark-of-atrahasis \
+            "${GITHUB_REF_NAME#v}" \
+            "./.artifacts/$ARTIFACT_BASE.tgz"
+
+      - name: Create or verify the exact recoverable GitHub release
+        id: release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ARTIFACT_BASE: ${{ steps.artifacts.outputs.artifact-base }}
+          REGISTRY_STATE: ${{ steps.registry.outputs.registry-state }}
+        with:
+          script: |
+            const { pathToFileURL } = require("node:url");
+            const recovery = await import(pathToFileURL(process.env.RELEASE_RECOVERY_SCRIPT).href);
+            await recovery.prepareGitHubRelease({
+              artifactBase: process.env.ARTIFACT_BASE,
+              commitSha: context.sha,
+              core,
+              github,
+              ...context.repo,
+              registryState: process.env.REGISTRY_STATE,
+              tag: process.env.GITHUB_REF_NAME,
+            });
+
+      - name: Publish once or verify the exact npm bytes and provenance
+        env:
+          ARTIFACT_BASE: ${{ steps.artifacts.outputs.artifact-base }}
+          RELEASE_STATE: ${{ steps.release.outputs.release-state }}
+        run: |
+          node "$RELEASE_RECOVERY_SCRIPT" publish-or-resume \
+            "$RELEASE_STATE" \
+            ark-of-atrahasis \
+            "${GITHUB_REF_NAME#v}" \
+            "./.artifacts/$ARTIFACT_BASE.tgz"
+
+      - name: Publish or verify the populated GitHub release
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           ARTIFACT_BASE: ${{ steps.artifacts.outputs.artifact-base }}
         with:
           script: |
-            const fs = require("fs");
-            const path = require("path");
-            const { owner, repo } = context.repo;
-            const { data: release } = await github.rest.repos.createRelease({
-              owner,
-              repo,
-              tag_name: context.ref.replace("refs/tags/", ""),
-              target_commitish: context.sha,
-              name: context.ref.replace("refs/tags/", ""),
-              draft: true,
-              prerelease: false,
-              generate_release_notes: true,
-            });
-            const names = [
-              `${process.env.ARTIFACT_BASE}.tgz`,
-              `${process.env.ARTIFACT_BASE}.sbom.cdx.json`,
-              `${process.env.ARTIFACT_BASE}.sha256`,
-            ];
-            for (const name of names) {
-              const filePath = path.join(".artifacts", name);
-              const data = fs.readFileSync(filePath);
-              await github.rest.repos.uploadReleaseAsset({
-                owner,
-                repo,
-                release_id: release.id,
-                name,
-                data,
-                headers: {
-                  "content-type": "application/octet-stream",
-                  "content-length": data.length,
-                },
-              });
-            }
-            core.setOutput("release-id", release.id);
-
-      - name: Publish the verified tarball through npm trusted publishing
-        run: >-
-          node "$NPM_CLI" publish
-          "./.artifacts/${{ steps.artifacts.outputs.artifact-base }}.tgz"
-          --ignore-scripts
-          --access public
-          --provenance
-          --registry https://registry.npmjs.org/
-
-      - name: Publish the populated GitHub release
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          RELEASE_ID: ${{ steps.draft.outputs.release-id }}
-        with:
-          script: |
-            await github.rest.repos.updateRelease({
+            const { pathToFileURL } = require("node:url");
+            const recovery = await import(pathToFileURL(process.env.RELEASE_RECOVERY_SCRIPT).href);
+            await recovery.finalizeGitHubRelease({
+              artifactBase: process.env.ARTIFACT_BASE,
+              commitSha: context.sha,
+              github,
               ...context.repo,
-              release_id: Number(process.env.RELEASE_ID),
-              draft: false,
+              tag: process.env.GITHUB_REF_NAME,
             });
