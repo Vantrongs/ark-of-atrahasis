@@ -16,7 +16,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Check out the release commit
         uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
@@ -45,6 +45,9 @@ jobs:
 
       - name: Install frozen dependencies
         run: node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install pinned Playwright browsers
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
 
       - name: Run the complete gate
         run: node "$NPM_CLI" run check
