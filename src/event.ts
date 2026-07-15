@@ -1,49 +1,502 @@
-import type { SafeEvent, SafeElement } from "./types.ts";
+import type {
+  SafeEvent,
+  SafeEventKind,
+  SafeEventTargetSnapshot,
+  SafeFocusEvent,
+  SafeGenericEvent,
+  SafeInputEvent,
+  SafeKeyboardEvent,
+  SafeMouseEvent,
+  SafePointerEvent,
+  SafeTouchEvent,
+  SafeTouchSnapshot,
+} from "./types.ts";
 
-function getTargetProp(target: EventTarget | null, prop: string): unknown {
-  if (target === null || !(prop in target)) return undefined;
-  return (target as unknown as Record<string, unknown>)[prop];
+type PlatformFunction = (...arguments_: unknown[]) => unknown;
+type GetterRecord = Readonly<Record<string, PlatformFunction | undefined>>;
+
+interface EventAccessors {
+  readonly event: GetterRecord;
+  readonly eventMethods: GetterRecord;
+  readonly keyboard: GetterRecord;
+  readonly mouse: GetterRecord;
+  readonly pointer: GetterRecord;
+  readonly touchEvent: GetterRecord;
+  readonly focus: GetterRecord;
+  readonly input: GetterRecord;
+  readonly element: GetterRecord;
+  readonly inputElement: GetterRecord;
+  readonly controlValueGetters: readonly (PlatformFunction | undefined)[];
+  readonly touchList: GetterRecord;
+  readonly touch: GetterRecord;
 }
 
-function assertPrimitiveInput(input: unknown): asserts input is string | number | boolean {
-  if (typeof input !== "string" && typeof input !== "number" && typeof input !== "boolean") {
-    throw new Error("Invalid input: expected string, number, or boolean");
+export interface SafeEventDispatch<Event extends SafeEvent = SafeEvent> {
+  readonly event: Event;
+  /** Host-only dispatch terminator. Always invoke it in a finally block. */
+  readonly close: () => void;
+}
+
+export interface EventSnapshotter {
+  readonly open: <Kind extends SafeEventKind>(
+    nativeEvent: Event,
+    kind: Kind,
+  ) => SafeEventDispatch<Extract<SafeEvent, { readonly kind: Kind }>>;
+}
+
+const apply = Reflect.apply;
+const EMPTY_TOUCHES: readonly SafeTouchSnapshot[] = Object.freeze([]);
+
+function realmPrototype(realm: unknown, name: string): unknown {
+  if ((typeof realm !== "object" && typeof realm !== "function") || realm === null) return undefined;
+  try {
+    const realmConstructor = (realm as Record<string, unknown>)[name];
+    if (typeof realmConstructor !== "function") return undefined;
+    return (realmConstructor as { prototype?: unknown }).prototype;
+  } catch {
+    return undefined;
   }
 }
 
-export function createSafeEvent(nativeEvent: Event, _wrapper: SafeElement): SafeEvent {
+function ownGetter(prototype: unknown, name: string): PlatformFunction | undefined {
+  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
+    return undefined;
+  }
+  try {
+    const getter = Object.getOwnPropertyDescriptor(prototype, name)?.get;
+    return typeof getter === "function" ? getter as PlatformFunction : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function ownMethod(prototype: unknown, name: string): PlatformFunction | undefined {
+  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
+    return undefined;
+  }
+  try {
+    const method = Object.getOwnPropertyDescriptor(prototype, name)?.value;
+    return typeof method === "function" ? method as PlatformFunction : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function captureGetters(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
+  const prototype = realmPrototype(realm, constructorName);
+  const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
+    string,
+    PlatformFunction | undefined
+  >;
+  for (const name of names) result[name] = ownGetter(prototype, name);
+  return Object.freeze(result);
+}
+
+function captureMethods(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
+  const prototype = realmPrototype(realm, constructorName);
+  const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
+    string,
+    PlatformFunction | undefined
+  >;
+  for (const name of names) result[name] = ownMethod(prototype, name);
+  return Object.freeze(result);
+}
+
+function captureEventAccessors(realm: unknown): EventAccessors {
+  const valueGetters = [
+    ownGetter(realmPrototype(realm, "HTMLInputElement"), "value"),
+    ownGetter(realmPrototype(realm, "HTMLTextAreaElement"), "value"),
+    ownGetter(realmPrototype(realm, "HTMLSelectElement"), "value"),
+    ownGetter(realmPrototype(realm, "HTMLButtonElement"), "value"),
+    ownGetter(realmPrototype(realm, "HTMLOptionElement"), "value"),
+    ownGetter(realmPrototype(realm, "HTMLOutputElement"), "value"),
+  ];
+
   return Object.freeze({
-    type: nativeEvent.type,
-    ctrlKey: (nativeEvent as KeyboardEvent).ctrlKey ?? false,
-    altKey: (nativeEvent as KeyboardEvent).altKey ?? false,
-    shiftKey: (nativeEvent as KeyboardEvent).shiftKey ?? false,
-    metaKey: (nativeEvent as KeyboardEvent).metaKey ?? false,
-    target: {
-      id: String(getTargetProp(nativeEvent.target, "id") ?? ""),
-      get value() {
-        return getTargetProp(nativeEvent.target, "value");
-      },
-      set value(input: unknown) {
-        assertPrimitiveInput(input);
-        if (nativeEvent.target !== null && "value" in nativeEvent.target) {
-          (nativeEvent.target as HTMLInputElement).value = String(input);
-        }
-      },
-    },
-    currentTarget: {
-      id: String(getTargetProp(nativeEvent.currentTarget, "id") ?? ""),
-      get value() {
-        return getTargetProp(nativeEvent.currentTarget, "value");
-      },
-      set value(input: unknown) {
-        assertPrimitiveInput(input);
-        if (nativeEvent.currentTarget !== null && "value" in nativeEvent.currentTarget) {
-          (nativeEvent.currentTarget as HTMLInputElement).value = String(input);
-        }
-      },
-    },
-    preventDefault: () => nativeEvent.preventDefault(),
-    stopPropagation: () => nativeEvent.stopPropagation(),
-    stopImmediatePropagation: () => nativeEvent.stopImmediatePropagation(),
+    event: captureGetters(realm, "Event", [
+      "type",
+      "target",
+      "currentTarget",
+      "eventPhase",
+      "bubbles",
+      "cancelable",
+      "defaultPrevented",
+      "composed",
+      "timeStamp",
+    ]),
+    eventMethods: captureMethods(realm, "Event", [
+      "preventDefault",
+      "stopPropagation",
+      "stopImmediatePropagation",
+    ]),
+    keyboard: captureGetters(realm, "KeyboardEvent", [
+      "key",
+      "code",
+      "location",
+      "repeat",
+      "isComposing",
+      "ctrlKey",
+      "altKey",
+      "shiftKey",
+      "metaKey",
+    ]),
+    mouse: captureGetters(realm, "MouseEvent", [
+      "screenX",
+      "screenY",
+      "clientX",
+      "clientY",
+      "pageX",
+      "pageY",
+      "offsetX",
+      "offsetY",
+      "movementX",
+      "movementY",
+      "button",
+      "buttons",
+      "relatedTarget",
+      "ctrlKey",
+      "altKey",
+      "shiftKey",
+      "metaKey",
+    ]),
+    pointer: captureGetters(realm, "PointerEvent", [
+      "pointerId",
+      "width",
+      "height",
+      "pressure",
+      "tangentialPressure",
+      "tiltX",
+      "tiltY",
+      "twist",
+      "pointerType",
+      "isPrimary",
+    ]),
+    touchEvent: captureGetters(realm, "TouchEvent", [
+      "touches",
+      "targetTouches",
+      "changedTouches",
+      "ctrlKey",
+      "altKey",
+      "shiftKey",
+      "metaKey",
+    ]),
+    focus: captureGetters(realm, "FocusEvent", ["relatedTarget"]),
+    input: captureGetters(realm, "InputEvent", ["data", "inputType", "isComposing"]),
+    element: captureGetters(realm, "Element", ["id"]),
+    inputElement: captureGetters(realm, "HTMLInputElement", ["checked"]),
+    controlValueGetters: Object.freeze(valueGetters),
+    touchList: Object.freeze({
+      length: ownGetter(realmPrototype(realm, "TouchList"), "length"),
+      item: ownMethod(realmPrototype(realm, "TouchList"), "item"),
+    }),
+    touch: captureGetters(realm, "Touch", [
+      "identifier",
+      "screenX",
+      "screenY",
+      "clientX",
+      "clientY",
+      "pageX",
+      "pageY",
+      "radiusX",
+      "radiusY",
+      "rotationAngle",
+      "force",
+      "target",
+    ]),
   });
+}
+
+function readUnknown(getter: PlatformFunction | undefined, receiver: unknown): unknown {
+  if (getter === undefined) return undefined;
+  try {
+    return apply(getter, receiver, []);
+  } catch {
+    // A caught exception may itself be a DOM node, Window, function, or proxy.
+    // Never inspect or propagate it across the membrane.
+    return undefined;
+  }
+}
+
+function readString(getter: PlatformFunction | undefined, receiver: unknown, fallback = ""): string {
+  const value = readUnknown(getter, receiver);
+  return typeof value === "string" ? value : fallback;
+}
+
+function readNullableString(getter: PlatformFunction | undefined, receiver: unknown): string | null {
+  const value = readUnknown(getter, receiver);
+  return typeof value === "string" ? value : null;
+}
+
+function readBoolean(getter: PlatformFunction | undefined, receiver: unknown): boolean {
+  const value = readUnknown(getter, receiver);
+  return typeof value === "boolean" ? value : false;
+}
+
+function readNumber(getter: PlatformFunction | undefined, receiver: unknown): number {
+  const value = readUnknown(getter, receiver);
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function snapshotTarget(target: unknown, accessors: EventAccessors): SafeEventTargetSnapshot {
+  const snapshot: { id: string; value?: string; checked?: boolean } = {
+    id: readString(accessors.element.id, target),
+  };
+
+  for (const valueGetter of accessors.controlValueGetters) {
+    const value = readUnknown(valueGetter, target);
+    if (typeof value === "string") {
+      snapshot.value = value;
+      break;
+    }
+  }
+
+  const checked = readUnknown(accessors.inputElement.checked, target);
+  if (typeof checked === "boolean") snapshot.checked = checked;
+  return Object.freeze(snapshot);
+}
+
+function snapshotRelatedTarget(target: unknown, accessors: EventAccessors): SafeEventTargetSnapshot | null {
+  return target === null || target === undefined ? null : snapshotTarget(target, accessors);
+}
+
+function modifiers(getters: GetterRecord, nativeEvent: Event): SafeModifierSnapshotRecord {
+  return {
+    ctrlKey: readBoolean(getters.ctrlKey, nativeEvent),
+    altKey: readBoolean(getters.altKey, nativeEvent),
+    shiftKey: readBoolean(getters.shiftKey, nativeEvent),
+    metaKey: readBoolean(getters.metaKey, nativeEvent),
+  };
+}
+
+interface SafeModifierSnapshotRecord {
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+  readonly metaKey: boolean;
+}
+
+interface NativeEventCell {
+  nativeEvent: Event | null;
+}
+
+function cancellationCapability(
+  cell: NativeEventCell,
+  method: PlatformFunction | undefined,
+): () => boolean {
+  return Object.freeze((): boolean => {
+    const nativeEvent = cell.nativeEvent;
+    if (nativeEvent === null || method === undefined) return false;
+    try {
+      apply(method, nativeEvent, []);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function baseSnapshot(
+  kind: SafeEventKind,
+  nativeEvent: Event,
+  accessors: EventAccessors,
+  cell: NativeEventCell,
+): SafeEventBaseRecord {
+  return {
+    kind,
+    type: readString(accessors.event.type, nativeEvent),
+    bubbles: readBoolean(accessors.event.bubbles, nativeEvent),
+    cancelable: readBoolean(accessors.event.cancelable, nativeEvent),
+    composed: readBoolean(accessors.event.composed, nativeEvent),
+    defaultPrevented: readBoolean(accessors.event.defaultPrevented, nativeEvent),
+    eventPhase: readNumber(accessors.event.eventPhase, nativeEvent),
+    timeStamp: readNumber(accessors.event.timeStamp, nativeEvent),
+    target: snapshotTarget(readUnknown(accessors.event.target, nativeEvent), accessors),
+    currentTarget: snapshotTarget(readUnknown(accessors.event.currentTarget, nativeEvent), accessors),
+    preventDefault: cancellationCapability(cell, accessors.eventMethods.preventDefault),
+    stopPropagation: cancellationCapability(cell, accessors.eventMethods.stopPropagation),
+    stopImmediatePropagation: cancellationCapability(cell, accessors.eventMethods.stopImmediatePropagation),
+  };
+}
+
+interface SafeEventBaseRecord {
+  readonly kind: SafeEventKind;
+  readonly type: string;
+  readonly bubbles: boolean;
+  readonly cancelable: boolean;
+  readonly composed: boolean;
+  readonly defaultPrevented: boolean;
+  readonly eventPhase: number;
+  readonly timeStamp: number;
+  readonly target: SafeEventTargetSnapshot;
+  readonly currentTarget: SafeEventTargetSnapshot;
+  readonly preventDefault: () => boolean;
+  readonly stopPropagation: () => boolean;
+  readonly stopImmediatePropagation: () => boolean;
+}
+
+function mouseFields(nativeEvent: Event, accessors: EventAccessors): Omit<
+  SafeMouseEvent,
+  keyof SafeEventBaseRecord | "kind"
+> {
+  return {
+    ...modifiers(accessors.mouse, nativeEvent),
+    screenX: readNumber(accessors.mouse.screenX, nativeEvent),
+    screenY: readNumber(accessors.mouse.screenY, nativeEvent),
+    clientX: readNumber(accessors.mouse.clientX, nativeEvent),
+    clientY: readNumber(accessors.mouse.clientY, nativeEvent),
+    pageX: readNumber(accessors.mouse.pageX, nativeEvent),
+    pageY: readNumber(accessors.mouse.pageY, nativeEvent),
+    offsetX: readNumber(accessors.mouse.offsetX, nativeEvent),
+    offsetY: readNumber(accessors.mouse.offsetY, nativeEvent),
+    movementX: readNumber(accessors.mouse.movementX, nativeEvent),
+    movementY: readNumber(accessors.mouse.movementY, nativeEvent),
+    button: readNumber(accessors.mouse.button, nativeEvent),
+    buttons: readNumber(accessors.mouse.buttons, nativeEvent),
+    relatedTarget: snapshotRelatedTarget(readUnknown(accessors.mouse.relatedTarget, nativeEvent), accessors),
+  };
+}
+
+function snapshotTouch(touch: unknown, accessors: EventAccessors): SafeTouchSnapshot {
+  return Object.freeze({
+    identifier: readNumber(accessors.touch.identifier, touch),
+    screenX: readNumber(accessors.touch.screenX, touch),
+    screenY: readNumber(accessors.touch.screenY, touch),
+    clientX: readNumber(accessors.touch.clientX, touch),
+    clientY: readNumber(accessors.touch.clientY, touch),
+    pageX: readNumber(accessors.touch.pageX, touch),
+    pageY: readNumber(accessors.touch.pageY, touch),
+    radiusX: readNumber(accessors.touch.radiusX, touch),
+    radiusY: readNumber(accessors.touch.radiusY, touch),
+    rotationAngle: readNumber(accessors.touch.rotationAngle, touch),
+    force: readNumber(accessors.touch.force, touch),
+    target: snapshotTarget(readUnknown(accessors.touch.target, touch), accessors),
+  });
+}
+
+function snapshotTouchList(list: unknown, accessors: EventAccessors): readonly SafeTouchSnapshot[] {
+  const rawLength = readUnknown(accessors.touchList.length, list);
+  if (
+    typeof rawLength !== "number" ||
+    !Number.isSafeInteger(rawLength) ||
+    rawLength <= 0 ||
+    accessors.touchList.item === undefined
+  ) {
+    return EMPTY_TOUCHES;
+  }
+
+  // Native touch lists are physically small. A cap also prevents a patched
+  // platform implementation from turning snapshotting into unbounded work.
+  const length = Math.min(rawLength, 256);
+  const snapshots: SafeTouchSnapshot[] = [];
+  for (let index = 0; index < length; index += 1) {
+    let touch: unknown;
+    try {
+      touch = apply(accessors.touchList.item, list, [index]);
+    } catch {
+      continue;
+    }
+    if (touch !== null && touch !== undefined) snapshots.push(snapshotTouch(touch, accessors));
+  }
+  return Object.freeze(snapshots);
+}
+
+function createSnapshot(
+  nativeEvent: Event,
+  kind: SafeEventKind,
+  accessors: EventAccessors,
+  cell: NativeEventCell,
+): SafeEvent {
+  const base = baseSnapshot(kind, nativeEvent, accessors, cell);
+
+  switch (kind) {
+    case "keyboard": {
+      const snapshot: SafeKeyboardEvent = {
+        ...base,
+        kind,
+        ...modifiers(accessors.keyboard, nativeEvent),
+        key: readString(accessors.keyboard.key, nativeEvent),
+        code: readString(accessors.keyboard.code, nativeEvent),
+        location: readNumber(accessors.keyboard.location, nativeEvent),
+        repeat: readBoolean(accessors.keyboard.repeat, nativeEvent),
+        isComposing: readBoolean(accessors.keyboard.isComposing, nativeEvent),
+      };
+      return Object.freeze(snapshot);
+    }
+    case "mouse": {
+      const snapshot: SafeMouseEvent = { ...base, kind, ...mouseFields(nativeEvent, accessors) };
+      return Object.freeze(snapshot);
+    }
+    case "pointer": {
+      const snapshot: SafePointerEvent = {
+        ...base,
+        kind,
+        ...mouseFields(nativeEvent, accessors),
+        pointerId: readNumber(accessors.pointer.pointerId, nativeEvent),
+        width: readNumber(accessors.pointer.width, nativeEvent),
+        height: readNumber(accessors.pointer.height, nativeEvent),
+        pressure: readNumber(accessors.pointer.pressure, nativeEvent),
+        tangentialPressure: readNumber(accessors.pointer.tangentialPressure, nativeEvent),
+        tiltX: readNumber(accessors.pointer.tiltX, nativeEvent),
+        tiltY: readNumber(accessors.pointer.tiltY, nativeEvent),
+        twist: readNumber(accessors.pointer.twist, nativeEvent),
+        pointerType: readString(accessors.pointer.pointerType, nativeEvent),
+        isPrimary: readBoolean(accessors.pointer.isPrimary, nativeEvent),
+      };
+      return Object.freeze(snapshot);
+    }
+    case "touch": {
+      const snapshot: SafeTouchEvent = {
+        ...base,
+        kind,
+        ...modifiers(accessors.touchEvent, nativeEvent),
+        touches: snapshotTouchList(readUnknown(accessors.touchEvent.touches, nativeEvent), accessors),
+        targetTouches: snapshotTouchList(readUnknown(accessors.touchEvent.targetTouches, nativeEvent), accessors),
+        changedTouches: snapshotTouchList(readUnknown(accessors.touchEvent.changedTouches, nativeEvent), accessors),
+      };
+      return Object.freeze(snapshot);
+    }
+    case "focus": {
+      const snapshot: SafeFocusEvent = {
+        ...base,
+        kind,
+        relatedTarget: snapshotRelatedTarget(readUnknown(accessors.focus.relatedTarget, nativeEvent), accessors),
+      };
+      return Object.freeze(snapshot);
+    }
+    case "input": {
+      const snapshot: SafeInputEvent = {
+        ...base,
+        kind,
+        data: readNullableString(accessors.input.data, nativeEvent),
+        inputType: readString(accessors.input.inputType, nativeEvent),
+        isComposing: readBoolean(accessors.input.isComposing, nativeEvent),
+      };
+      return Object.freeze(snapshot);
+    }
+    case "generic": {
+      const snapshot: SafeGenericEvent = { ...base, kind };
+      return Object.freeze(snapshot);
+    }
+  }
+}
+
+/** Capture realm-local WebIDL accessors before an adversarial event arrives. */
+export function createEventSnapshotter(realm: unknown): EventSnapshotter {
+  const accessors = captureEventAccessors(realm);
+  const open = Object.freeze(<Kind extends SafeEventKind>(
+    nativeEvent: Event,
+    kind: Kind,
+  ): SafeEventDispatch<Extract<SafeEvent, { readonly kind: Kind }>> => {
+    const cell: NativeEventCell = { nativeEvent };
+    const event = createSnapshot(nativeEvent, kind, accessors, cell) as Extract<SafeEvent, { readonly kind: Kind }>;
+    let closed = false;
+    const close = Object.freeze((): void => {
+      if (closed) return;
+      closed = true;
+      cell.nativeEvent = null;
+      Object.freeze(cell);
+    });
+    return Object.freeze({ event, close });
+  });
+  return Object.freeze({ open });
 }
