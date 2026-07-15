@@ -219,13 +219,14 @@ release is externally complete.
   source maps with embedded content, two byte-identical prepack tarballs, an
   offline consumer install, literal minimum/current typecheck and Chromium
   execution of every executable packed README fence, and a byte-for-byte `dist`
-  rebuild. `scripts/readme-examples.mjs` structurally rejects unclosed or
-  unsupported executable fences instead of maintaining a copied example.
+  rebuild. `scripts/readme-examples.mjs` recognizes CommonMark backtick/tilde,
+  length, and indentation forms and structurally rejects unclosed or unsupported
+  executable fences instead of maintaining a copied example.
 - `scripts/stable-version.mjs` is the single parser/comparator/advance contract
   imported by metadata verification and release recovery. The publish job
   extracts it beside the recovery script from the verified tarball, and the
-  dated target release is accepted only with an immediately preceding empty
-  `[Unreleased]` section.
+  dated target release is accepted only when its heading and the immediately
+  preceding empty `[Unreleased]` heading are both unique.
 
 ## PR chain and live CI
 

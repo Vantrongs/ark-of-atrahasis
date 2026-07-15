@@ -14,14 +14,27 @@ export function extractReadmeFences(readme) {
   const fences = [];
 
   for (let index = 0; index < lines.length; index += 1) {
-    const opening = /^```([^`]*)$/u.exec(lines[index]);
+    const opening = /^( {0,3})(`{3,}|~{3,})(.*)$/u.exec(lines[index]);
     if (!opening) continue;
-    const info = opening[1].trim();
+    const indentation = opening[1].length;
+    const marker = opening[2];
+    const info = opening[3].trim();
+    if (marker[0] === "`" && info.includes("`")) continue;
     const language = (info.split(/\s+/u)[0] ?? "").toLowerCase();
     const codeLines = [];
     let closingIndex = index + 1;
-    while (closingIndex < lines.length && !/^```[ \t]*$/u.test(lines[closingIndex])) {
-      codeLines.push(lines[closingIndex]);
+    while (closingIndex < lines.length) {
+      const closing = /^( {0,3})(`+|~+)[ \t]*$/u.exec(lines[closingIndex]);
+      if (
+        closing
+        && closing[2][0] === marker[0]
+        && closing[2].length >= marker.length
+      ) {
+        break;
+      }
+      const content = lines[closingIndex];
+      const leadingSpaces = /^ */u.exec(content)?.[0].length ?? 0;
+      codeLines.push(content.slice(Math.min(indentation, leadingSpaces)));
       closingIndex += 1;
     }
     if (closingIndex === lines.length) {

@@ -19,8 +19,9 @@ release has occurred.
   or run dependency lifecycle scripts during a release install.
 - Bump `package.json` and `npm-shrinkwrap.json` to a version that is not already
   present on npm. Never reuse or overwrite a published version.
-- Promote every `[Unreleased]` changelog entry to the dated target-version
-  heading and leave `[Unreleased]` structurally empty immediately before it.
+- Promote every `[Unreleased]` changelog entry to the sole dated target-version
+  heading and leave exactly one `[Unreleased]` heading structurally empty
+  immediately before it.
 - Review the license metadata and the external owner/legal controls below.
 
 ## Verify and create the artifact
@@ -40,10 +41,11 @@ import plus declarations on the documented minimum and current TypeScript, and
 rebuilds `dist/` from the source and lockfile included in the tarball. Two
 consecutive prepack builds from the same clean archive and frozen install must
 be byte-identical. Every executable fenced block in the exact packed README is
-classified structurally, copied without rewriting into the consumer, checked as
-JavaScript by both supported TypeScript versions, and executed in Chromium
-against the exact installed tarball. Unsupported executable fence languages and
-unclosed fences fail the package gate.
+classified across the CommonMark backtick/tilde, length, and indentation forms,
+copied without rewriting into the consumer, checked as JavaScript by both
+supported TypeScript versions, and executed in Chromium against the exact
+installed tarball. Unsupported executable fence languages and unclosed fences
+fail the package gate.
 
 `pack:verified` copies that same, already-tested tarball to `.artifacts/` and
 also writes a CycloneDX SBOM and a SHA-256 checksum file covering both assets.

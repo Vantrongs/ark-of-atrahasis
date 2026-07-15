@@ -68,7 +68,8 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
   registration, fence installation, and exhaustive unit/browser checks.
 - Centralized stable version parsing/comparison/advance checks in one module
   shared by release metadata and interrupted-publication recovery, and required
-  an empty `[Unreleased]` section immediately before the dated release heading.
+  unique target and empty `[Unreleased]` headings, with the latter immediately
+  before the dated release heading.
 - Removed `password` from the public input vocabulary and runtime state machine;
   credential-confidentiality deployments now explicitly require a separately
   trusted origin/iframe or process boundary.

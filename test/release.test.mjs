@@ -329,6 +329,26 @@ test("release metadata binds the tag to a dated changelog version", () => {
       }),
     /Unreleased heading immediately before the 0\.4\.0 release heading/u,
   );
+  assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog:
+          "## [Unreleased]\n\n## [0.4.0] - 2026-07-15\n\n## [0.4.0] - 2026-07-16\n",
+        manifest,
+        tag: "v0.4.0",
+      }),
+    /exactly one dated 0\.4\.0 release heading/u,
+  );
+  assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog:
+          "## [Unreleased]\n\n## [0.4.0] - 2026-07-15\n\n## [Unreleased]\n\n- Unpromoted duplicate section.\n",
+        manifest,
+        tag: "v0.4.0",
+      }),
+    /exactly one Unreleased heading/u,
+  );
 });
 
 test("release metadata in the repository is synchronized at 0.4.0", () => {
@@ -401,6 +421,20 @@ test("README fences are structurally classified so executable drift cannot be sk
       { executable: true, language: "js" },
       { executable: true, language: "sh" },
       { executable: false, language: "text" },
+    ],
+  );
+  const commonMarkForms = extractReadmeFences(
+    "  ~~~javascript\nconsole.log('tilde');\n ~~~\n\n````js\nconsole.log('long');\n```\n````\n",
+  );
+  assert.deepEqual(
+    commonMarkForms.map(({ code, executable: isExecutable, language }) => ({
+      code,
+      executable: isExecutable,
+      language,
+    })),
+    [
+      { code: "console.log('tilde');\n", executable: true, language: "javascript" },
+      { code: "console.log('long');\n```\n", executable: true, language: "js" },
     ],
   );
   assert.throws(() => extractReadmeFences("```js\nunclosed\n"), /unclosed README fence/u);

@@ -28,17 +28,27 @@ export function verifyReleaseMetadata({ changelog, manifest, tag }) {
     `^## \\[${escapeRegExp(manifest.version)}\\] - \\d{4}-\\d{2}-\\d{2}$`,
     "gmu",
   );
-  const releaseMatch = releaseHeading.exec(changelog);
-  if (!releaseMatch) {
+  const releaseMatches = [...changelog.matchAll(releaseHeading)];
+  if (releaseMatches.length === 0) {
     throw new Error(`CHANGELOG.md has no dated ${manifest.version} release heading`);
   }
+  if (releaseMatches.length !== 1) {
+    throw new Error(
+      `CHANGELOG.md must contain exactly one dated ${manifest.version} release heading`,
+    );
+  }
+  const releaseMatch = releaseMatches[0];
 
-  const unreleasedMatch = /^## \[Unreleased\][ \t]*$/gmu.exec(changelog);
-  if (!unreleasedMatch) {
+  const unreleasedMatches = [...changelog.matchAll(/^## \[Unreleased\][ \t]*$/gmu)];
+  if (unreleasedMatches.length === 0) {
     throw new Error(
       `CHANGELOG.md must keep an empty Unreleased heading immediately before the ${manifest.version} release heading`,
     );
   }
+  if (unreleasedMatches.length !== 1) {
+    throw new Error("CHANGELOG.md must contain exactly one Unreleased heading");
+  }
+  const unreleasedMatch = unreleasedMatches[0];
 
   const nextHeading = /^## .+$/gmu;
   nextHeading.lastIndex = unreleasedMatch.index + unreleasedMatch[0].length;
