@@ -42,6 +42,11 @@ export type TextareaWrapValue = (typeof TEXTAREA_WRAP_VALUES)[number];
 export const IMAGE_LOADING_VALUES = Object.freeze(["eager", "lazy"] as const);
 export type ImageLoadingValue = (typeof IMAGE_LOADING_VALUES)[number];
 
+export const TRACK_KINDS = Object.freeze([
+  "subtitles", "captions", "descriptions", "chapters", "metadata",
+] as const);
+export type TrackKind = (typeof TRACK_KINDS)[number];
+
 export const TABLE_SCOPE_VALUES = Object.freeze(["row", "col", "rowgroup", "colgroup"] as const);
 export type TableScopeValue = (typeof TABLE_SCOPE_VALUES)[number];
 
@@ -71,8 +76,8 @@ export const ARIA_ROLES = Object.freeze([
 export type AriaRole = (typeof ARIA_ROLES)[number];
 
 export const SPECIALIZED_ELEMENT_KINDS = Object.freeze([
-  "input", "textarea", "select", "option", "button", "label", "fieldset", "image", "anchor",
-  "video", "audio", "source", "canvas", "th", "td", "details", "dialog", "progress", "meter",
+  "input", "textarea", "select", "option", "optgroup", "button", "label", "fieldset", "image", "anchor",
+  "video", "audio", "source", "track", "canvas", "th", "td", "details", "dialog", "progress", "meter",
   "list", "description-list",
 ] as const);
 export type SpecializedElementKind = (typeof SPECIALIZED_ELEMENT_KINDS)[number];

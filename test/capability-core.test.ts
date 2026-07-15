@@ -94,16 +94,28 @@ describe("strict ShadowRoot capability core", () => {
     expect(root.firstElementChild?.localName).toBe("div");
   });
 
-  it("returns the canonical specialized wrapper from lookup", () => {
+  it("returns canonical form and internationalized specialized wrappers from lookup", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
     const input = safeDocument.createInput();
+    const optgroup = safeDocument.createOptgroup();
+    const track = safeDocument.createTrack();
     input.setId("canonical");
+    optgroup.setId("optgroup-canonical");
+    track.setId("track-canonical");
     safeDocument.appendChild(input);
+    safeDocument.appendChild(optgroup);
+    safeDocument.appendChild(track);
 
     const lookedUp = safeDocument.getElement("canonical");
     expect(lookedUp).toBe(input);
     expect((lookedUp as typeof input).getValue).toBe(input.getValue);
+    const lookedUpOptgroup = safeDocument.getElement("optgroup-canonical", "optgroup");
+    const lookedUpTrack = safeDocument.getElement("track-canonical", "track");
+    expect(lookedUpOptgroup).toBe(optgroup);
+    expect(lookedUpOptgroup?.setLabel).toBe(optgroup.setLabel);
+    expect(lookedUpTrack).toBe(track);
+    expect(lookedUpTrack?.setSrcLang).toBe(track.setSrcLang);
   });
 
   it("rejects wrappers owned by another SafeDocument", () => {

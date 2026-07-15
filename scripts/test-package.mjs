@@ -15,6 +15,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractReadmeFences } from "./readme-examples.mjs";
 import { EXPECTED_RUNTIME_EXPORTS } from "./runtime-export-contract.mjs";
+import {
+  CYCLONEDX_SCHEMA,
+  CYCLONEDX_SPEC_VERSION,
+  generateReleaseSbom,
+  validateReleaseSbomInventory,
+} from "./sbom.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputFlag = process.argv.indexOf("--output");
@@ -612,32 +618,35 @@ declare class Compartment {
     }
   }
 
-  const sbom = JSON.parse(
-    runNpm(
-      ["sbom", "--package-lock-only", "--sbom-format", "cyclonedx", "--sbom-type", "library"],
-      sourceDirectory,
-      { capture: true, env: isolatedEnvironment },
-    ),
-  );
-
-  // npm derives the root component name from the temporary directory even
-  // though its purl/bom-ref use package.json. Normalize that presentation-only
-  // field so the published SBOM names the artifact it actually describes.
-  if (sbom.metadata?.component) {
-    sbom.metadata.component.name = packedManifest.name;
-    sbom.metadata.component.version = packedManifest.version;
+  const sbomOptions = {
+    cwd: sourceDirectory,
+    env: isolatedEnvironment,
+    name: packedManifest.name,
+    npmExecPath,
+    npmVersion: actualNpmVersion,
+    tarballSha256: tarballDigest,
+    version: packedManifest.version,
+  };
+  const sbomContents = await generateReleaseSbom(sbomOptions);
+  const repeatedSbomContents = await generateReleaseSbom(sbomOptions);
+  if (repeatedSbomContents !== sbomContents) {
+    throw new Error("two consecutive CycloneDX SBOM generations were not byte-identical");
   }
-
+  const sbom = JSON.parse(sbomContents);
+  validateReleaseSbomInventory(
+    sbom,
+    JSON.parse(readFileSync(join(sourceDirectory, "npm-shrinkwrap.json"), "utf8")),
+  );
   if (
-    sbom.bomFormat !== "CycloneDX" ||
-    sbom.metadata?.component?.name !== packedManifest.name ||
-    sbom.metadata?.component?.version !== packedManifest.version ||
-    sbom.metadata?.component?.["bom-ref"] !==
-      `${packedManifest.name}@${packedManifest.version}` ||
-    !Array.isArray(sbom.components) ||
-    sbom.components.length === 0
+    sbom.$schema !== CYCLONEDX_SCHEMA
+    || sbom.specVersion !== CYCLONEDX_SPEC_VERSION
+    || sbom.metadata?.component?.name !== packedManifest.name
+    || sbom.metadata?.component?.version !== packedManifest.version
+    || sbom.metadata?.component?.hashes?.[0]?.content !== tarballDigest
+    || !Array.isArray(sbom.components)
+    || sbom.components.length === 0
   ) {
-    throw new Error("generated CycloneDX SBOM does not describe the packed release");
+    throw new Error("generated CycloneDX SBOM does not describe the exact packed release");
   }
 
   if (outputDirectory) {
@@ -645,7 +654,6 @@ declare class Compartment {
     const verifiedArtifact = join(outputDirectory, basename(tarballPath));
     const artifactBaseName = basename(tarballPath, ".tgz");
     const sbomName = `${artifactBaseName}.sbom.cdx.json`;
-    const sbomContents = `${JSON.stringify(sbom, null, 2)}\n`;
     const checksumName = `${artifactBaseName}.sha256`;
 
     copyFileSync(tarballPath, verifiedArtifact);

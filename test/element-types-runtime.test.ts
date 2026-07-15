@@ -50,7 +50,12 @@ const VOID_FACTORIES: readonly [
 		(safeDocument) => safeDocument.createSource(),
 		["setSrc", "setType"],
 	],
-	["track", "track", (safeDocument) => safeDocument.createTrack(), []],
+	[
+		"track",
+		"track",
+		(safeDocument) => safeDocument.createTrack(),
+		["setKind", "setSrc", "setSrcLang", "setLabel", "setDefault"],
+	],
 	["hr", "hr", (safeDocument) => safeDocument.createHr(), []],
 	["br", "br", (safeDocument) => safeDocument.createBr(), []],
 	["wbr", "wbr", (safeDocument) => safeDocument.createWbr(), []],
@@ -136,6 +141,7 @@ const CONTAINER_FACTORIES: readonly [
 	["ruby", "ruby", (safeDocument) => safeDocument.createRuby()],
 	["rt", "rt", (safeDocument) => safeDocument.createRt()],
 	["rp", "rp", (safeDocument) => safeDocument.createRp()],
+	["bdi", "bdi", (safeDocument) => safeDocument.createBdi()],
 ];
 
 const SPECIALIZED_FACTORIES: Readonly<
@@ -145,6 +151,7 @@ const SPECIALIZED_FACTORIES: Readonly<
 	textarea: (safeDocument) => safeDocument.createTextarea(),
 	select: (safeDocument) => safeDocument.createSelect(),
 	option: (safeDocument) => safeDocument.createOption(),
+	optgroup: (safeDocument) => safeDocument.createOptgroup(),
 	button: (safeDocument) => safeDocument.createButton(),
 	label: (safeDocument) => safeDocument.createLabel(),
 	fieldset: (safeDocument) => safeDocument.createFieldset(),
@@ -153,6 +160,7 @@ const SPECIALIZED_FACTORIES: Readonly<
 	video: (safeDocument) => safeDocument.createVideo(),
 	audio: (safeDocument) => safeDocument.createAudio(),
 	source: (safeDocument) => safeDocument.createSource(),
+	track: (safeDocument) => safeDocument.createTrack(),
 	canvas: (safeDocument) => safeDocument.createCanvas(),
 	th: (safeDocument) => safeDocument.createTh(),
 	td: (safeDocument) => safeDocument.createTd(),

@@ -3,7 +3,11 @@ import { JSDOM } from "jsdom";
 import { test } from "vitest";
 
 import { isSafeDOMError } from "../src/errors.ts";
-import { createStylePolicy, type SafeStylePolicy } from "../src/style-policy.ts";
+import {
+  SAFE_STYLE_PROPERTIES,
+  createStylePolicy,
+  type SafeStylePolicy,
+} from "../src/style-policy.ts";
 import { createContainedRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
@@ -76,6 +80,97 @@ test("explicit style policy canonicalizes known aliases and coherently gets/sets
 
   assert.equal(style.remove("backgroundColor"), true);
   assert.equal(style.get("background-color"), "");
+});
+
+test("flow-relative style properties support direction-neutral host grants", () => {
+  const { root } = fixture();
+  const safeDocument = createSafeDocument(root, {
+    stylePolicy: {
+      allowedProperties: [
+        "inline-size",
+        "border-inline-start-color",
+        "border-start-start-radius",
+        "margin-inline-start",
+        "padding-block-end",
+        "inset-inline-end",
+      ],
+    },
+  });
+  const style = safeDocument.createDiv().style;
+
+  assert.equal(style.set("inlineSize", "12rem"), true);
+  assert.equal(style.set("borderInlineStartColor", "red"), true);
+  assert.equal(style.set("border-start-start-radius", "4px"), true);
+  assert.equal(style.set("marginInlineStart", "1rem"), true);
+  assert.equal(style.set("padding-block-end", "2px"), true);
+  assert.equal(style.set("insetInlineEnd", "0px"), true);
+  assert.equal(style.get("inline-size"), "12rem");
+  assert.match(style.get("border-inline-start-color") ?? "", /red|rgb\(255, 0, 0\)/u);
+  assert.equal(style.get("borderStartStartRadius"), "4px");
+  assert.equal(style.get("margin-inline-start"), "1rem");
+  assert.equal(style.get("paddingBlockEnd"), "2px");
+  assert.equal(style.get("inset-inline-end"), "0px");
+});
+
+test("logical style authority is exactly the reviewed 34-longhand set", () => {
+  const expected = [
+    "block-size",
+    "border-block-end-color",
+    "border-block-end-style",
+    "border-block-end-width",
+    "border-block-start-color",
+    "border-block-start-style",
+    "border-block-start-width",
+    "border-end-end-radius",
+    "border-end-start-radius",
+    "border-inline-end-color",
+    "border-inline-end-style",
+    "border-inline-end-width",
+    "border-inline-start-color",
+    "border-inline-start-style",
+    "border-inline-start-width",
+    "border-start-end-radius",
+    "border-start-start-radius",
+    "inline-size",
+    "inset-block-end",
+    "inset-block-start",
+    "inset-inline-end",
+    "inset-inline-start",
+    "margin-block-end",
+    "margin-block-start",
+    "margin-inline-end",
+    "margin-inline-start",
+    "max-block-size",
+    "max-inline-size",
+    "min-block-size",
+    "min-inline-size",
+    "padding-block-end",
+    "padding-block-start",
+    "padding-inline-end",
+    "padding-inline-start",
+  ].sort();
+  const reviewedLonghand = /^(?:block-size|inline-size|(?:min|max)-(?:block|inline)-size|(?:margin|padding|inset)-(?:block|inline)-(?:start|end)|border-(?:block|inline)-(?:start|end)-(?:color|style|width)|border-(?:start|end)-(?:start|end)-radius)$/u;
+  const actual = SAFE_STYLE_PROPERTIES.filter((property) => reviewedLonghand.test(property)).sort();
+  const safeProperties: readonly string[] = SAFE_STYLE_PROPERTIES;
+
+  assert.deepEqual(actual, expected);
+  for (const property of [
+    "direction",
+    "overflow-block",
+    "overflow-inline",
+    "text-orientation",
+    "unicode-bidi",
+    "writing-mode",
+  ]) {
+    assert.equal(safeProperties.includes(property), false, property);
+  }
+  assert.equal(
+    safeProperties.some((property) =>
+      /^(?:(?:margin|padding|inset)-(?:block|inline)|border-(?:block|inline)(?:-(?:color|style|width))?|scroll-(?:margin|padding)-(?:block|inline)(?:-(?:start|end))?)$/u
+        .test(property)),
+    false,
+    "logical shorthands and scroll variants remain outside the fixed ceiling",
+  );
 });
 
 test("style values cannot smuggle URL/network CSS through escapes, comments, or indirection", () => {

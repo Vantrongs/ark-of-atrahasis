@@ -30,6 +30,7 @@ test("URL policy denies every sink by default", () => {
     "video.poster",
     "audio.src",
     "source.src",
+    "track.src",
   ] as const) {
     const decision = engine.decide(sink, "https://cdn.example.test/a");
     assert.equal(decision.allowed, false, sink);
@@ -74,6 +75,41 @@ test("URL policy denies scheme, credentials, query, fragment, and malformed URLs
     assert.equal(engine.decide("image.src", input).allowed, false, input);
   }
   assert.equal(engine.decide("video.src", "https://media.example.test:8443/a#x").allowed, false);
+});
+
+test("URL policy canonicalizes IDNs and Unicode paths without trusting confusable hosts", () => {
+  const unicodePolicy = (allowedOrigin: string, maxLength = 2048): SafeURLPolicy => ({
+    baseURL: "https://faß.example/base/",
+    sinks: {
+      "image.src": {
+        allowedOrigins: [allowedOrigin],
+        allowedProtocols: ["https:"],
+        maxLength,
+      },
+    },
+  });
+  const expected = "https://xn--fa-hia.example/%E8%B7%AF%E5%BE%84";
+
+  for (const allowedOrigin of ["https://faß.example", "https://xn--fa-hia.example"]) {
+    const engine = createURLPolicy(unicodePolicy(allowedOrigin));
+    assert.deepEqual(engine.decide("image.src", "https://faß.example/路径"), {
+      allowed: true,
+      url: expected,
+    });
+    assert.equal(engine.decide("image.src", "https://fass.example/路径").allowed, false);
+    assert.equal(engine.decide("image.src", "https://\ud800.example/path").allowed, false);
+  }
+
+  assert.equal(
+    createURLPolicy(unicodePolicy("https://faß.example", expected.length))
+      .decide("image.src", "https://faß.example/路径").allowed,
+    true,
+  );
+  assert.equal(
+    createURLPolicy(unicodePolicy("https://faß.example", expected.length - 1))
+      .decide("image.src", "https://faß.example/路径").allowed,
+    false,
+  );
 });
 
 test("each enabled runtime decision normalizes attacker input exactly once", () => {

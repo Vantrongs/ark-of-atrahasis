@@ -83,6 +83,11 @@ const server = createServer(async (request, response) => {
       response.end(pixel);
       return;
     }
+    if (url.pathname === "/allowed/captions-ar.vtt") {
+      response.writeHead(200, { "Content-Type": "text/vtt; charset=utf-8" });
+      response.end("WEBVTT\n\n00:00.000 --> 00:10.000\nمرحبا بالعالم\n");
+      return;
+    }
     if (url.pathname === "/hostile-worker.js") {
       response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       response.end(`onmessage = ({ data }) => {

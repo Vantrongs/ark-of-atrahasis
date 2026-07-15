@@ -49,13 +49,28 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
   root runtime-export namespace enforcement, minimum/current
   TypeScript declaration checks, offline consumer installation, source rebuild
   comparison, literal typecheck/browser execution of every executable packed
-  README fence, SHA-256 checksums, and a CycloneDX SBOM.
+  README fence, SHA-256 checksums, and a byte-reproducible, strict-validated
+  CycloneDX 1.7 SBOM bound to the exact tarball SHA-256 and reconciled with the
+  complete non-root, non-link packed-shrinkwrap component inventory.
 - A tag-triggered release workflow whose write/OIDC job targets the protected
   `npm` environment, transfers only the verified tarball, checksum, and SBOM,
   verifies their identity, uses npm trusted publishing, and publishes a
   populated draft GitHub release.
 - Release-engineering documentation for reproducible packaging, external owner
   controls, preferred source information, and historical package metadata risk.
+- An explicit internationalization contract and tests for BCP 47 language-tag
+  round-tripping, distinct unknown/inherited language states, resettable HTML
+  direction keywords, multilingual/Unicode string preservation, exact
+  non-normalized identifiers, inherited translation instructions, semantic
+  `<bdi>` isolation, locale-independent error codes, localized ARIA ownership,
+  and the explicit `isComposing`-only IME boundary.
+- Specialized localized `optgroup` labels and media-track kind/language/label/
+  default operations, with `track.src` routed through the same default-deny URL,
+  request-accounting, lifecycle, and three-engine network boundary as existing
+  sinks.
+- Flow-relative block/inline size, inset, margin, padding, border-side, and
+  corner-radius longhands in the fixed deny-by-default style ceiling for
+  direction-neutral host grants.
 
 ### Changed
 

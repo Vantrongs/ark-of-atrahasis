@@ -24,6 +24,7 @@ export const EXPECTED_RUNTIME_EXPORTS = Object.freeze([
   "SPECIALIZED_ELEMENT_KINDS",
   "TABLE_SCOPE_VALUES",
   "TEXTAREA_WRAP_VALUES",
+  "TRACK_KINDS",
   "URL_SINKS",
   "canonicalizeStyleProperty",
   "createSafeDocument",
