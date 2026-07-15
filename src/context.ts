@@ -693,7 +693,8 @@ class DocumentContextImplementation implements DocumentContext {
       return;
     }
     if (entry.state === "revoked") {
-      this.#finalizeTerminalSubtree(entry, "revoked", "none");
+      const detach = this.#isWithin(entry.real, this.root) ? "always" : "none";
+      this.#finalizeTerminalSubtree(entry, "revoked", detach);
       return;
     }
     const compromised = this.#auditPlacements();
@@ -895,7 +896,7 @@ class DocumentContextImplementation implements DocumentContext {
     }
   }
 
-  #isWithin(candidate: RealNode, ancestor: RealNode): boolean {
+  #isWithin(candidate: RealNode, ancestor: Node): boolean {
     let current: Node | null = candidate;
     while (current !== null) {
       if (current === ancestor) return true;

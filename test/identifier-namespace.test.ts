@@ -502,6 +502,7 @@ describe("identifier namespace", () => {
 
       target.dispose();
       expect(raw.hasAttribute("id")).toBe(false);
+      expect(root.firstElementChild).toBeNull();
       replacement.setId("old");
       expect(replacement.getId()).toBe("old");
     } finally {
