@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
-const { JsonStrictValidator } = require("@cyclonedx/cyclonedx-library/Validation");
-const { Version } = require("@cyclonedx/cyclonedx-library/Spec");
+const Ajv = require("ajv");
+const addFormats = require("ajv-formats");
 const cyclonedxLibraryManifest = require("@cyclonedx/cyclonedx-library/package.json");
+const { parse: parseSmtpAddress } = require("smtp-address-parser");
 
 export const CYCLONEDX_SPEC_VERSION = "1.7";
 export const CYCLONEDX_SCHEMA =
@@ -17,6 +18,66 @@ if (cyclonedxLibraryManifest.version !== CYCLONEDX_LIBRARY_VERSION) {
   throw new Error(
     `CycloneDX validator drift: expected ${CYCLONEDX_LIBRARY_VERSION}, received ${cyclonedxLibraryManifest.version}`,
   );
+}
+
+const cyclonedxSchemaDirectory = join(
+  dirname(require.resolve("@cyclonedx/cyclonedx-library/package.json")),
+  "res",
+  "schema",
+);
+const referencedSchemaFiles = Object.freeze({
+  "http://cyclonedx.org/schema/cryptography-defs.SNAPSHOT.schema.json":
+    "cryptography-defs.SNAPSHOT.schema.json",
+  "http://cyclonedx.org/schema/jsf-0.82.SNAPSHOT.schema.json":
+    "jsf-0.82.SNAPSHOT.schema.json",
+  "http://cyclonedx.org/schema/spdx.SNAPSHOT.schema.json":
+    "spdx.SNAPSHOT.schema.json",
+});
+let releaseSbomValidator;
+
+function readCycloneDxSchema(file) {
+  return JSON.parse(readFileSync(join(cyclonedxSchemaDirectory, file), "utf8"));
+}
+
+function getReleaseSbomValidator() {
+  if (releaseSbomValidator) return releaseSbomValidator;
+
+  const referencedSchemas = Object.fromEntries(
+    Object.entries(referencedSchemaFiles).map(([id, file]) => [id, readCycloneDxSchema(file)]),
+  );
+  const ajv = new Ajv({
+    addUsedSchema: false,
+    loadSchema: (uri) => {
+      throw new Error(`Remote CycloneDX schemas are disabled: ${uri}`);
+    },
+    schemas: referencedSchemas,
+    strict: false,
+    strictSchema: false,
+    useDefaults: false,
+  });
+  addFormats(ajv);
+
+  // The removed ajv-formats-draft2019 plugin used smtp-address-parser for
+  // idn-email. Keep that RFC 5321 grammar directly so quoted and UTF-8 local
+  // parts retain their previous meaning without loading the plugin's deprecated
+  // node:punycode-backed idn-hostname format.
+  ajv.addFormat("iri-reference", true);
+  ajv.addFormat("idn-email", {
+    type: "string",
+    validate: (value) => {
+      try {
+        parseSmtpAddress(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  releaseSbomValidator = ajv.compile(
+    readCycloneDxSchema(`bom-${CYCLONEDX_SPEC_VERSION}.SNAPSHOT.schema.json`),
+  );
+  return releaseSbomValidator;
 }
 
 function requireNonEmptyString(value, name) {
@@ -198,10 +259,11 @@ export function normalizeReleaseSbom(rawSbom, {
 }
 
 export async function validateReleaseSbomContents(contents) {
-  const validator = new JsonStrictValidator(Version.v1dot7);
-  const validationErrors = await validator.validate(contents);
-  if (validationErrors !== null) {
-    throw new Error(`CycloneDX ${CYCLONEDX_SPEC_VERSION} validation failed: ${JSON.stringify(validationErrors)}`);
+  const validator = getReleaseSbomValidator();
+  if (!validator(JSON.parse(contents))) {
+    throw new Error(
+      `CycloneDX ${CYCLONEDX_SPEC_VERSION} validation failed: ${JSON.stringify(validator.errors)}`,
+    );
   }
 }
 

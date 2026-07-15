@@ -49,9 +49,13 @@ jobs:
         run: node scripts/verify-release.mjs "$GITHUB_REF_NAME"
 
       - name: Run the complete credential-free gate
+        env:
+          NODE_OPTIONS: --throw-deprecation
         run: node "$NPM_CLI" run check
 
       - name: Create the already-tested release artifacts
+        env:
+          NODE_OPTIONS: --throw-deprecation
         run: node "$NPM_CLI" run pack:verified
 
       - name: Verify the exact artifact set

@@ -74,6 +74,12 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 
 ### Changed
 
+- Upgraded the Node DOM test realm to `jsdom` 29.1.1 and replaced its deprecated
+  `whatwg-encoding` chain with the maintained `@exodus/bytes` implementation.
+- Replaced the abandoned `ajv-formats-draft2019` SBOM-validator peer with a
+  narrow Ajv adapter retaining its direct RFC 5321 parser semantics, promoted
+  CI/release/package Node deprecations to failures, and added a zero-deprecated
+  lock gate.
 - Renamed the paragraph and text-node factories to `createParagraph()` and
   `createTextNode()` while retaining deprecated same-function `createText()` and
   `createRawText()` aliases, made list-local creation helpers consistently

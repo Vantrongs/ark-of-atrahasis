@@ -229,6 +229,7 @@ mkdirSync(emptyConsumerCache, { recursive: true });
 const isolatedEnvironment = {
   ...process.env,
   HOME: isolatedHome,
+  NODE_OPTIONS: "--throw-deprecation",
   NPM_CONFIG_AUDIT: "false",
   NPM_CONFIG_CACHE: isolatedCache,
   NPM_CONFIG_FUND: "false",
