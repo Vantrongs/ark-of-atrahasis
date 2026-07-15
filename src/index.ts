@@ -163,7 +163,6 @@ export function createSafeDocument(
   options: SafeDocumentOptions,
 ): SafeDocument {
   const context = createDocumentContext(root, options);
-  const { registry } = context;
 
   const document: SafeDocument = {
     appendChild(child): void {
@@ -263,7 +262,9 @@ export function createSafeDocument(
       const element = context.createElement("input");
       return createSafeInputElement(context, element, true);
     },
-    createSelect() { return createSafeSelectElement(context, context.createElement("select")); },
+    createSelect() {
+      return createSafeSelectElement(context, context.createElement("select"), true);
+    },
     createOption() { return createSafeOptionElement(context, context.createElement("option")); },
     createOptgroup(): SafeElement { return simple(context, "optgroup"); },
     createTextarea() {
@@ -314,11 +315,7 @@ export function createSafeDocument(
 
     getElement(id: string): SafeElement | null {
       const primitiveId = requireString(id, "SafeDocument.getElement.id");
-      return context.documentOperation(() => {
-        const real = context.platform.getElementById(context.root, primitiveId);
-        if (!real) return null;
-        return registry.getWrapper<SafeElement>(real) ?? null;
-      });
+      return context.lookupLocalId(primitiveId);
     },
   };
 

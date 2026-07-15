@@ -4,6 +4,7 @@ export type SafeDOMErrorCode =
   | "INVALID_QUOTA"
   | "CROSS_OWNER"
   | "DUPLICATE_REGISTRATION"
+  | "DUPLICATE_IDENTIFIER"
   | "OWNER_DOCUMENT_MISMATCH"
   | "ERR_INVALID_ARGUMENT"
   | "ERR_INVALID_HARDENER"
@@ -29,6 +30,7 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   INVALID_QUOTA: "The quota configuration is invalid",
   CROSS_OWNER: "The wrapper belongs to a different safe document",
   DUPLICATE_REGISTRATION: "The DOM node already has a different wrapper",
+  DUPLICATE_IDENTIFIER: "The local identifier already has an active target",
   OWNER_DOCUMENT_MISMATCH: "The DOM node belongs to a different document",
   ERR_INVALID_ARGUMENT: "The operation received an invalid argument",
   ERR_INVALID_HARDENER: "The host hardener is invalid",

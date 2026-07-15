@@ -43,10 +43,11 @@ export type SafeEventKind =
   | "input";
 
 export interface SafeEventTargetSnapshot {
+  /** Logical local ID for an active owned target; empty for foreign/terminal targets. */
   readonly id: string;
-  /** Present only for a branded standard form control. */
+  /** Present only for an active owned branded standard form control. */
   readonly value?: string;
-  /** Present only for a branded HTMLInputElement. */
+  /** Present only for an active owned branded HTMLInputElement. */
   readonly checked?: boolean;
 }
 
@@ -200,6 +201,12 @@ export interface SafeDocumentQuotas {
   readonly requests: number;
   /** Every URL setter attempt, including non-primitive, malformed and denied input. */
   readonly requestAttempts: number;
+  /** Live distinct logical ID and name records. */
+  readonly identifierMappings: number;
+  /** Live IDREF token occurrences across all mapped attributes. */
+  readonly identifierReferences: number;
+  /** Aggregate UTF-8 bytes of logical ID and name records. */
+  readonly identifierBytes: number;
 }
 
 export interface SafeDocumentOptions {
@@ -354,6 +361,7 @@ export interface SafeButtonElement extends SafeElement {
 
 export interface SafeLabelElement extends SafeElement {
   setFor(value: string): void;
+  getFor(): string;
 }
 
 export interface SafeFieldsetElement extends SafeElement {
@@ -406,6 +414,7 @@ export interface SafeTableCellElement extends SafeElement {
   setRowspan(value: number): void;
   setScope(value: TableScopeValue): void;
   setHeaders(value: string): void;
+  getHeaders(): string;
 }
 
 export interface SafeDetailsElement extends SafeElement {

@@ -187,6 +187,35 @@ test("custom targets and getters that throw DOM/global/function values expose on
   assertDeeplyFrozenData(retained);
 });
 
+test("owned related targets expose only their local ID and branded control primitives", () => {
+  const { dom, root } = fixture();
+  const safeDocument = createSafeDocument(root);
+  const safeTarget = safeDocument.createInput();
+  const safeRelated = safeDocument.createInput();
+  safeTarget.setId("target-local");
+  safeRelated.setId("related-local");
+  safeRelated.setValue("owned-value");
+  safeRelated.setType("checkbox");
+  safeRelated.setChecked(true);
+  safeDocument.appendChild(safeTarget);
+  safeDocument.appendChild(safeRelated);
+  const [target, related] = root.querySelectorAll("input");
+  assert.ok(target);
+  assert.ok(related);
+
+  let retained: SafeMouseEvent | undefined;
+  safeTarget.onClick((event) => { retained = event; });
+  target.dispatchEvent(new dom.window.MouseEvent("click", { relatedTarget: related }));
+
+  assert.ok(retained);
+  assert.deepEqual(retained.relatedTarget, {
+    id: "related-local",
+    value: "owned-value",
+    checked: true,
+  });
+  assertDeeplyFrozenData(retained);
+});
+
 test("every registered event family produces its discriminated frozen field set", () => {
   const { dom, root } = fixture();
 
@@ -213,8 +242,10 @@ test("every registered event family produces its discriminated frozen field set"
   safeDocument.appendChild(safeTarget);
   const target = root.querySelector("input");
   assert.ok(target);
-  const related = dom.window.document.createElement("div");
+  const related = dom.window.document.createElement("input");
   related.id = "related";
+  related.value = "host-secret";
+  related.checked = true;
   dom.window.document.body.appendChild(related);
 
   const snapshots: SafeEvent[] = [];
@@ -273,7 +304,8 @@ test("every registered event family produces its discriminated frozen field set"
   assert.equal(mouse.clientX, 20);
   assert.equal(mouse.clientY, 30);
   assert.equal(mouse.buttons, 2);
-  assert.deepEqual(mouse.relatedTarget, { id: "related" });
+  assert.deepEqual(mouse.relatedTarget, { id: "" });
+  assert.deepEqual(Reflect.ownKeys(mouse.relatedTarget ?? {}), ["id"]);
 
   const pointer = snapshots[3] as SafePointerEvent;
   assert.equal(pointer.clientX, 60);
@@ -294,7 +326,7 @@ test("every registered event family produces its discriminated frozen field set"
 
   const focus = snapshots[5];
   assert.equal(focus.kind, "focus");
-  if (focus.kind === "focus") assert.deepEqual(focus.relatedTarget, { id: "related" });
+  if (focus.kind === "focus") assert.deepEqual(focus.relatedTarget, { id: "" });
 
   const input = snapshots[6];
   assert.equal(input.kind, "input");
@@ -305,6 +337,113 @@ test("every registered event family produces its discriminated frozen field set"
   }
 
   for (const snapshot of snapshots) assertDeeplyFrozenData(snapshot);
+});
+
+test("touch targets use logical owned IDs and redact foreign or disposed targets in every list", () => {
+  const { dom, root } = fixture();
+
+  class FixtureTouch {
+    readonly #identifier: number;
+    readonly #target: EventTarget;
+    constructor(identifier: number, target: EventTarget) {
+      this.#identifier = identifier;
+      this.#target = target;
+    }
+    get identifier(): number { return this.#identifier; }
+    get target(): EventTarget { return this.#target; }
+    get screenX(): number { return 1; }
+    get screenY(): number { return 2; }
+    get clientX(): number { return 3; }
+    get clientY(): number { return 4; }
+    get pageX(): number { return 5; }
+    get pageY(): number { return 6; }
+    get radiusX(): number { return 7; }
+    get radiusY(): number { return 8; }
+    get rotationAngle(): number { return 9; }
+    get force(): number { return 0.5; }
+  }
+
+  class FixtureTouchList {
+    readonly #items: readonly FixtureTouch[];
+    constructor(items: readonly FixtureTouch[]) { this.#items = items; }
+    get length(): number { return this.#items.length; }
+    item(index: number): FixtureTouch | null { return this.#items[index] ?? null; }
+  }
+
+  class FixtureTouchEvent extends dom.window.Event {
+    readonly #touches: FixtureTouchList;
+    readonly #targetTouches: FixtureTouchList;
+    readonly #changedTouches: FixtureTouchList;
+    constructor(
+      type: string,
+      touches: FixtureTouchList,
+      targetTouches: FixtureTouchList,
+      changedTouches: FixtureTouchList,
+    ) {
+      super(type);
+      this.#touches = touches;
+      this.#targetTouches = targetTouches;
+      this.#changedTouches = changedTouches;
+    }
+    get touches(): FixtureTouchList { return this.#touches; }
+    get targetTouches(): FixtureTouchList { return this.#targetTouches; }
+    get changedTouches(): FixtureTouchList { return this.#changedTouches; }
+    get ctrlKey(): boolean { return false; }
+    get altKey(): boolean { return false; }
+    get shiftKey(): boolean { return false; }
+    get metaKey(): boolean { return false; }
+  }
+
+  Object.defineProperties(dom.window, {
+    Touch: { configurable: true, value: FixtureTouch },
+    TouchList: { configurable: true, value: FixtureTouchList },
+    TouchEvent: { configurable: true, value: FixtureTouchEvent },
+  });
+
+  const safeDocument = createSafeDocument(root);
+  const safeTarget = safeDocument.createInput();
+  const disposed = safeDocument.createInput();
+  safeTarget.setId("owned-touch");
+  disposed.setId("disposed-touch");
+  safeDocument.appendChild(safeTarget);
+  safeDocument.appendChild(disposed);
+  const rawTarget = root.querySelectorAll("input")[0];
+  const rawDisposed = root.querySelectorAll("input")[1];
+  assert.ok(rawTarget);
+  assert.ok(rawDisposed);
+  disposed.dispose();
+
+  const foreign = dom.window.document.createElement("input");
+  foreign.id = "foreign-id";
+  foreign.value = "foreign-value";
+  foreign.checked = true;
+  const ownedTouch = new FixtureTouch(1, rawTarget);
+  const foreignTouch = new FixtureTouch(2, foreign);
+  const disposedTouch = new FixtureTouch(3, rawDisposed);
+  let retained: SafeEvent | undefined;
+  safeTarget.onTouchStart((event) => { retained = event; });
+  rawTarget.dispatchEvent(new FixtureTouchEvent(
+    "touchstart",
+    new FixtureTouchList([ownedTouch, foreignTouch]),
+    new FixtureTouchList([ownedTouch]),
+    new FixtureTouchList([disposedTouch, foreignTouch]),
+  ));
+
+  assert.ok(retained);
+  assert.equal(retained.kind, "touch");
+  if (retained.kind !== "touch") throw new Error("expected touch event");
+  assert.deepEqual(retained.touches.map((touch) => touch.target), [
+    { id: "owned-touch", value: "", checked: false },
+    { id: "" },
+  ]);
+  assert.deepEqual(retained.targetTouches.map((touch) => touch.target), [
+    { id: "owned-touch", value: "", checked: false },
+  ]);
+  assert.deepEqual(retained.changedTouches.map((touch) => touch.target), [
+    { id: "" },
+    { id: "" },
+  ]);
+  assertDeeplyFrozenData(retained);
 });
 
 test("cancellation cells are independent under reentrancy and expire after each callback", () => {

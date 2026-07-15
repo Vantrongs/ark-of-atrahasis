@@ -377,8 +377,13 @@ describe("numeric boundary table", () => {
     cell.setHeaders("first second");
     fieldset.setDisabled(true);
     expect(root.querySelector("source")?.getAttribute("type")).toBe("video/mp4");
-    expect(root.querySelector("label")?.getAttribute("for")).toBe("forward-id");
-    expect(root.querySelector("th")?.getAttribute("headers")).toBe("first second");
+    const physicalFor = root.querySelector("label")?.getAttribute("for");
+    const physicalHeaders = root.querySelector("th")?.getAttribute("headers")?.split(" ");
+    expect(physicalFor).toMatch(/^aoa-i-[0-9a-f]{48}$/);
+    expect(physicalHeaders).toHaveLength(2);
+    expect(physicalHeaders?.every((value) => /^aoa-i-[0-9a-f]{48}$/.test(value))).toBe(true);
+    expect(label.getFor()).toBe("forward-id");
+    expect(cell.getHeaders()).toBe("first second");
     expect(root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(true);
     fieldset.setDisabled(false);
     expect(root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(false);
