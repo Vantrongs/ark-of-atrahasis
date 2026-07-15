@@ -6,86 +6,77 @@ import {
   test,
 } from "./fixtures.mjs";
 
-test("a specific indefinitely progressing Worker stops after host termination", async ({
+test("an unyielding Worker stops after host termination while the page stays responsive", async ({
   page,
   browserLedger,
+  browserName,
 }) => {
   await openHarness(page, browserLedger);
   browserLedger.reset();
 
-  const result = await page.evaluate(async () => {
+  const beforeTermination = await page.evaluate(async () => {
     if (!crossOriginIsolated) throw new Error("harness must be cross-origin isolated");
     if (typeof SharedArrayBuffer !== "function") throw new Error("SharedArrayBuffer is unavailable");
-    const progress = new BigInt64Array(new SharedArrayBuffer(16));
+    const progress = new Uint32Array(new SharedArrayBuffer(8));
     const worker = new Worker("/hostile-worker.js");
     worker.postMessage(progress.buffer);
     const started = await new Promise((resolve, reject) => {
       worker.addEventListener("message", (event) => resolve(event.data), { once: true });
-      worker.addEventListener("error", () => reject(new Error("hostile worker failed to start")), {
-        once: true,
-      });
+      worker.addEventListener("error", (event) => {
+        reject(new Error(event.message || "hostile worker failed to start"));
+      }, { once: true });
     });
 
     const observed = [];
     const progressDeadline = performance.now() + 2_000;
     while (new Set(observed).size < 2 && performance.now() < progressDeadline) {
-      observed.push(Atomics.load(progress, 0).toString());
+      observed.push(Atomics.load(progress, 0));
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     if (new Set(observed).size < 2) throw new Error("Worker made no observable progress");
 
-    worker.terminate();
-    let stableValue;
-    let consecutive = 0;
-    const stopSamples = [];
-    const stopStartedAt = performance.now();
-    const stopDeadline = performance.now() + 2_000;
-    while (consecutive < 6 && performance.now() < stopDeadline) {
-      const sample = Atomics.load(progress, 0);
-      stopSamples.push(sample.toString());
-      if (stopSamples.length > 12) stopSamples.shift();
-      if (sample === stableValue) consecutive += 1;
-      else {
-        stableValue = sample;
-        consecutive = 1;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    if (consecutive < 6 || stableValue === undefined) {
-      throw new Error(
-        `Worker progress did not become stable after terminate(): ${JSON.stringify({
-          consecutive,
-          elapsed: performance.now() - stopStartedAt,
-          stopSamples,
-        })}`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    const afterBoundedWait = Atomics.load(progress, 0);
     const pageThreadResponse = await new Promise((resolve) => {
       requestAnimationFrame(() => resolve("responsive"));
     });
+    worker.terminate();
+    globalThis.__arkTerminatedWorker = { progress, worker };
     return {
       crossOriginIsolated,
       started,
-      startedFlag: Atomics.load(progress, 1).toString(),
+      startedFlag: Atomics.load(progress, 1),
       distinctProgressSamples: new Set(observed).size,
-      stable: afterBoundedWait === stableValue,
-      stoppedAt: stableValue.toString(),
       pageThreadResponse,
     };
   });
+
+  // Chromium's worker implementation schedules forced script termination after
+  // a two-second grace period. Keep that wait outside a long inspector
+  // evaluation so the browser's parent-thread termination task can run.
+  await page.waitForTimeout(browserName === "chromium" ? 2_500 : 100);
+  const stoppedAt = await page.evaluate(() => {
+    return Atomics.load(globalThis.__arkTerminatedWorker.progress, 0);
+  });
+  await page.waitForTimeout(100);
+  const result = await page.evaluate(() => {
+    const state = globalThis.__arkTerminatedWorker;
+    const afterBoundedWait = Atomics.load(state.progress, 0);
+    const pageThreadResponse = document.readyState;
+    state.worker.terminate();
+    delete globalThis.__arkTerminatedWorker;
+    return { afterBoundedWait, pageThreadResponse };
+  });
   await flushBrowserWork(page);
 
-  expect(result).toMatchObject({
+  expect(beforeTermination).toMatchObject({
     crossOriginIsolated: true,
-    started: "started",
-    startedFlag: "1",
-    stable: true,
+    started: "entered-unyielding-loop",
+    startedFlag: 1,
     pageThreadResponse: "responsive",
   });
-  expect(result.distinctProgressSamples).toBeGreaterThanOrEqual(2);
-  expect(BigInt(result.stoppedAt)).toBeGreaterThan(0n);
+  expect(beforeTermination.distinctProgressSamples).toBeGreaterThanOrEqual(2);
+  expect(stoppedAt).toBeGreaterThan(0);
+  expect(result.afterBoundedWait).toBe(stoppedAt);
+  expect(result.pageThreadResponse).toBe("complete");
   const workerRequests = browserLedger.requests.filter(
     ({ url }) => new URL(url).pathname === "/hostile-worker.js",
   );

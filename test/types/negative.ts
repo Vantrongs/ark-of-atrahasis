@@ -57,12 +57,6 @@ declare const safeDocument: SafeDocument;
 const child = safeDocument.createDiv();
 const text = safeDocument.createTextNode();
 
-// @ts-expect-error the paragraph factory was renamed
-safeDocument.createText();
-
-// @ts-expect-error the text-node factory was renamed
-safeDocument.createRawText();
-
 // @ts-expect-error password inputs are outside the strict credential boundary
 safeDocument.createInput().setType("password");
 const col = safeDocument.createCol();

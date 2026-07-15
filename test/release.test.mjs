@@ -18,13 +18,19 @@ import {
   verifyAnnotatedTagAtHead,
   verifyReleaseMetadata,
 } from "../scripts/verify-release.mjs";
+import {
+  assertVersionAdvancesLatest,
+  compareStableVersions,
+  parseStableVersion,
+} from "../scripts/stable-version.mjs";
+import { extractReadmeFences } from "../scripts/readme-examples.mjs";
 
 const manifest = {
   name: "ark-of-atrahasis",
   packageManager: "npm@11.18.0",
   version: "0.4.0",
 };
-const changelog = "## [0.4.0] - 2026-07-15\n";
+const changelog = "## [Unreleased]\n\n## [0.4.0] - 2026-07-15\n";
 const releaseWorkflow = readFileSync(
   new URL("../.github/workflows/release.yml", import.meta.url),
   "utf8",
@@ -304,6 +310,25 @@ test("release metadata binds the tag to a dated changelog version", () => {
       }),
     /must be a stable release version/u,
   );
+  assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog:
+          "## [Unreleased]\n\n### Added\n\n- Release-bound change.\n\n## [0.4.0] - 2026-07-15\n",
+        manifest,
+        tag: "v0.4.0",
+      }),
+    /unpromoted content above the 0\.4\.0 release heading/u,
+  );
+  assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog: "## [0.4.0] - 2026-07-15\n\n## [Unreleased]\n",
+        manifest,
+        tag: "v0.4.0",
+      }),
+    /Unreleased heading immediately before the 0\.4\.0 release heading/u,
+  );
 });
 
 test("release metadata in the repository is synchronized at 0.4.0", () => {
@@ -325,6 +350,60 @@ test("release metadata in the repository is synchronized at 0.4.0", () => {
       tag: "v0.4.0",
     }),
   );
+});
+
+test("one pure stable-version contract parses, compares, and enforces latest advancement", () => {
+  assert.deepEqual(parseStableVersion("0.4.0"), [0n, 4n, 0n]);
+  assert.equal(compareStableVersions("0.4.0", "0.3.99"), 1);
+  assert.equal(compareStableVersions("1.0.0", "1.0.0"), 0);
+  assert.equal(compareStableVersions("1.0.0", "2.0.0"), -1);
+  assert.doesNotThrow(() =>
+    assertVersionAdvancesLatest({
+      latest: "0.3.1",
+      name: "ark-of-atrahasis",
+      version: "0.4.0",
+    }),
+  );
+  for (const invalid of ["0.4", "v0.4.0", "0.4.0-rc.1", "01.4.0", "0.4.0.0"]) {
+    assert.throws(() => parseStableVersion(invalid), /stable release version/u);
+  }
+  assert.throws(
+    () =>
+      assertVersionAdvancesLatest({
+        latest: "0.4.0",
+        name: "ark-of-atrahasis",
+        version: "0.4.0",
+      }),
+    /would not advance/u,
+  );
+});
+
+test("README fences are structurally classified so executable drift cannot be skipped", () => {
+  const sourceReadme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const fences = extractReadmeFences(sourceReadme);
+  const executable = fences.filter((fence) => fence.executable);
+
+  assert.equal(fences.length, 1);
+  assert.equal(executable.length, 1);
+  assert.equal(executable[0].language, "js");
+  assert.match(executable[0].code, /createSafeDocument\(root/u);
+  assert.doesNotMatch(executable[0].code, /npm run check/u);
+
+  const classified = extractReadmeFences(
+    "```js\nconsole.log('run');\n```\n\n```sh\nnpm test\n```\n\n```text\nreference\n```\n",
+  );
+  assert.deepEqual(
+    classified.map(({ executable: isExecutable, language }) => ({
+      executable: isExecutable,
+      language,
+    })),
+    [
+      { executable: true, language: "js" },
+      { executable: true, language: "sh" },
+      { executable: false, language: "text" },
+    ],
+  );
+  assert.throws(() => extractReadmeFences("```js\nunclosed\n"), /unclosed README fence/u);
 });
 
 test("annotated release tags must resolve to the checked-out HEAD", () => {
@@ -813,6 +892,7 @@ test("release workflow hands off and publishes only the exact verified artifacts
   const downloadIndex = releaseWorkflow.indexOf("uses: actions/download-artifact@");
   const checksumIndex = releaseWorkflow.indexOf("sha256sum --check --strict");
   const recoveryScriptIndex = releaseWorkflow.indexOf("package/scripts/release-recovery.mjs");
+  const stableVersionScriptIndex = releaseWorkflow.indexOf("package/scripts/stable-version.mjs");
   const registryIndex = releaseWorkflow.indexOf("inspect-registry");
   const draftIndex = releaseWorkflow.indexOf("recovery.prepareGitHubRelease");
   const npmPublishIndex = releaseWorkflow.indexOf("publish-or-resume");
@@ -827,6 +907,7 @@ test("release workflow hands off and publishes only the exact verified artifacts
     npmPublishIndex,
     packIndex,
     recoveryScriptIndex,
+    stableVersionScriptIndex,
     registryIndex,
     releaseIndex,
     uploadIndex,
@@ -840,7 +921,12 @@ test("release workflow hands off and publishes only the exact verified artifacts
   assert.ok(uploadIndex < downloadIndex);
   assert.ok(downloadIndex < checksumIndex);
   assert.ok(checksumIndex < recoveryScriptIndex);
+  assert.ok(checksumIndex < stableVersionScriptIndex);
   assert.ok(recoveryScriptIndex < registryIndex);
+  assert.match(
+    releaseWorkflow,
+    /RELEASE_RECOVERY_SCRIPT=\$RUNNER_TEMP\/release-scripts\/release-recovery\.mjs/u,
+  );
   assert.ok(registryIndex < draftIndex);
   assert.ok(draftIndex < npmPublishIndex);
   assert.ok(npmPublishIndex < releaseIndex);

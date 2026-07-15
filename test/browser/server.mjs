@@ -86,15 +86,10 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/hostile-worker.js") {
       response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       response.end(`onmessage = ({ data }) => {
-  const progress = new BigInt64Array(data);
-  Atomics.store(progress, 1, 1n);
-  postMessage("started");
-  // The browser proof observes indefinitely scheduled isolated work. The
-  // Chromium build bundled with Playwright 1.61.1 in this gate did not preempt
-  // an unyielding Atomics loop; the Node witness covers hard CPU-bound termination.
-  setInterval(() => {
-    Atomics.add(progress, 0, 1n);
-  }, 1);
+  const progress = new Uint32Array(data);
+  Atomics.store(progress, 1, 1);
+  postMessage("entered-unyielding-loop");
+  for (;;) progress[0] = (progress[0] + 1) >>> 0;
 };
 `);
       return;

@@ -5,6 +5,7 @@ import {
   openHarness,
   test,
 } from "./fixtures.mjs";
+import { PUBLIC_EVENT_CATALOG } from "../../src/event-catalog.ts";
 
 const BASE_EVENT_FIELDS = [
   "bubbles",
@@ -98,6 +99,12 @@ const POISONED_EVENT_FIELDS = Object.freeze(Object.fromEntries(
   Object.entries(EVENT_FIELDS).map(([family, fields]) => [
     family,
     fields.filter((field) => !CONTROL_EVENT_FIELDS.has(field)),
+  ]),
+));
+const PUBLIC_EVENT_REGISTRATIONS = Object.freeze(Object.fromEntries(
+  Object.entries(PUBLIC_EVENT_CATALOG).map(([method, metadata]) => [
+    method,
+    Object.freeze({ kind: metadata.kind, type: metadata.type }),
   ]),
 ));
 
@@ -206,6 +213,80 @@ test("real browser SES hardens the completed public capability graph", async ({
   } finally {
     await state.dispose();
   }
+});
+
+test("post-lockdown dispatches every advertised public event type through its fence", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate((registrations) => {
+    const host = document.createElement("div");
+    host.style.contain = "paint";
+    document.body.append(host);
+    const root = host.attachShadow({ mode: "closed" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    });
+    const target = safeDocument.createInput();
+    safeDocument.appendChild(target);
+    const rawTarget = root.querySelector("input");
+    if (!(rawTarget instanceof HTMLInputElement)) throw new Error("event target is missing");
+
+    const hardenedRegistrations = harden(registrations);
+    const delegated = [];
+    for (const { type } of Object.values(hardenedRegistrations)) {
+      host.addEventListener(type, () => delegated.push(type));
+    }
+    const guest = new Compartment({ registrations: hardenedRegistrations, target });
+    guest.evaluate(`
+      globalThis.snapshots = [];
+      for (const [method, metadata] of Object.entries(registrations)) {
+        target[method](event => {
+          snapshots.push({
+            deeplyFrozen: Object.isFrozen(event) && Object.isFrozen(event.target),
+            kind: event.kind,
+            method,
+            type: event.type,
+          });
+        });
+      }
+    `);
+
+    const createNativeEvent = ({ kind, type }) => {
+      const initialization = { bubbles: true, cancelable: true, composed: true };
+      if (kind === "keyboard") return new KeyboardEvent(type, initialization);
+      if (kind === "mouse") return new MouseEvent(type, initialization);
+      if (kind === "pointer") return new PointerEvent(type, initialization);
+      if (kind === "focus") return new FocusEvent(type, initialization);
+      if (kind === "touch") return new TouchEvent(type, initialization);
+      if (kind === "input" && type === "input") {
+        return new InputEvent(type, initialization);
+      }
+      return new Event(type, initialization);
+    };
+    for (const metadata of Object.values(hardenedRegistrations)) {
+      rawTarget.dispatchEvent(createNativeEvent(metadata));
+    }
+
+    const snapshots = guest.evaluate("snapshots");
+    safeDocument.dispose();
+    host.remove();
+    return { delegated, snapshots };
+  }, PUBLIC_EVENT_REGISTRATIONS);
+  await flushBrowserWork(page);
+
+  expect(result.snapshots).toEqual(
+    Object.entries(PUBLIC_EVENT_REGISTRATIONS).map(([method, metadata]) => ({
+      deeplyFrozen: true,
+      kind: metadata.kind,
+      method,
+      type: metadata.type,
+    })),
+  );
+  expect(result.delegated).toEqual([]);
+  expectNoUnapprovedActivity(browserLedger);
 });
 
 test("real browser SES covers the browser-relevant strict acceptance matrix", async ({

@@ -7,6 +7,11 @@ the tag, npm package, or GitHub release exists.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
+This is the repository release candidate. As of 2026-07-15, npm `latest` remains
+`0.3.1`; no tag, npm publication, or immutable GitHub release is claimed here.
+
 ### Added
 
 - Added a strict-default policy denial for guest-readable native `input`,
@@ -23,42 +28,24 @@ the tag, npm package, or GitHub release exists.
   owned `focus`/`blur` targets, with three-engine delegated click/hotkey/action/
   form/focus coverage and an explicit trusted-host capture-phase obligation.
 - Expanded post-lockdown Chromium, Firefox, and WebKit SES coverage to every
-  advertised event family and public snapshot field, cancellation reentrancy,
-  hostile getters, and a documented trusted-touch substitute where WebKit
-  rejects scripted `Touch` construction.
+  advertised event family, all 21 public event types, and every public snapshot
+  field, cancellation reentrancy, hostile getters, and a documented
+  trusted-touch substitute where WebKit rejects scripted `Touch` construction.
 - Enforced computed paint containment on the `ShadowRoot` host and added
   Chromium, Firefox, and WebKit geometry/hit-test coverage for explicitly
   granted fixed, viewport-sized, high-z-index guest styles.
 - Expanded real-browser SES coverage across the browser-relevant issue #1
   authority, event/error, policy, form, owner, lifecycle, numeric, and quota
   seams.
-
-### Changed
-
-- Renamed the paragraph and text-node factories to `createParagraph()` and
-  `createTextNode()`, made list-local creation helpers consistently detached,
-  and documented that descendants replaced by `setText()` remain reusable.
-- Removed `password` from the public input vocabulary and runtime state machine;
-  credential-confidentiality deployments now explicitly require a separately
-  trusted origin/iframe or process boundary.
-- Consolidated UTF-8 quota accounting and enabled TypeScript unused-local and
-  unused-parameter diagnostics.
-
-## [0.4.0] - 2026-07-15
-
-This is the repository release candidate. As of 2026-07-15, npm `latest` remains
-`0.3.1`; no tag, npm publication, or immutable GitHub release is claimed here.
-
-### Added
-
 - A single lint, typecheck, test, audit, and pristine-package CI gate.
 - Real Chromium, Firefox, and WebKit request/navigation interception, browser
-  SES bootstrap, and scheduled dedicated-Worker termination coverage.
+  SES bootstrap, and unyielding dedicated-Worker termination coverage.
 - Fixed-seed generated CSS, URL, numeric, identifier, and lifecycle/model tests,
   including exact quota failure/release and replay paths.
 - Reproducible tarball verification from a clean Git archive, minimum/current
   TypeScript declaration checks, offline consumer installation, source rebuild
-  comparison, SHA-256 checksums, and a CycloneDX SBOM.
+  comparison, literal typecheck/browser execution of every executable packed
+  README fence, SHA-256 checksums, and a CycloneDX SBOM.
 - A tag-triggered release workflow whose write/OIDC job targets the protected
   `npm` environment, transfers only the verified tarball, checksum, and SBOM,
   verifies their identity, uses npm trusted publishing, and publishes a
@@ -68,6 +55,25 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 
 ### Changed
 
+- Renamed the paragraph and text-node factories to `createParagraph()` and
+  `createTextNode()` while retaining deprecated same-function `createText()` and
+  `createRawText()` aliases, made list-local creation helpers consistently
+  detached, and documented that descendants replaced by `setText()` remain
+  reusable.
+- Added preferred `setReadOnly()`, `setAutoFocus()`, `setColSpan()`, and
+  `setRowSpan()` casing while retaining the deprecated former spellings as
+  exact-function aliases with identical lifecycle and validation behavior.
+- Centralized all public handler event types, snapshot kinds, and root/target
+  fence placement in one authoritative catalog consumed by runtime
+  registration, fence installation, and exhaustive unit/browser checks.
+- Centralized stable version parsing/comparison/advance checks in one module
+  shared by release metadata and interrupted-publication recovery, and required
+  an empty `[Unreleased]` section immediately before the dated release heading.
+- Removed `password` from the public input vocabulary and runtime state machine;
+  credential-confidentiality deployments now explicitly require a separately
+  trusted origin/iframe or process boundary.
+- Consolidated UTF-8 quota accounting and enabled TypeScript unused-local and
+  unused-parameter diagnostics.
 - Replaced the Bun lock and unbounded Bun types with a publishable npm build
   lock and exact development dependency versions.
 - Added explicit TypeScript 5.0.4/7.0.2 compatibility checks while retaining

@@ -341,6 +341,8 @@ export interface SafeInputElement extends SafeVoidElement {
   readonly getValue: () => string;
   readonly setPlaceholder: (value: string) => void;
   readonly setDisabled: (value: boolean) => void;
+  readonly setReadOnly: (value: boolean) => void;
+  /** @deprecated Use setReadOnly(). */
   readonly setReadonly: (value: boolean) => void;
   readonly setRequired: (value: boolean) => void;
   readonly setChecked: (value: boolean) => void;
@@ -352,6 +354,8 @@ export interface SafeInputElement extends SafeVoidElement {
   readonly setMaxLength: (value: number) => void;
   readonly setPattern: (value: string) => void;
   readonly setAutocomplete: (value: AutocompleteValue) => void;
+  readonly setAutoFocus: (value: false) => void;
+  /** @deprecated Use setAutoFocus(). */
   readonly setAutofocus: (value: false) => void;
   readonly setName: (value: string) => void;
   readonly setInputMode: (value: InputModeValue) => void;
@@ -365,6 +369,8 @@ export interface SafeTextareaElement extends SafeContainerElement {
   readonly getValue: () => string;
   readonly setPlaceholder: (value: string) => void;
   readonly setDisabled: (value: boolean) => void;
+  readonly setReadOnly: (value: boolean) => void;
+  /** @deprecated Use setReadOnly(). */
   readonly setReadonly: (value: boolean) => void;
   readonly setRequired: (value: boolean) => void;
   readonly setMinLength: (value: number) => void;
@@ -453,7 +459,11 @@ export interface SafeCanvasElement extends SafeContainerElement {
 }
 
 export interface SafeTableCellElement extends SafeContainerElement {
+  readonly setColSpan: (value: number) => void;
+  /** @deprecated Use setColSpan(). */
   readonly setColspan: (value: number) => void;
+  readonly setRowSpan: (value: number) => void;
+  /** @deprecated Use setRowSpan(). */
   readonly setRowspan: (value: number) => void;
   readonly setScope: (value: TableScopeValue) => void;
   readonly setHeaders: (value: string) => void;
@@ -557,6 +567,8 @@ export interface SafeDocument {
   readonly createFigcaption: () => SafeContainerElement;
 
   readonly createParagraph: () => SafeContainerElement;
+  /** @deprecated Use createParagraph(). */
+  readonly createText: () => SafeContainerElement;
   readonly createHeading: (level: HeadingLevel) => SafeContainerElement;
   readonly createFormatting: (format: FormattingTag) => SafeContainerElement;
 
@@ -614,6 +626,8 @@ export interface SafeDocument {
   readonly createRp: () => SafeContainerElement;
 
   readonly createTextNode: () => SafeTextNode;
+  /** @deprecated Use createTextNode(). */
+  readonly createRawText: () => SafeTextNode;
 
   readonly getElement: GetElement;
 }

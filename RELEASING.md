@@ -19,7 +19,8 @@ release has occurred.
   or run dependency lifecycle scripts during a release install.
 - Bump `package.json` and `npm-shrinkwrap.json` to a version that is not already
   present on npm. Never reuse or overwrite a published version.
-- Promote the `[Unreleased]` changelog entries to a dated version heading.
+- Promote every `[Unreleased]` changelog entry to the dated target-version
+  heading and leave `[Unreleased]` structurally empty immediately before it.
 - Review the license metadata and the external owner/legal controls below.
 
 ## Verify and create the artifact
@@ -38,7 +39,11 @@ an isolated consumer with an empty cache and disabled registry, checks ESM
 import plus declarations on the documented minimum and current TypeScript, and
 rebuilds `dist/` from the source and lockfile included in the tarball. Two
 consecutive prepack builds from the same clean archive and frozen install must
-be byte-identical.
+be byte-identical. Every executable fenced block in the exact packed README is
+classified structurally, copied without rewriting into the consumer, checked as
+JavaScript by both supported TypeScript versions, and executed in Chromium
+against the exact installed tarball. Unsupported executable fence languages and
+unclosed fences fail the package gate.
 
 `pack:verified` copies that same, already-tested tarball to `.artifacts/` and
 also writes a CycloneDX SBOM and a SHA-256 checksum file covering both assets.
@@ -84,6 +89,13 @@ This repository-enforced identity chain does not make GitHub releases immutable
 by itself. The canonical repository owner must enable immutable releases and
 protect the tag/ref policy outside the workflow.
 
+Stable-version parsing, comparison, and the requirement to advance npm
+`latest` live in the shared `scripts/stable-version.mjs` contract used by both
+metadata verification and interrupted-release recovery. The credentialed job
+extracts that module beside `release-recovery.mjs` from the already verified
+tarball before invoking recovery; it does not recreate version logic in the
+workflow shell.
+
 ## Protected release path
 
 After the external controls below are audited, create a signed, annotated
@@ -95,8 +107,9 @@ commit. It cannot establish signer trust from repository content alone; tag
 signature requirements and trusted signer identities are external owner
 controls and must be audited separately.
 
-1. requires a stable version that advances npm's current `latest` tag, and
-   requires the release tag, package version, and dated changelog entry to agree;
+1. requires a stable version that advances npm's current `latest` tag, requires
+   the release tag, package version, and dated changelog entry to agree, and
+   requires the immediately preceding `[Unreleased]` section to be empty;
 2. requires the annotated tag to resolve to the checked-out commit and requires
    the npm version to be absent or a byte-identical, exact-provenance
    interrupted-run recovery;

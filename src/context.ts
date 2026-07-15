@@ -1,10 +1,9 @@
 import { createSafeDOMError, isSafeDOMError, type SafeDOMError } from "./errors.ts";
+import { createEventSnapshotter, type EventSnapshotter } from "./event.ts";
 import {
-  createEventSnapshotter,
   ROOT_BUBBLE_FENCE_EVENT_TYPES,
   TARGET_FENCE_EVENT_TYPES,
-  type EventSnapshotter,
-} from "./event.ts";
+} from "./event-catalog.ts";
 import {
   createIdentifierNamespace,
   type IdentifierNamespace,

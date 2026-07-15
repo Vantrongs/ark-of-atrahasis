@@ -4,6 +4,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertVersionAdvancesLatest } from "./stable-version.mjs";
 
 const registryOrigin = "https://registry.npmjs.org";
 const expectedAssetSuffixes = [".tgz", ".sbom.cdx.json", ".sha256"];
@@ -288,16 +289,6 @@ function registryVersionUrl(name, version) {
   return `${registryOrigin}/${encodedName}/${encodeURIComponent(version)}`;
 }
 
-function compareStableVersions(left, right) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
-  for (let index = 0; index < 3; index += 1) {
-    const difference = leftParts[index] - rightParts[index];
-    if (difference !== 0) return Math.sign(difference);
-  }
-  return 0;
-}
-
 async function verifyNewVersionAdvancesLatest({ fetchImplementation = fetch, name, version }) {
   const encodedName = encodeURIComponent(name).replaceAll("%2F", "%2f");
   const response = await fetchResponse(fetchImplementation, `${registryOrigin}/${encodedName}`);
@@ -306,12 +297,7 @@ async function verifyNewVersionAdvancesLatest({ fetchImplementation = fetch, nam
     throw new Error(`npm registry returned unexpected HTTP ${response.status}`);
   }
   const latest = (await response.json())?.["dist-tags"]?.latest;
-  if (typeof latest !== "string" || !/^\d+\.\d+\.\d+$/u.test(latest)) {
-    throw new Error("npm registry has no valid stable latest dist-tag");
-  }
-  if (compareStableVersions(version, latest) <= 0) {
-    throw new Error(`${name}@${version} would not advance the current latest version ${latest}`);
-  }
+  assertVersionAdvancesLatest({ latest, name, version });
 }
 
 async function fetchResponse(fetchImplementation, url) {

@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  assertVersionAdvancesLatest,
+  parseStableVersion,
+} from "./stable-version.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -14,9 +18,7 @@ export function verifyReleaseMetadata({ changelog, manifest, tag }) {
     throw new Error(`release tag ${tag} does not match package version ${manifest.version}`);
   }
 
-  if (!/^\d+\.\d+\.\d+$/u.test(manifest.version)) {
-    throw new Error(`package version ${manifest.version} must be a stable release version`);
-  }
+  parseStableVersion(manifest.version);
 
   if (!/^npm@\d+\.\d+\.\d+$/u.test(manifest.packageManager ?? "")) {
     throw new Error("packageManager must pin an exact npm version before release");
@@ -24,10 +26,37 @@ export function verifyReleaseMetadata({ changelog, manifest, tag }) {
 
   const releaseHeading = new RegExp(
     `^## \\[${escapeRegExp(manifest.version)}\\] - \\d{4}-\\d{2}-\\d{2}$`,
-    "mu",
+    "gmu",
   );
-  if (!releaseHeading.test(changelog)) {
+  const releaseMatch = releaseHeading.exec(changelog);
+  if (!releaseMatch) {
     throw new Error(`CHANGELOG.md has no dated ${manifest.version} release heading`);
+  }
+
+  const unreleasedMatch = /^## \[Unreleased\][ \t]*$/gmu.exec(changelog);
+  if (!unreleasedMatch) {
+    throw new Error(
+      `CHANGELOG.md must keep an empty Unreleased heading immediately before the ${manifest.version} release heading`,
+    );
+  }
+
+  const nextHeading = /^## .+$/gmu;
+  nextHeading.lastIndex = unreleasedMatch.index + unreleasedMatch[0].length;
+  const nextHeadingMatch = nextHeading.exec(changelog);
+  if (nextHeadingMatch?.index !== releaseMatch.index) {
+    throw new Error(
+      `CHANGELOG.md must keep an empty Unreleased heading immediately before the ${manifest.version} release heading`,
+    );
+  }
+
+  const unreleasedContents = changelog.slice(
+    unreleasedMatch.index + unreleasedMatch[0].length,
+    releaseMatch.index,
+  );
+  if (unreleasedContents.trim() !== "") {
+    throw new Error(
+      `CHANGELOG.md has unpromoted content above the ${manifest.version} release heading`,
+    );
   }
 }
 
@@ -92,23 +121,8 @@ export async function inspectVersionForRelease(name, version, fetchImplementatio
   }
 
   const latest = (await packageResponse.json())?.["dist-tags"]?.latest;
-  if (typeof latest !== "string" || !/^\d+\.\d+\.\d+$/u.test(latest)) {
-    throw new Error("npm registry has no valid stable latest dist-tag");
-  }
-  if (compareStableVersions(version, latest) <= 0) {
-    throw new Error(`${name}@${version} would not advance the current latest version ${latest}`);
-  }
+  assertVersionAdvancesLatest({ latest, name, version });
   return "unpublished";
-}
-
-function compareStableVersions(left, right) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
-  for (let index = 0; index < 3; index += 1) {
-    const difference = leftParts[index] - rightParts[index];
-    if (difference !== 0) return Math.sign(difference);
-  }
-  return 0;
 }
 
 async function main() {

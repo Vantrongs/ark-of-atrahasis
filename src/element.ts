@@ -40,6 +40,7 @@ import { createSafeStyle } from "./style.ts";
 import { isAttrKeySafe } from "./validation.ts";
 import type { SafeURLDecision } from "./url-policy.ts";
 import { invalidArgument } from "./errors.ts";
+import { PUBLIC_EVENT_CATALOG as EVENTS } from "./event-catalog.ts";
 import {
   asciiLowercase,
   requireAsciiKeyword,
@@ -258,29 +259,29 @@ function buildSafeElement(context: DocumentContext, realEl: Element): SafeElemen
       );
     },
 
-    onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "click", "mouse", handler, "SafeElement.onClick.handler"); },
-    onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "dblclick", "mouse", handler, "SafeElement.onDblClick.handler"); },
-    onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousedown", "mouse", handler, "SafeElement.onMouseDown.handler"); },
-    onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseup", "mouse", handler, "SafeElement.onMouseUp.handler"); },
-    onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseenter", "mouse", handler, "SafeElement.onMouseEnter.handler"); },
-    onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mouseleave", "mouse", handler, "SafeElement.onMouseLeave.handler"); },
-    onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "mousemove", "mouse", handler, "SafeElement.onMouseMove.handler"); },
-    onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerdown", "pointer", handler, "SafeElement.onPointerDown.handler"); },
-    onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointerup", "pointer", handler, "SafeElement.onPointerUp.handler"); },
-    onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, "pointermove", "pointer", handler, "SafeElement.onPointerMove.handler"); },
-    onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, "contextmenu", "mouse", handler, "SafeElement.onContextMenu.handler"); },
+    onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onClick.type, EVENTS.onClick.kind, handler, "SafeElement.onClick.handler"); },
+    onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onDblClick.type, EVENTS.onDblClick.kind, handler, "SafeElement.onDblClick.handler"); },
+    onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onMouseDown.type, EVENTS.onMouseDown.kind, handler, "SafeElement.onMouseDown.handler"); },
+    onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onMouseUp.type, EVENTS.onMouseUp.kind, handler, "SafeElement.onMouseUp.handler"); },
+    onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onMouseEnter.type, EVENTS.onMouseEnter.kind, handler, "SafeElement.onMouseEnter.handler"); },
+    onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onMouseLeave.type, EVENTS.onMouseLeave.kind, handler, "SafeElement.onMouseLeave.handler"); },
+    onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onMouseMove.type, EVENTS.onMouseMove.kind, handler, "SafeElement.onMouseMove.handler"); },
+    onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onPointerDown.type, EVENTS.onPointerDown.kind, handler, "SafeElement.onPointerDown.handler"); },
+    onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onPointerUp.type, EVENTS.onPointerUp.kind, handler, "SafeElement.onPointerUp.handler"); },
+    onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onPointerMove.type, EVENTS.onPointerMove.kind, handler, "SafeElement.onPointerMove.handler"); },
+    onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onContextMenu.type, EVENTS.onContextMenu.kind, handler, "SafeElement.onContextMenu.handler"); },
 
-    onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keydown", "keyboard", handler, "SafeElement.onKeyDown.handler"); },
-    onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, "keyup", "keyboard", handler, "SafeElement.onKeyUp.handler"); },
+    onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onKeyDown.type, EVENTS.onKeyDown.kind, handler, "SafeElement.onKeyDown.handler"); },
+    onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onKeyUp.type, EVENTS.onKeyUp.kind, handler, "SafeElement.onKeyUp.handler"); },
 
-    onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "focus", "focus", handler, "SafeElement.onFocus.handler"); },
-    onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, "blur", "focus", handler, "SafeElement.onBlur.handler"); },
+    onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onFocus.type, EVENTS.onFocus.kind, handler, "SafeElement.onFocus.handler"); },
+    onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onBlur.type, EVENTS.onBlur.kind, handler, "SafeElement.onBlur.handler"); },
 
-    onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchstart", "touch", handler, "SafeElement.onTouchStart.handler"); },
-    onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchend", "touch", handler, "SafeElement.onTouchEnd.handler"); },
-    onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, "touchmove", "touch", handler, "SafeElement.onTouchMove.handler"); },
+    onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onTouchStart.type, EVENTS.onTouchStart.kind, handler, "SafeElement.onTouchStart.handler"); },
+    onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onTouchEnd.type, EVENTS.onTouchEnd.kind, handler, "SafeElement.onTouchEnd.handler"); },
+    onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onTouchMove.type, EVENTS.onTouchMove.kind, handler, "SafeElement.onTouchMove.handler"); },
 
-    onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup { return addSafeEvent(context, realEl, "scroll", "generic", handler, "SafeElement.onScroll.handler"); },
+    onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup { return addSafeEvent(context, realEl, EVENTS.onScroll.type, EVENTS.onScroll.kind, handler, "SafeElement.onScroll.handler"); },
 
     style: createSafeStyle(context, htmlEl),
   };
@@ -344,6 +345,17 @@ export function createSafeInputElement(
   const known = context.registry.getWrapper<SafeInputElement>(realEl);
   if (known) return known;
   const base = buildSafeElement(context, realEl);
+  const setReadOnly = (value: boolean): void => {
+    const primitive = requireBoolean(value, "SafeInputElement.setReadonly.value");
+    attribute(context, realEl, "readonly", primitive ? "" : null, () => {
+      requireReadonlyInputState(context.platform, realEl, "SafeInputElement.setReadonly.state");
+    });
+  };
+  const setAutoFocus = (value: boolean): void => {
+    const primitive = requireBoolean(value, "SafeInputElement.setAutofocus.value");
+    if (primitive) throw invalidArgument("SafeInputElement.setAutofocus.value");
+    attribute(context, realEl, "autofocus", null);
+  };
 
   const wrapper = Object.assign(base, {
     setType(type: string): void {
@@ -415,12 +427,8 @@ export function createSafeInputElement(
     setDisabled(value: boolean): void {
       booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeInputElement.setDisabled.value"));
     },
-    setReadonly(value: boolean): void {
-      const primitive = requireBoolean(value, "SafeInputElement.setReadonly.value");
-      attribute(context, realEl, "readonly", primitive ? "" : null, () => {
-        requireReadonlyInputState(context.platform, realEl, "SafeInputElement.setReadonly.state");
-      });
-    },
+    setReadOnly,
+    setReadonly: setReadOnly,
     setRequired(value: boolean): void {
       const primitive = requireBoolean(value, "SafeInputElement.setRequired.value");
       attribute(context, realEl, "required", primitive ? "" : null, () => {
@@ -515,11 +523,8 @@ export function createSafeInputElement(
         requireAutocompleteInputState(context.platform, realEl, "SafeInputElement.setAutocomplete.state");
       });
     },
-    setAutofocus(value: boolean): void {
-      const primitive = requireBoolean(value, "SafeInputElement.setAutofocus.value");
-      if (primitive) throw invalidArgument("SafeInputElement.setAutofocus.value");
-      attribute(context, realEl, "autofocus", null);
-    },
+    setAutoFocus,
+    setAutofocus: setAutoFocus,
     setName(value: string): void {
       context.setLocalName(realEl, requireString(value, "SafeInputElement.setName.value"));
     },
@@ -530,10 +535,10 @@ export function createSafeInputElement(
       attribute(context, realEl, "enterkeyhint", requireAsciiKeyword(value, ENTER_KEY_HINT_VALUES, "SafeInputElement.setEnterKeyHint.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler, "SafeInputElement.onChange.handler");
+      return addSafeEvent(context, realEl, EVENTS.onChange.type, EVENTS.onChange.kind, handler, "SafeInputElement.onChange.handler");
     },
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "input", "input", handler, "SafeInputElement.onInput.handler");
+      return addSafeEvent(context, realEl, EVENTS.onInput.type, EVENTS.onInput.kind, handler, "SafeInputElement.onInput.handler");
     },
   }) as SafeInputElement;
   if (initializeNonForm) {
@@ -552,6 +557,14 @@ export function createSafeTextareaElement(
   const known = context.registry.getWrapper<SafeTextareaElement>(realEl);
   if (known) return known;
   const base = buildSafeContainerElement(context, realEl);
+  const setReadOnly = (value: boolean): void => {
+    booleanAttribute(
+      context,
+      realEl,
+      "readonly",
+      requireBoolean(value, "SafeTextareaElement.setReadonly.value"),
+    );
+  };
 
   const wrapper = Object.assign(base, {
     setValue(value: string): void {
@@ -569,9 +582,8 @@ export function createSafeTextareaElement(
     setDisabled(value: boolean): void {
       booleanAttribute(context, realEl, "disabled", requireBoolean(value, "SafeTextareaElement.setDisabled.value"));
     },
-    setReadonly(value: boolean): void {
-      booleanAttribute(context, realEl, "readonly", requireBoolean(value, "SafeTextareaElement.setReadonly.value"));
-    },
+    setReadOnly,
+    setReadonly: setReadOnly,
     setRequired(value: boolean): void {
       booleanAttribute(context, realEl, "required", requireBoolean(value, "SafeTextareaElement.setRequired.value"));
     },
@@ -617,10 +629,10 @@ export function createSafeTextareaElement(
       attribute(context, realEl, "autocomplete", requireExactKeyword(value, AUTOCOMPLETE_VALUES, "SafeTextareaElement.setAutocomplete.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler, "SafeTextareaElement.onChange.handler");
+      return addSafeEvent(context, realEl, EVENTS.onChange.type, EVENTS.onChange.kind, handler, "SafeTextareaElement.onChange.handler");
     },
     onInput(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "input", "input", handler, "SafeTextareaElement.onInput.handler");
+      return addSafeEvent(context, realEl, EVENTS.onInput.type, EVENTS.onInput.kind, handler, "SafeTextareaElement.onInput.handler");
     },
   }) as SafeTextareaElement;
   if (initializeNonForm) {
@@ -663,7 +675,7 @@ export function createSafeSelectElement(
       context.setLocalName(realEl, requireString(value, "SafeSelectElement.setName.value"));
     },
     onChange(handler: EventHandler<SafeInputEvent>): EventCleanup {
-      return addSafeEvent(context, realEl, "change", "input", handler, "SafeSelectElement.onChange.handler");
+      return addSafeEvent(context, realEl, EVENTS.onChange.type, EVENTS.onChange.kind, handler, "SafeSelectElement.onChange.handler");
     },
   }) as SafeSelectElement;
   if (initializeNonForm) {
@@ -997,20 +1009,34 @@ export function createSafeTableCellElement(
   const known = context.registry.getWrapper<SafeTableCellElement>(realEl);
   if (known) return known;
   const base = buildSafeContainerElement(context, realEl);
+  const setColSpan = (value: number): void => {
+    const span = requireIntegerInRange(
+      value,
+      1,
+      1_000,
+      "SafeTableCellElement.setColspan.value",
+    );
+    context.setReflectedIDL(realEl, "colspan", `${span}`, () => {
+      context.platform.setTableColSpan(realEl, span);
+    });
+  };
+  const setRowSpan = (value: number): void => {
+    const span = requireIntegerInRange(
+      value,
+      0,
+      65_534,
+      "SafeTableCellElement.setRowspan.value",
+    );
+    context.setReflectedIDL(realEl, "rowspan", `${span}`, () => {
+      context.platform.setTableRowSpan(realEl, span);
+    });
+  };
 
   return context.complete(Object.assign(base, {
-    setColspan(value: number): void {
-      const span = requireIntegerInRange(value, 1, 1_000, "SafeTableCellElement.setColspan.value");
-      context.setReflectedIDL(realEl, "colspan", `${span}`, () => {
-        context.platform.setTableColSpan(realEl, span);
-      });
-    },
-    setRowspan(value: number): void {
-      const span = requireIntegerInRange(value, 0, 65_534, "SafeTableCellElement.setRowspan.value");
-      context.setReflectedIDL(realEl, "rowspan", `${span}`, () => {
-        context.platform.setTableRowSpan(realEl, span);
-      });
-    },
+    setColSpan,
+    setColspan: setColSpan,
+    setRowSpan,
+    setRowspan: setRowSpan,
     setScope(value: string): void {
       attribute(context, realEl, "scope", requireAsciiKeyword(value, TABLE_SCOPE_VALUES, "SafeTableCellElement.setScope.value"));
     },
