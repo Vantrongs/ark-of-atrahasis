@@ -1,13 +1,25 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { createSafeDocument, isSafeDOMError, type Hardener } from "../src/index.ts";
+import {
+  createSafeDocument,
+  isSafeDOMError,
+  type Hardener,
+  type SafeFormControlPolicy,
+} from "../src/index.ts";
 import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { testHarden } from "./support/harden.ts";
 
+const FORM_CONTROL_POLICY = Object.freeze({
+  allowGuestReadableNonCredentialValues: true,
+}) satisfies SafeFormControlPolicy;
+
 describe("capability completion boundary", () => {
   it("hardens a specialized wrapper only after its nested style and methods are complete", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { harden: testHarden });
+    const safeDocument = createSafeDocument(makeRoot(), {
+      harden: testHarden,
+      formControlPolicy: FORM_CONTROL_POLICY,
+    });
     const input = safeDocument.createInput();
 
     expect(Object.isFrozen(input)).toBe(true);

@@ -27,6 +27,7 @@ import type {
   SafeDocumentRateLimit,
   SafeDocumentRates,
   SafeElement,
+  SafeFormControlPolicy,
 } from "./types.ts";
 import {
   createStylePolicy,
@@ -111,6 +112,7 @@ interface NormalizedOptions {
   readonly rates?: Partial<SafeDocumentRates>;
   readonly urlPolicy?: SafeURLPolicy;
   readonly stylePolicy?: SafeStylePolicy;
+  readonly formControlPolicy?: SafeFormControlPolicy;
 }
 
 function readOwnDataProperty<Value>(
@@ -161,6 +163,20 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
   if (rates.present && rates.value === undefined) {
     throw createSafeDOMError("INVALID_RATE", "createSafeDocument.options.rates");
   }
+  const formControlPolicy = readOwnDataPropertyEntry<SafeFormControlPolicy | undefined>(
+    options,
+    "formControlPolicy",
+    () => createSafeDOMError(
+      "ERR_INVALID_POLICY",
+      "createSafeDocument.options.formControlPolicy",
+    ),
+  );
+  if (formControlPolicy.present && formControlPolicy.value === undefined) {
+    throw createSafeDOMError(
+      "ERR_INVALID_POLICY",
+      "createSafeDocument.options.formControlPolicy",
+    );
+  }
 
   completeWithHardener(harden, { nested: { method: (): boolean => true } });
 
@@ -182,7 +198,39 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
       "stylePolicy",
       () => createSafeDOMError("ERR_INVALID_POLICY", "createSafeDocument.options.stylePolicy"),
     ),
+    formControlPolicy: formControlPolicy.present
+      ? formControlPolicy.value
+      : undefined,
   };
+}
+
+function resolveFormControlPolicy(supplied: SafeFormControlPolicy | undefined): boolean {
+  if (supplied === undefined) return false;
+  const policyOperation = "createSafeDocument.options.formControlPolicy";
+  if (supplied === null || typeof supplied !== "object") {
+    throw createSafeDOMError("ERR_INVALID_POLICY", policyOperation);
+  }
+
+  let keys: readonly PropertyKey[];
+  try {
+    keys = Reflect.ownKeys(supplied);
+  } catch {
+    throw createSafeDOMError("ERR_INVALID_POLICY", policyOperation);
+  }
+  const grantName = "allowGuestReadableNonCredentialValues";
+  if (keys.length !== 1 || keys[0] !== grantName) {
+    throw createSafeDOMError("ERR_INVALID_POLICY", policyOperation);
+  }
+  const grantOperation = `${policyOperation}.${grantName}`;
+  const grant = readOwnDataPropertyEntry<unknown>(
+    supplied,
+    grantName,
+    () => createSafeDOMError("ERR_INVALID_POLICY", grantOperation),
+  );
+  if (!grant.present || grant.value !== true) {
+    throw createSafeDOMError("ERR_INVALID_POLICY", grantOperation);
+  }
+  return true;
 }
 
 function invalidHardener(): SafeDOMError {
@@ -330,6 +378,9 @@ export interface DocumentContext {
   ): Node;
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
+  createGuestReadableFormControl(tag: "input", operation: string): HTMLInputElement;
+  createGuestReadableFormControl(tag: "textarea", operation: string): HTMLTextAreaElement;
+  createGuestReadableFormControl(tag: "select", operation: string): HTMLSelectElement;
   createTextNode(value: string): Text;
   documentOperation<T>(action: () => T): T;
   nodeOperation<T>(real: RealNode, action: () => T): T;
@@ -435,6 +486,7 @@ class DocumentContextImplementation implements DocumentContext {
   readonly #harden: Hardener;
   readonly #quotas: SafeDocumentQuotas;
   readonly #rates: SafeDocumentRates;
+  readonly #allowGuestReadableNonCredentialValues: boolean;
   readonly #rateWindows: Record<RateName, RateWindowState> = {
     operations: { count: 0, failed: false },
     requestAttempts: { count: 0, failed: false },
@@ -470,6 +522,9 @@ class DocumentContextImplementation implements DocumentContext {
     this.ownerRealm = view;
     this.#quotas = resolveQuotas(normalizedOptions.quotas);
     this.#rates = resolveRates(normalizedOptions.rates);
+    this.#allowGuestReadableNonCredentialValues = resolveFormControlPolicy(
+      normalizedOptions.formControlPolicy,
+    );
     this.platform = createPlatformOps(ownerDocument, view);
     this.platform.assertPaintContainedRoot(root);
     this.registry = new NodeRegistry(ownerDocument, (node) => this.platform.ownerDocument(node));
@@ -512,6 +567,24 @@ class DocumentContextImplementation implements DocumentContext {
   createElement(tag: string): HTMLElement;
   createElement(tag: string): HTMLElement {
     return this.documentOperation(() => this.platform.createElement(tag));
+  }
+
+  createGuestReadableFormControl(tag: "input", operation: string): HTMLInputElement;
+  createGuestReadableFormControl(tag: "textarea", operation: string): HTMLTextAreaElement;
+  createGuestReadableFormControl(tag: "select", operation: string): HTMLSelectElement;
+  createGuestReadableFormControl(
+    tag: "input" | "textarea" | "select",
+    operation: string,
+  ): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
+    this.#prepareDocumentOperation();
+    if (!this.#allowGuestReadableNonCredentialValues) {
+      throw createSafeDOMError("FORM_CONTROL_POLICY_REQUIRED", operation);
+    }
+    this.#reserveCall("operations");
+    return this.platform.createElement(tag) as
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | HTMLSelectElement;
   }
 
   createTextNode(value: string): Text {
@@ -588,10 +661,14 @@ class DocumentContextImplementation implements DocumentContext {
   }
 
   documentOperation<T>(action: () => T): T {
-    this.#assertDocumentActive();
-    this.#auditPlacements();
+    this.#prepareDocumentOperation();
     this.#reserveCall("operations");
     return action();
+  }
+
+  #prepareDocumentOperation(): void {
+    this.#assertDocumentActive();
+    this.#auditPlacements();
   }
 
   nodeOperation<T>(real: RealNode, action: () => T): T {

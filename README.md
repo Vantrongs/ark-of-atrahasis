@@ -122,6 +122,20 @@ event records, cleanups, decisions, and errors. JavaScript cannot prove the
 hardener's provenance: a test double outside tests does not satisfy the security
 precondition.
 
+The default strict profile does not create native `input`, `textarea`, or
+`select` controls because each has a live value that browser Autofill or an
+extension may populate and guest code could then read. Those factories fail
+before native node creation with `FORM_CONTROL_POLICY_REQUIRED`. A host that
+needs same-origin, non-credential form structure must explicitly acknowledge
+the weaker surface with the exact own-data option
+`formControlPolicy: { allowGuestReadableNonCredentialValues: true }`.
+
+The policy and its grant are read once through own data descriptors. Accessors,
+non-records, extra keys, and values other than primitive `true` fail with
+`ERR_INVALID_POLICY` without claiming the root, so corrected initialization can
+retry. The grant does not enable password, hidden, file, submit, or reset input
+states and does not promise autofill or PII confidentiality.
+
 ## Threat model and lifecycle contract
 
 - **Ownership and placement:** one `SafeDocument` claims one native
@@ -130,15 +144,20 @@ precondition.
   reparent, adoption, or detach-then-external insertion revokes the affected
   wrappers before a later guest mutation can touch external DOM.
 - **Identifiers and forms:** logical IDs, names, IDREFs, and IDREF lists map to
-  per-document opaque physical tokens. Created form controls start with safe
-  non-form defaults (`button` type, control type, autocomplete, and autofocus
-  constraints); password, submit/reset, and file-like states are not guest
-  vocabularies. `autocomplete="off"`, opaque names, and Shadow DOM are structural
-  isolation measures, not a promise about every browser extension or password
-  manager. If an integration handles credentials or requires autofill
-  confidentiality, place it behind a separately trusted origin and iframe or a
-  separate process/RPC boundary, then test the deployed credential agent and
-  browser policy directly.
+  per-document opaque physical tokens. The strict default denies the three
+  guest-readable native value factories (`input`, `textarea`, and `select`).
+  The explicit non-credential opt-in initializes them with structural non-form
+  defaults; buttons remain `type="button"`, and password, hidden, file,
+  submit, and reset states remain unavailable. Address, email, telephone, or
+  username-like values may still be autofilled and read by the guest despite
+  `autocomplete="off"`, opaque identifiers, `form === null`, and Shadow DOM.
+  The HTML autofill standard permits user-agent override of author hints and
+  does not make a ShadowRoot a no-autofill boundary
+  ([WHATWG HTML autofill](https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#autofill)).
+  If an integration handles credentials or requires autofill/PII
+  confidentiality, place the UI behind a separately trusted cross-origin
+  iframe/origin or a separate process/RPC boundary, then test the deployed
+  browser and credential agent directly.
 - **Events and errors:** handlers receive deeply frozen primitive snapshots made
   through captured standard accessors. Malicious getters and platform failures
   collapse to primitive defaults or frozen `SafeDOMError` records without
@@ -238,6 +257,17 @@ workload.
 - Source and output target ES2022 plus standard DOM APIs.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
+- The standard three-engine projects prove strict default denial plus external
+  host form/submission/named-access/label/radio isolation for the explicit
+  non-credential profile. A separate `chromium-autofill` project uses the
+  Chrome-for-Testing `chromium` channel and Chromium's address Autofill CDP
+  domain to preserve the positive limitation: an opt-in safe email can be
+  filled and read while external host state stays unchanged. Playwright exposes
+  CDP sessions only for Chromium
+  ([Playwright `newCDPSession`](https://playwright.dev/docs/api/class-browsercontext#browser-context-new-cdp-session)),
+  and the [CDP Autofill domain](https://chromedevtools.github.io/devtools-protocol/tot/Autofill/)
+  seeds address/card data, not a browser password store. This is not
+  password-manager proof.
 - Post-lockdown browser event tests cover generic, keyboard, mouse, pointer,
   touch, focus, and input snapshots, every public field, hostile getters,
   cancellation lifetime, and reentrancy in every engine. Chromium and Firefox
@@ -276,7 +306,7 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run typecheck` | Check source and property/model commands with TypeScript 6.0.3 and 7.0.2 |
 | `npm test` | Run unit/property/model tests, built ESM/API smoke, and release-contract tests |
 | `npm run test:property` | Run only the fixed-seed generated security and lifecycle suites (already discovered by `test:unit`) |
-| `npm run test:browser` | Run boundary, SES, and scheduled-Worker tests in Chromium, Firefox, and WebKit |
+| `npm run test:browser` | Run boundary, SES, and scheduled-Worker tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run test:package` | Build and test a tarball from a pristine Git archive |

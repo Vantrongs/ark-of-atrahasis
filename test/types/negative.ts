@@ -27,6 +27,7 @@ import type {
 	SafeElement,
 	SafeEventBase,
 	SafeFieldsetElement,
+	SafeFormControlPolicy,
 	SafeImageElement,
 	SafeInputElement,
 	SafeLabelElement,
@@ -270,6 +271,12 @@ const invalidRatePrimitive: SafeDocumentOptions = { harden: value => value, rate
 // @ts-expect-error supplied rate entries require a complete window contract
 const incompleteRate: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: 1 } } };
 
+// @ts-expect-error the explicit form-control grant accepts only literal true
+const _disabledFormControlGrant: SafeFormControlPolicy = { allowGuestReadableNonCredentialValues: false };
+
+// @ts-expect-error non-primitive grant values are rejected by the public type
+const _statefulFormControlGrant: SafeFormControlPolicy = { allowGuestReadableNonCredentialValues: new Boolean(true) };
+
 declare const textNode: SafeTextNode;
 declare const element: SafeElement;
 declare const containerElement: SafeContainerElement;
@@ -298,6 +305,7 @@ declare const stylePolicyEngine: StylePolicyEngine;
 declare const documentOptions: SafeDocumentOptions;
 declare const rateLimit: SafeDocumentRateLimit;
 declare const documentRates: SafeDocumentRates;
+declare const formControlPolicy: SafeFormControlPolicy;
 declare const replacementDocument: SafeDocument;
 declare const replacementTextNode: SafeTextNode;
 declare const replacementElement: SafeElement;
@@ -337,6 +345,8 @@ documentOptions.harden = replacementDocumentOptions.harden;
 rateLimit.limit = 2;
 // @ts-expect-error rate-map entries are readonly
 documentRates.operations = rateLimit;
+// @ts-expect-error form-control policy fields are readonly
+formControlPolicy.allowGuestReadableNonCredentialValues = true;
 // @ts-expect-error text-node functions are readonly
 textNode.setText = replacementTextNode.setText;
 // @ts-expect-error common-element functions are readonly

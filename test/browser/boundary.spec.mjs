@@ -135,7 +135,9 @@ test("denied image, link, media, and form actions leave the host and browser led
       throw new Error("host fixture is incomplete");
     }
     const root = mount.attachShadow({ mode: "open" });
-    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    });
     const image = safeDocument.createImage();
     const anchor = safeDocument.createAnchor();
     const video = safeDocument.createVideo();
@@ -270,7 +272,53 @@ test("canvas validation failure preserves the trusted bitmap", async ({ page, br
   expectNoUnapprovedActivity(browserLedger);
 });
 
-test("opaque identifier and form namespace leaves host form, named access, and autofill state unchanged", async ({
+test("strict default exposes no guest-readable native form-value sink", async ({
+  page,
+  browserLedger,
+}) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(() => {
+    const mount = document.querySelector("#mount");
+    if (!(mount instanceof HTMLElement)) throw new Error("host fixture is incomplete");
+    const root = mount.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const errors = [];
+    for (const factory of [
+      () => safeDocument.createInput(),
+      () => safeDocument.createTextarea(),
+      () => safeDocument.createSelect(),
+    ]) {
+      try {
+        factory();
+      } catch (error) {
+        errors.push({
+          code: error?.code ?? null,
+          frozen: Object.isFrozen(error),
+          operation: error?.operation ?? null,
+        });
+      }
+    }
+    return {
+      errors,
+      rootHTML: root.innerHTML,
+      valueSinkCount: root.querySelectorAll("input, textarea, select").length,
+    };
+  });
+
+  expect(result).toEqual({
+    errors: [
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createInput.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createTextarea.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createSelect.policy" },
+    ],
+    rootHTML: "",
+    valueSinkCount: 0,
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
+test("opt-in non-credential form controls preserve host form and named access with structural autofill-facing defaults", async ({
   page,
   browserLedger,
 }) => {
@@ -314,7 +362,9 @@ test("opaque identifier and form namespace leaves host form, named access, and a
     const before = snapshotHost();
 
     const root = mount.attachShadow({ mode: "open" });
-    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    });
     const input = safeDocument.createInput();
     const textarea = safeDocument.createTextarea();
     const select = safeDocument.createSelect();
@@ -367,7 +417,9 @@ test("opaque identifier and form namespace leaves host form, named access, and a
     secondMount.style.contain = "paint";
     document.body.append(secondMount);
     const secondRoot = secondMount.attachShadow({ mode: "open" });
-    const secondDocument = globalThis.arkPublicAPI.createSafeDocument(secondRoot);
+    const secondDocument = globalThis.arkPublicAPI.createSafeDocument(secondRoot, {
+      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+    });
     const secondInput = secondDocument.createInput();
     secondInput.setId("shared-key");
     secondInput.setName("shared-key");

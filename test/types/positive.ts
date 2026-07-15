@@ -51,6 +51,7 @@ import type {
 	SafeEventTargetSnapshot,
 	SafeFieldsetElement,
 	SafeFocusEvent,
+	SafeFormControlPolicy,
 	SafeGenericEvent,
 	SafeImageElement,
 	SafeInputElement,
@@ -124,6 +125,15 @@ type _ButtonVocabulary = Expect<
 type _AutocompleteVocabulary = Expect<
 	Equal<AutocompleteValue, (typeof AUTOCOMPLETE_VALUES)[number]>
 >;
+
+const formControlPolicy: SafeFormControlPolicy = {
+	allowGuestReadableNonCredentialValues: true,
+};
+const formControlDocumentOptions: SafeDocumentOptions = {
+	harden: (value) => value,
+	formControlPolicy,
+};
+void formControlDocumentOptions;
 type _DirVocabulary = Expect<Equal<DirValue, (typeof DIR_VALUES)[number]>>;
 type _InputModeVocabulary = Expect<
 	Equal<InputModeValue, (typeof INPUT_MODE_VALUES)[number]>
