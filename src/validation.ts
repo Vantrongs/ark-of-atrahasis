@@ -4,7 +4,10 @@ export type CSSNetworkRisk =
   | "malformed-escape"
   | "import"
   | "url"
-  | "image-set";
+  | "image-set"
+  | "image"
+  | "src"
+  | "indirect-value";
 
 export type CSSNetworkRiskDecision =
   | Readonly<{ risky: false }>
@@ -104,6 +107,12 @@ function canonicalizeCSSForSecurityScan(input: string): CanonicalCSS {
 const CSS_IMPORT = /@\s*import(?:\s|["'(;]|$)/;
 const CSS_URL_FUNCTION = /(^|[^a-z0-9_-])url\s*\(/;
 const CSS_IMAGE_SET_FUNCTION = /(^|[^a-z0-9_-])(?:-webkit-)?image-set\s*\(/;
+const CSS_IMAGE_FUNCTION = /(^|[^a-z0-9_-])image\s*\(/;
+const CSS_SRC_FUNCTION = /(^|[^a-z0-9_-])src\s*\(/;
+// var()/env()/attr() can resolve to a request-bearing token that does not
+// appear in the guest-provided value. The strict style facade rejects these
+// indirections rather than attempting to reason about host/custom state.
+const CSS_INDIRECT_VALUE_FUNCTION = /(^|[^a-z0-9_-])(?:var|env|attr)\s*\(/;
 
 /**
  * Detect CSS constructs that can initiate a request. Unlike a raw regex, this
@@ -119,6 +128,9 @@ export function scanCSSNetworkRisk(value: unknown): CSSNetworkRiskDecision {
   if (CSS_IMPORT.test(canonical.value)) return cssRisk("import");
   if (CSS_URL_FUNCTION.test(canonical.value)) return cssRisk("url");
   if (CSS_IMAGE_SET_FUNCTION.test(canonical.value)) return cssRisk("image-set");
+  if (CSS_IMAGE_FUNCTION.test(canonical.value)) return cssRisk("image");
+  if (CSS_SRC_FUNCTION.test(canonical.value)) return cssRisk("src");
+  if (CSS_INDIRECT_VALUE_FUNCTION.test(canonical.value)) return cssRisk("indirect-value");
   return NO_CSS_NETWORK_RISK;
 }
 

@@ -1,0 +1,329 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { JSDOM } from "jsdom";
+
+import { createSafeElement, createSafeInputElement } from "../src/element.ts";
+import type {
+  SafeEvent,
+  SafeGenericEvent,
+  SafeKeyboardEvent,
+  SafeMouseEvent,
+  SafePointerEvent,
+} from "../src/types.ts";
+
+function assertDeeplyFrozenData(value: unknown, seen = new Set<unknown>()): void {
+  if (value === null || value === undefined) return;
+  if (typeof value === "function") {
+    assert.equal(Object.isFrozen(value), true, "reachable cancellation function is frozen");
+    return;
+  }
+  if (typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  assert.equal(Object.isFrozen(value), true, "reachable snapshot record/array is frozen");
+
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    assert.equal(descriptor.get, undefined, "snapshot contains no live getter");
+    assert.equal(descriptor.set, undefined, "snapshot contains no setter");
+    if ("value" in descriptor) assertDeeplyFrozenData(descriptor.value, seen);
+  }
+}
+
+function getNativeInputValue(window: JSDOM["window"], input: HTMLInputElement): string {
+  const getter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.get;
+  assert.equal(typeof getter, "function");
+  return Reflect.apply(getter!, input, []) as string;
+}
+
+function setNativeInputValue(window: JSDOM["window"], input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+  assert.equal(typeof setter, "function");
+  Reflect.apply(setter!, input, [value]);
+}
+
+test("keyboard event is an immutable primitive snapshot despite hostile own getters", () => {
+  const dom = new JSDOM("<!doctype html><input id=control>");
+  const input = dom.window.document.querySelector("input") as HTMLInputElement;
+  input.value = "trusted-value";
+  input.checked = true;
+
+  let ownValueReads = 0;
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get() {
+      ownValueReads += 1;
+      return dom.window;
+    },
+  });
+
+  const safeInput = createSafeElement(input);
+  let retained: SafeKeyboardEvent | undefined;
+  let hostileEventGetterReads = 0;
+  safeInput.onKeyDown((event) => {
+    retained = event;
+    assert.equal(event.preventDefault(), true);
+  });
+
+  const nativeEvent = new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "A",
+    code: "KeyA",
+    location: 1,
+    repeat: true,
+    ctrlKey: true,
+    altKey: true,
+  });
+  for (const property of ["type", "target", "key", "ctrlKey", "altKey"]) {
+    Object.defineProperty(nativeEvent, property, {
+      configurable: true,
+      get() {
+        hostileEventGetterReads += 1;
+        if (property === "key") throw dom.window.document.body;
+        if (property === "ctrlKey") throw dom.window;
+        return dom.window.document.documentElement;
+      },
+    });
+  }
+  Object.defineProperty(nativeEvent, "preventDefault", {
+    configurable: true,
+    value() {
+      throw dom.window.document.body;
+    },
+  });
+
+  assert.doesNotThrow(() => input.dispatchEvent(nativeEvent));
+  assert.ok(retained);
+  assert.equal(hostileEventGetterReads, 0, "own/custom event getters were never invoked");
+  assert.equal(ownValueReads, 0, "own control value getter was never invoked");
+  assert.equal(retained.kind, "keyboard");
+  assert.equal(retained.type, "keydown");
+  assert.equal(retained.key, "A");
+  assert.equal(retained.code, "KeyA");
+  assert.equal(retained.location, 1);
+  assert.equal(retained.repeat, true);
+  assert.equal(retained.ctrlKey, true);
+  assert.equal(retained.altKey, true);
+  assert.deepEqual(retained.target, { id: "control", value: "trusted-value", checked: true });
+  assert.deepEqual(retained.currentTarget, { id: "control", value: "trusted-value", checked: true });
+  assert.equal(nativeEvent.defaultPrevented, true);
+
+  assert.equal(retained.preventDefault(), false);
+  assert.equal(retained.stopPropagation(), false);
+  assert.equal(retained.stopImmediatePropagation(), false);
+  assert.equal(Reflect.set(retained.target, "value", "guest-write"), false);
+  assert.equal(getNativeInputValue(dom.window, input), "trusted-value");
+
+  setNativeInputValue(dom.window, input, "changed-after-dispatch");
+  assert.equal(retained.target.value, "trusted-value", "retained data remains a stable snapshot");
+  assertDeeplyFrozenData(retained);
+});
+
+test("custom targets and getters that throw DOM/global/function values expose only primitives", () => {
+  const dom = new JSDOM("<!doctype html><x-host id=custom></x-host>");
+  const target = dom.window.document.querySelector("x-host") as HTMLElement;
+  let getterReads = 0;
+  Object.defineProperty(target, "value", {
+    configurable: true,
+    get() {
+      getterReads += 1;
+      throw dom.window.document.body;
+    },
+  });
+
+  const safeTarget = createSafeElement(target);
+  let retained: SafeGenericEvent | undefined;
+  safeTarget.onScroll((event) => {
+    retained = event;
+  });
+
+  const nativeEvent = new dom.window.Event("scroll", { bubbles: true });
+  for (const [property, thrown] of [
+    ["type", dom.window],
+    ["bubbles", dom.window.document],
+    ["currentTarget", () => dom.window],
+  ] as const) {
+    Object.defineProperty(nativeEvent, property, {
+      configurable: true,
+      get() {
+        getterReads += 1;
+        throw thrown;
+      },
+    });
+  }
+
+  assert.doesNotThrow(() => target.dispatchEvent(nativeEvent));
+  assert.ok(retained);
+  assert.equal(getterReads, 0);
+  assert.equal(retained.kind, "generic");
+  assert.equal(retained.type, "scroll");
+  assert.deepEqual(retained.target, { id: "custom" });
+  assert.deepEqual(retained.currentTarget, { id: "custom" });
+  assert.equal("value" in retained.target, false);
+  assertDeeplyFrozenData(retained);
+});
+
+test("every registered event family produces its discriminated frozen field set", () => {
+  const dom = new JSDOM("<!doctype html><input id=target><div id=related></div>");
+  const target = dom.window.document.querySelector("input") as HTMLInputElement;
+  const related = dom.window.document.querySelector("#related") as HTMLDivElement;
+
+  class FixturePointerEvent extends dom.window.MouseEvent {
+    get pointerId(): number { return 41; }
+    get width(): number { return 12; }
+    get height(): number { return 9; }
+    get pressure(): number { return 0.75; }
+    get tangentialPressure(): number { return 0.125; }
+    get tiltX(): number { return 10; }
+    get tiltY(): number { return -5; }
+    get twist(): number { return 180; }
+    get pointerType(): string { return "pen"; }
+    get isPrimary(): boolean { return true; }
+  }
+  Object.defineProperty(dom.window, "PointerEvent", {
+    configurable: true,
+    value: FixturePointerEvent,
+  });
+
+  const safeTarget = createSafeInputElement(target);
+  const snapshots: SafeEvent[] = [];
+  safeTarget.onScroll((event) => snapshots.push(event));
+  safeTarget.onKeyDown((event) => snapshots.push(event));
+  safeTarget.onClick((event) => snapshots.push(event));
+  safeTarget.onPointerDown((event) => snapshots.push(event));
+  safeTarget.onTouchStart((event) => snapshots.push(event));
+  safeTarget.onFocus((event) => snapshots.push(event));
+  safeTarget.onInput((event) => snapshots.push(event));
+
+  target.dispatchEvent(new dom.window.Event("scroll"));
+  target.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    key: "Enter",
+    code: "Enter",
+    shiftKey: true,
+  }));
+  target.dispatchEvent(new dom.window.MouseEvent("click", {
+    clientX: 20,
+    clientY: 30,
+    screenX: 40,
+    screenY: 50,
+    button: 1,
+    buttons: 2,
+    relatedTarget: related,
+  }));
+  target.dispatchEvent(new FixturePointerEvent("pointerdown", {
+    clientX: 60,
+    clientY: 70,
+    buttons: 1,
+  }));
+  target.dispatchEvent(new dom.window.TouchEvent("touchstart", {
+    ctrlKey: true,
+    touches: [],
+    targetTouches: [],
+    changedTouches: [],
+  }));
+  target.dispatchEvent(new dom.window.FocusEvent("focus", { relatedTarget: related }));
+  target.dispatchEvent(new dom.window.InputEvent("input", {
+    data: "x",
+    inputType: "insertText",
+    isComposing: true,
+  }));
+
+  assert.deepEqual(snapshots.map(({ kind }) => kind), [
+    "generic",
+    "keyboard",
+    "mouse",
+    "pointer",
+    "touch",
+    "focus",
+    "input",
+  ]);
+
+  const mouse = snapshots[2] as SafeMouseEvent;
+  assert.equal(mouse.clientX, 20);
+  assert.equal(mouse.clientY, 30);
+  assert.equal(mouse.buttons, 2);
+  assert.deepEqual(mouse.relatedTarget, { id: "related" });
+
+  const pointer = snapshots[3] as SafePointerEvent;
+  assert.equal(pointer.clientX, 60);
+  assert.equal(pointer.pointerId, 41);
+  assert.equal(pointer.pressure, 0.75);
+  assert.equal(pointer.pointerType, "pen");
+  assert.equal(pointer.isPrimary, true);
+
+  const touch = snapshots[4];
+  assert.equal(touch.kind, "touch");
+  if (touch.kind === "touch") {
+    assert.equal(touch.ctrlKey, true);
+    assert.deepEqual(touch.touches, []);
+    assert.equal(Object.isFrozen(touch.touches), true);
+    assert.equal(Object.isFrozen(touch.targetTouches), true);
+    assert.equal(Object.isFrozen(touch.changedTouches), true);
+  }
+
+  const focus = snapshots[5];
+  assert.equal(focus.kind, "focus");
+  if (focus.kind === "focus") assert.deepEqual(focus.relatedTarget, { id: "related" });
+
+  const input = snapshots[6];
+  assert.equal(input.kind, "input");
+  if (input.kind === "input") {
+    assert.equal(input.data, "x");
+    assert.equal(input.inputType, "insertText");
+    assert.equal(input.isComposing, true);
+  }
+
+  for (const snapshot of snapshots) assertDeeplyFrozenData(snapshot);
+});
+
+test("cancellation cells are independent under reentrancy and expire after each callback", () => {
+  const dom = new JSDOM("<!doctype html><button></button>");
+  const target = dom.window.document.querySelector("button") as HTMLButtonElement;
+  const safeTarget = createSafeElement(target);
+  let outer: SafeMouseEvent | undefined;
+  let inner: SafeMouseEvent | undefined;
+  const nestedNative = new dom.window.MouseEvent("click", { cancelable: true });
+
+  safeTarget.onClick((event) => {
+    if (outer === undefined) {
+      outer = event;
+      assert.equal(event.preventDefault(), true);
+      target.dispatchEvent(nestedNative);
+      assert.ok(inner);
+      assert.equal(inner.preventDefault(), false, "nested callback was closed on return");
+      assert.equal(event.stopPropagation(), true, "outer callback remains live after nested dispatch");
+    } else {
+      inner = event;
+      assert.equal(event.preventDefault(), true);
+    }
+  });
+
+  const outerNative = new dom.window.MouseEvent("click", { cancelable: true });
+  target.dispatchEvent(outerNative);
+  assert.ok(outer);
+  assert.ok(inner);
+  assert.equal(outerNative.defaultPrevented, true);
+  assert.equal(nestedNative.defaultPrevented, true);
+  assert.equal(outer.preventDefault(), false);
+  assert.equal(outer.stopPropagation(), false);
+  assert.equal(inner.stopImmediatePropagation(), false);
+});
+
+test("listener finally clears the native event even when the guest callback throws", () => {
+  const dom = new JSDOM("<!doctype html><button></button>");
+  const target = dom.window.document.querySelector("button") as HTMLButtonElement;
+  const safeTarget = createSafeElement(target);
+  let retained: SafeMouseEvent | undefined;
+
+  dom.window.addEventListener("error", (event) => event.preventDefault());
+  safeTarget.onClick((event) => {
+    retained = event;
+    throw new Error("guest callback failure");
+  });
+
+  target.dispatchEvent(new dom.window.MouseEvent("click", { cancelable: true }));
+  assert.ok(retained);
+  assert.equal(retained.preventDefault(), false);
+  assert.equal(retained.stopPropagation(), false);
+  assertDeeplyFrozenData(retained);
+});

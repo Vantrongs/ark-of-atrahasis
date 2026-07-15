@@ -1,6 +1,6 @@
-import type { SafeElement, SafeTextNode, SafeStyleSheet } from "./types.ts";
+import type { SafeElement, SafeTextNode } from "./types.ts";
 
-type SafeNode = SafeElement | SafeTextNode | SafeStyleSheet;
+type SafeNode = SafeElement | SafeTextNode;
 type RealNode = Element | Text;
 
 const wrapperByReal = new WeakMap<RealNode, SafeNode>();

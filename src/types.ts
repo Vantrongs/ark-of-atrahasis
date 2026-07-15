@@ -1,38 +1,157 @@
 import type { SafeURLDecision, SafeURLPolicy } from "./url-policy.ts";
+import type { SafeStylePolicy } from "./style-policy.ts";
 
-export interface SafeEvent {
-  type: string;
-  ctrlKey: boolean;
-  altKey: boolean;
-  shiftKey: boolean;
-  metaKey: boolean;
-  target: {
-    id: string;
-    value: unknown;
-  };
-  currentTarget: {
-    id: string;
-    value: unknown;
-  };
-  preventDefault(): void;
-  stopPropagation(): void;
-  stopImmediatePropagation(): void;
+export type SafeEventKind =
+  | "generic"
+  | "keyboard"
+  | "mouse"
+  | "pointer"
+  | "touch"
+  | "focus"
+  | "input";
+
+export interface SafeEventTargetSnapshot {
+  readonly id: string;
+  /** Present only for a branded standard form control. */
+  readonly value?: string;
+  /** Present only for a branded HTMLInputElement. */
+  readonly checked?: boolean;
 }
 
-export type SafeStyle = Record<string, string>;
+export interface SafeEventBase<Kind extends SafeEventKind> {
+  readonly kind: Kind;
+  readonly type: string;
+  readonly bubbles: boolean;
+  readonly cancelable: boolean;
+  readonly composed: boolean;
+  readonly defaultPrevented: boolean;
+  readonly eventPhase: number;
+  readonly timeStamp: number;
+  readonly target: SafeEventTargetSnapshot;
+  readonly currentTarget: SafeEventTargetSnapshot;
 
-export type EventHandler = (event: SafeEvent) => void;
+  /** Returns false once the synchronous handler invocation has ended. */
+  readonly preventDefault: () => boolean;
+  /** Returns false once the synchronous handler invocation has ended. */
+  readonly stopPropagation: () => boolean;
+  /** Returns false once the synchronous handler invocation has ended. */
+  readonly stopImmediatePropagation: () => boolean;
+}
+
+export interface SafeModifierSnapshot {
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly shiftKey: boolean;
+  readonly metaKey: boolean;
+}
+
+export interface SafeGenericEvent extends SafeEventBase<"generic"> {}
+
+export interface SafeKeyboardEvent extends SafeEventBase<"keyboard">, SafeModifierSnapshot {
+  readonly key: string;
+  readonly code: string;
+  readonly location: number;
+  readonly repeat: boolean;
+  readonly isComposing: boolean;
+}
+
+export interface SafeMouseEvent extends SafeEventBase<"mouse">, SafeModifierSnapshot {
+  readonly screenX: number;
+  readonly screenY: number;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly pageX: number;
+  readonly pageY: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly movementX: number;
+  readonly movementY: number;
+  readonly button: number;
+  readonly buttons: number;
+  readonly relatedTarget: SafeEventTargetSnapshot | null;
+}
+
+export interface SafePointerEvent extends SafeEventBase<"pointer">, SafeModifierSnapshot {
+  readonly screenX: number;
+  readonly screenY: number;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly pageX: number;
+  readonly pageY: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly movementX: number;
+  readonly movementY: number;
+  readonly button: number;
+  readonly buttons: number;
+  readonly relatedTarget: SafeEventTargetSnapshot | null;
+  readonly pointerId: number;
+  readonly width: number;
+  readonly height: number;
+  readonly pressure: number;
+  readonly tangentialPressure: number;
+  readonly tiltX: number;
+  readonly tiltY: number;
+  readonly twist: number;
+  readonly pointerType: string;
+  readonly isPrimary: boolean;
+}
+
+export interface SafeTouchSnapshot {
+  readonly identifier: number;
+  readonly screenX: number;
+  readonly screenY: number;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly pageX: number;
+  readonly pageY: number;
+  readonly radiusX: number;
+  readonly radiusY: number;
+  readonly rotationAngle: number;
+  readonly force: number;
+  readonly target: SafeEventTargetSnapshot;
+}
+
+export interface SafeTouchEvent extends SafeEventBase<"touch">, SafeModifierSnapshot {
+  readonly touches: readonly SafeTouchSnapshot[];
+  readonly targetTouches: readonly SafeTouchSnapshot[];
+  readonly changedTouches: readonly SafeTouchSnapshot[];
+}
+
+export interface SafeFocusEvent extends SafeEventBase<"focus"> {
+  readonly relatedTarget: SafeEventTargetSnapshot | null;
+}
+
+export interface SafeInputEvent extends SafeEventBase<"input"> {
+  readonly data: string | null;
+  readonly inputType: string;
+  readonly isComposing: boolean;
+}
+
+export type SafeEvent =
+  | SafeGenericEvent
+  | SafeKeyboardEvent
+  | SafeMouseEvent
+  | SafePointerEvent
+  | SafeTouchEvent
+  | SafeFocusEvent
+  | SafeInputEvent;
+
+export interface SafeStyle {
+  /** Reads the canonical serialized value, or undefined when denied/invalid. */
+  readonly get: (property: string) => string | undefined;
+  /** Sets one policy-approved property. No coercion or URL-bearing CSS occurs. */
+  readonly set: (property: string, value: string) => boolean;
+  /** Removes one policy-approved property. */
+  readonly remove: (property: string) => boolean;
+}
+
+export type EventHandler<Event extends SafeEvent = SafeEvent> = (event: Event) => void;
 export type EventCleanup = () => void;
 
 export interface SafeTextNode {
   setText(value: string): void;
   getText(): string;
-  remove(): void;
-}
-
-export interface SafeStyleSheet {
-  setCSS(value: string): void;
-  getCSS(): string;
   remove(): void;
 }
 
@@ -63,29 +182,29 @@ export interface SafeElement {
   setAria(key: string, value: string): void;
   getAria(key: string): string | undefined;
 
-  onClick(handler: EventHandler): EventCleanup;
-  onDblClick(handler: EventHandler): EventCleanup;
-  onMouseDown(handler: EventHandler): EventCleanup;
-  onMouseUp(handler: EventHandler): EventCleanup;
-  onMouseEnter(handler: EventHandler): EventCleanup;
-  onMouseLeave(handler: EventHandler): EventCleanup;
-  onMouseMove(handler: EventHandler): EventCleanup;
-  onPointerDown(handler: EventHandler): EventCleanup;
-  onPointerUp(handler: EventHandler): EventCleanup;
-  onPointerMove(handler: EventHandler): EventCleanup;
-  onContextMenu(handler: EventHandler): EventCleanup;
+  onClick(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onDblClick(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onMouseDown(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onMouseUp(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onMouseEnter(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onMouseLeave(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onMouseMove(handler: EventHandler<SafeMouseEvent>): EventCleanup;
+  onPointerDown(handler: EventHandler<SafePointerEvent>): EventCleanup;
+  onPointerUp(handler: EventHandler<SafePointerEvent>): EventCleanup;
+  onPointerMove(handler: EventHandler<SafePointerEvent>): EventCleanup;
+  onContextMenu(handler: EventHandler<SafeMouseEvent>): EventCleanup;
 
-  onKeyDown(handler: EventHandler): EventCleanup;
-  onKeyUp(handler: EventHandler): EventCleanup;
+  onKeyDown(handler: EventHandler<SafeKeyboardEvent>): EventCleanup;
+  onKeyUp(handler: EventHandler<SafeKeyboardEvent>): EventCleanup;
 
-  onFocus(handler: EventHandler): EventCleanup;
-  onBlur(handler: EventHandler): EventCleanup;
+  onFocus(handler: EventHandler<SafeFocusEvent>): EventCleanup;
+  onBlur(handler: EventHandler<SafeFocusEvent>): EventCleanup;
 
-  onTouchStart(handler: EventHandler): EventCleanup;
-  onTouchEnd(handler: EventHandler): EventCleanup;
-  onTouchMove(handler: EventHandler): EventCleanup;
+  onTouchStart(handler: EventHandler<SafeTouchEvent>): EventCleanup;
+  onTouchEnd(handler: EventHandler<SafeTouchEvent>): EventCleanup;
+  onTouchMove(handler: EventHandler<SafeTouchEvent>): EventCleanup;
 
-  onScroll(handler: EventHandler): EventCleanup;
+  onScroll(handler: EventHandler<SafeGenericEvent>): EventCleanup;
 
   style: SafeStyle;
 }
@@ -111,8 +230,8 @@ export interface SafeInputElement extends SafeElement {
   setName(value: string): void;
   setInputMode(value: string): void;
   setEnterKeyHint(value: string): void;
-  onChange(handler: EventHandler): EventCleanup;
-  onInput(handler: EventHandler): EventCleanup;
+  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
+  onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
 }
 
 export interface SafeTextareaElement extends SafeElement {
@@ -129,8 +248,8 @@ export interface SafeTextareaElement extends SafeElement {
   setWrap(value: string): void;
   setName(value: string): void;
   setAutocomplete(value: string): void;
-  onChange(handler: EventHandler): EventCleanup;
-  onInput(handler: EventHandler): EventCleanup;
+  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
+  onInput(handler: EventHandler<SafeInputEvent>): EventCleanup;
 }
 
 export interface SafeSelectElement extends SafeElement {
@@ -140,7 +259,7 @@ export interface SafeSelectElement extends SafeElement {
   setRequired(value: boolean): void;
   setMultiple(value: boolean): void;
   setName(value: string): void;
-  onChange(handler: EventHandler): EventCleanup;
+  onChange(handler: EventHandler<SafeInputEvent>): EventCleanup;
 }
 
 export interface SafeOptionElement extends SafeElement {
@@ -253,6 +372,8 @@ export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 export interface SafeDocumentOptions {
   /** Missing policy means every URL-bearing sink is denied. */
   readonly urlPolicy?: SafeURLPolicy;
+  /** Missing policy means every inline style property is denied. */
+  readonly stylePolicy?: SafeStylePolicy;
 }
 
 export interface SafeDocument {
@@ -326,8 +447,6 @@ export interface SafeDocument {
   createRp(): SafeElement;
 
   createRawText(): SafeTextNode;
-
-  createStyle(): SafeStyleSheet;
 
   getElement(id: string): SafeElement | null;
 }

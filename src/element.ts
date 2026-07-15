@@ -21,24 +21,65 @@ import type {
   SafeMeterElement,
   SafeListElement,
   SafeDescriptionListElement,
+  SafeEvent,
+  SafeEventKind,
+  SafeInputEvent,
   EventHandler,
   EventCleanup,
 } from "./types.ts";
 import { registerPair, unregisterPair, getRealNode } from "./registry.ts";
-import { createSafeEvent } from "./event.ts";
+import { createEventSnapshotter } from "./event.ts";
 import { createSafeStyle } from "./style.ts";
+import { createStylePolicy, type StylePolicyEngine } from "./style-policy.ts";
 import { isInputTypeAllowed, isButtonTypeAllowed, isAttrKeySafe } from "./validation.ts";
 import type { SafeURLDecision, URLPolicyEngine } from "./url-policy.ts";
+import { invalidArgument } from "./errors.ts";
 
-function addSafeEvent(realEl: Element, wrapper: SafeElement, eventName: string, handler: EventHandler): EventCleanup {
+const apply = Reflect.apply;
+
+function isStyleElement(realEl: Element): boolean {
+  try {
+    const realm = realEl.ownerDocument?.defaultView;
+    const getter = realm?.Element === undefined
+      ? undefined
+      : Object.getOwnPropertyDescriptor(realm.Element.prototype, "localName")?.get;
+    if (typeof getter !== "function") return false;
+    return apply(getter, realEl, []) === "style";
+  } catch {
+    return false;
+  }
+}
+
+function addSafeEvent<Kind extends SafeEventKind>(
+  realEl: Element,
+  eventName: string,
+  kind: Kind,
+  handler: EventHandler<Extract<SafeEvent, { readonly kind: Kind }>>,
+): EventCleanup {
+  let realm: unknown;
+  try {
+    realm = realEl.ownerDocument?.defaultView;
+  } catch {
+    realm = undefined;
+  }
+  const snapshotter = createEventSnapshotter(realm);
   const nativeHandler = (nativeEvent: Event): void => {
-    handler(createSafeEvent(nativeEvent, wrapper));
+    const dispatch = snapshotter.open(nativeEvent, kind);
+    try {
+      handler(dispatch.event);
+    } finally {
+      dispatch.close();
+    }
   };
   realEl.addEventListener(eventName, nativeHandler);
   return () => realEl.removeEventListener(eventName, nativeHandler);
 }
 
-export function createSafeElement(realEl: Element): SafeElement {
+export function createSafeElement(
+  realEl: Element,
+  stylePolicy: StylePolicyEngine = createStylePolicy(),
+): SafeElement {
+  if (isStyleElement(realEl)) throw invalidArgument("createSafeElement.element");
   const htmlEl = realEl as HTMLElement;
 
   const wrapper: SafeElement = {
@@ -104,39 +145,42 @@ export function createSafeElement(realEl: Element): SafeElement {
       return realEl.getAttribute(`aria-${key}`) ?? undefined;
     },
 
-    onClick(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "click", handler); },
-    onDblClick(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "dblclick", handler); },
-    onMouseDown(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "mousedown", handler); },
-    onMouseUp(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "mouseup", handler); },
-    onMouseEnter(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "mouseenter", handler); },
-    onMouseLeave(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "mouseleave", handler); },
-    onMouseMove(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "mousemove", handler); },
-    onPointerDown(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "pointerdown", handler); },
-    onPointerUp(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "pointerup", handler); },
-    onPointerMove(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "pointermove", handler); },
-    onContextMenu(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "contextmenu", handler); },
+    onClick(handler): EventCleanup { return addSafeEvent(realEl, "click", "mouse", handler); },
+    onDblClick(handler): EventCleanup { return addSafeEvent(realEl, "dblclick", "mouse", handler); },
+    onMouseDown(handler): EventCleanup { return addSafeEvent(realEl, "mousedown", "mouse", handler); },
+    onMouseUp(handler): EventCleanup { return addSafeEvent(realEl, "mouseup", "mouse", handler); },
+    onMouseEnter(handler): EventCleanup { return addSafeEvent(realEl, "mouseenter", "mouse", handler); },
+    onMouseLeave(handler): EventCleanup { return addSafeEvent(realEl, "mouseleave", "mouse", handler); },
+    onMouseMove(handler): EventCleanup { return addSafeEvent(realEl, "mousemove", "mouse", handler); },
+    onPointerDown(handler): EventCleanup { return addSafeEvent(realEl, "pointerdown", "pointer", handler); },
+    onPointerUp(handler): EventCleanup { return addSafeEvent(realEl, "pointerup", "pointer", handler); },
+    onPointerMove(handler): EventCleanup { return addSafeEvent(realEl, "pointermove", "pointer", handler); },
+    onContextMenu(handler): EventCleanup { return addSafeEvent(realEl, "contextmenu", "mouse", handler); },
 
-    onKeyDown(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "keydown", handler); },
-    onKeyUp(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "keyup", handler); },
+    onKeyDown(handler): EventCleanup { return addSafeEvent(realEl, "keydown", "keyboard", handler); },
+    onKeyUp(handler): EventCleanup { return addSafeEvent(realEl, "keyup", "keyboard", handler); },
 
-    onFocus(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "focus", handler); },
-    onBlur(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "blur", handler); },
+    onFocus(handler): EventCleanup { return addSafeEvent(realEl, "focus", "focus", handler); },
+    onBlur(handler): EventCleanup { return addSafeEvent(realEl, "blur", "focus", handler); },
 
-    onTouchStart(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "touchstart", handler); },
-    onTouchEnd(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "touchend", handler); },
-    onTouchMove(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "touchmove", handler); },
+    onTouchStart(handler): EventCleanup { return addSafeEvent(realEl, "touchstart", "touch", handler); },
+    onTouchEnd(handler): EventCleanup { return addSafeEvent(realEl, "touchend", "touch", handler); },
+    onTouchMove(handler): EventCleanup { return addSafeEvent(realEl, "touchmove", "touch", handler); },
 
-    onScroll(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, wrapper, "scroll", handler); },
+    onScroll(handler): EventCleanup { return addSafeEvent(realEl, "scroll", "generic", handler); },
 
-    style: createSafeStyle(htmlEl),
+    style: createSafeStyle(htmlEl, stylePolicy),
   };
 
   registerPair(wrapper, realEl);
   return wrapper;
 }
 
-export function createSafeInputElement(realEl: HTMLInputElement): SafeInputElement {
-  const base = createSafeElement(realEl);
+export function createSafeInputElement(
+  realEl: HTMLInputElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeInputElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setType(type: string): void {
@@ -173,13 +217,16 @@ export function createSafeInputElement(realEl: HTMLInputElement): SafeInputEleme
     setName(value: string): void { realEl.setAttribute("name", String(value)); },
     setInputMode(value: string): void { realEl.setAttribute("inputmode", String(value)); },
     setEnterKeyHint(value: string): void { realEl.setAttribute("enterkeyhint", String(value)); },
-    onChange(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, base, "change", handler); },
-    onInput(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, base, "input", handler); },
+    onChange(handler: EventHandler<SafeInputEvent>): EventCleanup { return addSafeEvent(realEl, "change", "input", handler); },
+    onInput(handler: EventHandler<SafeInputEvent>): EventCleanup { return addSafeEvent(realEl, "input", "input", handler); },
   }) as SafeInputElement;
 }
 
-export function createSafeTextareaElement(realEl: HTMLTextAreaElement): SafeTextareaElement {
-  const base = createSafeElement(realEl);
+export function createSafeTextareaElement(
+  realEl: HTMLTextAreaElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeTextareaElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.value = String(value); },
@@ -204,13 +251,16 @@ export function createSafeTextareaElement(realEl: HTMLTextAreaElement): SafeText
     setWrap(value: string): void { realEl.setAttribute("wrap", String(value)); },
     setName(value: string): void { realEl.setAttribute("name", String(value)); },
     setAutocomplete(value: string): void { realEl.setAttribute("autocomplete", String(value)); },
-    onChange(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, base, "change", handler); },
-    onInput(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, base, "input", handler); },
+    onChange(handler: EventHandler<SafeInputEvent>): EventCleanup { return addSafeEvent(realEl, "change", "input", handler); },
+    onInput(handler: EventHandler<SafeInputEvent>): EventCleanup { return addSafeEvent(realEl, "input", "input", handler); },
   }) as SafeTextareaElement;
 }
 
-export function createSafeSelectElement(realEl: HTMLSelectElement): SafeSelectElement {
-  const base = createSafeElement(realEl);
+export function createSafeSelectElement(
+  realEl: HTMLSelectElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeSelectElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.value = String(value); },
@@ -228,12 +278,15 @@ export function createSafeSelectElement(realEl: HTMLSelectElement): SafeSelectEl
       else realEl.removeAttribute("multiple");
     },
     setName(value: string): void { realEl.setAttribute("name", String(value)); },
-    onChange(handler: EventHandler): EventCleanup { return addSafeEvent(realEl, base, "change", handler); },
+    onChange(handler: EventHandler<SafeInputEvent>): EventCleanup { return addSafeEvent(realEl, "change", "input", handler); },
   }) as SafeSelectElement;
 }
 
-export function createSafeOptionElement(realEl: HTMLOptionElement): SafeOptionElement {
-  const base = createSafeElement(realEl);
+export function createSafeOptionElement(
+  realEl: HTMLOptionElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeOptionElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setValue(value: string): void { realEl.setAttribute("value", String(value)); },
@@ -246,8 +299,11 @@ export function createSafeOptionElement(realEl: HTMLOptionElement): SafeOptionEl
   }) as SafeOptionElement;
 }
 
-export function createSafeButtonElement(realEl: HTMLButtonElement): SafeButtonElement {
-  const base = createSafeElement(realEl);
+export function createSafeButtonElement(
+  realEl: HTMLButtonElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeButtonElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setType(type: string): void {
@@ -262,16 +318,22 @@ export function createSafeButtonElement(realEl: HTMLButtonElement): SafeButtonEl
   }) as SafeButtonElement;
 }
 
-export function createSafeLabelElement(realEl: HTMLLabelElement): SafeLabelElement {
-  const base = createSafeElement(realEl);
+export function createSafeLabelElement(
+  realEl: HTMLLabelElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeLabelElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setFor(value: string): void { realEl.setAttribute("for", String(value)); },
   }) as SafeLabelElement;
 }
 
-export function createSafeFieldsetElement(realEl: HTMLFieldSetElement): SafeFieldsetElement {
-  const base = createSafeElement(realEl);
+export function createSafeFieldsetElement(
+  realEl: HTMLFieldSetElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeFieldsetElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setDisabled(value: boolean): void {
@@ -281,8 +343,12 @@ export function createSafeFieldsetElement(realEl: HTMLFieldSetElement): SafeFiel
   }) as SafeFieldsetElement;
 }
 
-export function createSafeImageElement(realEl: HTMLImageElement, urlPolicy: URLPolicyEngine): SafeImageElement {
-  const base = createSafeElement(realEl);
+export function createSafeImageElement(
+  realEl: HTMLImageElement,
+  urlPolicy: URLPolicyEngine,
+  stylePolicy?: StylePolicyEngine,
+): SafeImageElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -297,8 +363,12 @@ export function createSafeImageElement(realEl: HTMLImageElement, urlPolicy: URLP
   }) as SafeImageElement;
 }
 
-export function createSafeAnchorElement(realEl: HTMLAnchorElement, urlPolicy: URLPolicyEngine): SafeAnchorElement {
-  const base = createSafeElement(realEl);
+export function createSafeAnchorElement(
+  realEl: HTMLAnchorElement,
+  urlPolicy: URLPolicyEngine,
+  stylePolicy?: StylePolicyEngine,
+): SafeAnchorElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setHref(url: string): SafeURLDecision {
@@ -309,8 +379,12 @@ export function createSafeAnchorElement(realEl: HTMLAnchorElement, urlPolicy: UR
   }) as SafeAnchorElement;
 }
 
-export function createSafeVideoElement(realEl: HTMLVideoElement, urlPolicy: URLPolicyEngine): SafeVideoElement {
-  const base = createSafeElement(realEl);
+export function createSafeVideoElement(
+  realEl: HTMLVideoElement,
+  urlPolicy: URLPolicyEngine,
+  stylePolicy?: StylePolicyEngine,
+): SafeVideoElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -344,8 +418,12 @@ export function createSafeVideoElement(realEl: HTMLVideoElement, urlPolicy: URLP
   }) as SafeVideoElement;
 }
 
-export function createSafeAudioElement(realEl: HTMLAudioElement, urlPolicy: URLPolicyEngine): SafeAudioElement {
-  const base = createSafeElement(realEl);
+export function createSafeAudioElement(
+  realEl: HTMLAudioElement,
+  urlPolicy: URLPolicyEngine,
+  stylePolicy?: StylePolicyEngine,
+): SafeAudioElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -372,8 +450,12 @@ export function createSafeAudioElement(realEl: HTMLAudioElement, urlPolicy: URLP
   }) as SafeAudioElement;
 }
 
-export function createSafeSourceElement(realEl: HTMLSourceElement, urlPolicy: URLPolicyEngine): SafeSourceElement {
-  const base = createSafeElement(realEl);
+export function createSafeSourceElement(
+  realEl: HTMLSourceElement,
+  urlPolicy: URLPolicyEngine,
+  stylePolicy?: StylePolicyEngine,
+): SafeSourceElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setSrc(url: string): SafeURLDecision {
@@ -385,8 +467,11 @@ export function createSafeSourceElement(realEl: HTMLSourceElement, urlPolicy: UR
   }) as SafeSourceElement;
 }
 
-export function createSafeCanvasElement(realEl: HTMLCanvasElement): SafeCanvasElement {
-  const base = createSafeElement(realEl);
+export function createSafeCanvasElement(
+  realEl: HTMLCanvasElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeCanvasElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setWidth(value: number): void { realEl.setAttribute("width", String(Number(value) | 0)); },
@@ -394,8 +479,11 @@ export function createSafeCanvasElement(realEl: HTMLCanvasElement): SafeCanvasEl
   }) as SafeCanvasElement;
 }
 
-export function createSafeTableCellElement(realEl: HTMLTableCellElement): SafeTableCellElement {
-  const base = createSafeElement(realEl);
+export function createSafeTableCellElement(
+  realEl: HTMLTableCellElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeTableCellElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setColspan(value: number): void { realEl.setAttribute("colspan", String(Number(value) | 0)); },
@@ -405,8 +493,11 @@ export function createSafeTableCellElement(realEl: HTMLTableCellElement): SafeTa
   }) as SafeTableCellElement;
 }
 
-export function createSafeDetailsElement(realEl: HTMLDetailsElement): SafeDetailsElement {
-  const base = createSafeElement(realEl);
+export function createSafeDetailsElement(
+  realEl: HTMLDetailsElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeDetailsElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setOpen(value: boolean): void {
@@ -416,8 +507,11 @@ export function createSafeDetailsElement(realEl: HTMLDetailsElement): SafeDetail
   }) as SafeDetailsElement;
 }
 
-export function createSafeDialogElement(realEl: HTMLDialogElement): SafeDialogElement {
-  const base = createSafeElement(realEl);
+export function createSafeDialogElement(
+  realEl: HTMLDialogElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeDialogElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setOpen(value: boolean): void {
@@ -427,8 +521,11 @@ export function createSafeDialogElement(realEl: HTMLDialogElement): SafeDialogEl
   }) as SafeDialogElement;
 }
 
-export function createSafeProgressElement(realEl: HTMLProgressElement): SafeProgressElement {
-  const base = createSafeElement(realEl);
+export function createSafeProgressElement(
+  realEl: HTMLProgressElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeProgressElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setValue(value: number): void { realEl.setAttribute("value", String(Number(value))); },
@@ -436,8 +533,11 @@ export function createSafeProgressElement(realEl: HTMLProgressElement): SafeProg
   }) as SafeProgressElement;
 }
 
-export function createSafeMeterElement(realEl: HTMLMeterElement): SafeMeterElement {
-  const base = createSafeElement(realEl);
+export function createSafeMeterElement(
+  realEl: HTMLMeterElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeMeterElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     setValue(value: number): void { realEl.setAttribute("value", String(Number(value))); },
@@ -446,29 +546,35 @@ export function createSafeMeterElement(realEl: HTMLMeterElement): SafeMeterEleme
   }) as SafeMeterElement;
 }
 
-export function createSafeListElement(realEl: HTMLUListElement | HTMLOListElement): SafeListElement {
-  const base = createSafeElement(realEl);
+export function createSafeListElement(
+  realEl: HTMLUListElement | HTMLOListElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeListElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     createItem(): SafeElement {
-      const li = createSafeElement(document.createElement("li"));
+      const li = createSafeElement(realEl.ownerDocument.createElement("li"), stylePolicy);
       base.appendChild(li);
       return li;
     },
   }) as SafeListElement;
 }
 
-export function createSafeDescriptionListElement(realEl: HTMLDListElement): SafeDescriptionListElement {
-  const base = createSafeElement(realEl);
+export function createSafeDescriptionListElement(
+  realEl: HTMLDListElement,
+  stylePolicy?: StylePolicyEngine,
+): SafeDescriptionListElement {
+  const base = createSafeElement(realEl, stylePolicy);
 
   return Object.assign(base, {
     createTerm(): SafeElement {
-      const dt = createSafeElement(document.createElement("dt"));
+      const dt = createSafeElement(realEl.ownerDocument.createElement("dt"), stylePolicy);
       base.appendChild(dt);
       return dt;
     },
     createDescription(): SafeElement {
-      const dd = createSafeElement(document.createElement("dd"));
+      const dd = createSafeElement(realEl.ownerDocument.createElement("dd"), stylePolicy);
       base.appendChild(dd);
       return dd;
     },
