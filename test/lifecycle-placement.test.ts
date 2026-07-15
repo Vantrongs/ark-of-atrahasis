@@ -52,6 +52,8 @@ describe("placement enforcement", () => {
 
     expectCode(() => wrapper.setTitle("again"), "NODE_REVOKED");
     expect(raw.hasAttribute("title")).toBe(false);
+    expect(() => wrapper.dispose()).not.toThrow();
+    expect(outside.firstElementChild).toBe(raw);
     safeDocument.dispose();
     expect(outside.firstElementChild).toBe(raw);
   });
@@ -287,6 +289,9 @@ describe("placement enforcement", () => {
     expect(raw.parentNode).toBe(null);
     expect(raw.hasAttribute("id")).toBe(false);
     expect(raw.hasAttribute("name")).toBe(false);
+    expect(() => wrapper.dispose()).not.toThrow();
+    expect(raw.ownerDocument).toBe(foreignDocument);
+    expect(raw.parentNode).toBe(null);
   });
 
   it("suppresses callbacks after raw placement is compromised", () => {
