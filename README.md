@@ -108,8 +108,9 @@ Available gates:
 | Command | Purpose |
 | --- | --- |
 | `npm run lint` | Lint TypeScript and test/release scripts |
-| `npm run typecheck` | Strict source typecheck without emitting |
+| `npm run typecheck` | Strict source and property-model typecheck under TypeScript 6 and 7 |
 | `npm test` | Build from source and run runtime smoke tests |
+| `npm run test:property` | Run fixed-seed generated security-input and lifecycle-model tests |
 | `npm run test:browser` | Run the browser boundary and SES bootstrap in Chromium, Firefox, and WebKit |
 | `npm run test:ses` | Run real SES 2.2.0 with two compartments/roots and pass-style data checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |

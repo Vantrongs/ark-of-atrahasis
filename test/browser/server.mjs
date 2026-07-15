@@ -50,6 +50,9 @@ const pixel = Buffer.from(
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${host}:${port}`);
   response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 
   try {
     if (url.pathname === "/" || url.pathname === "/health" || url.pathname === "/barrier") {
@@ -81,7 +84,18 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/hostile-worker.js") {
       response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      response.end("postMessage('started'); for (;;) {}\n");
+      response.end(`onmessage = ({ data }) => {
+  const progress = new BigInt64Array(data);
+  Atomics.store(progress, 1, 1n);
+  postMessage("started");
+  // The browser proof observes indefinitely scheduled isolated work. The
+  // Chromium build bundled with Playwright 1.61.1 in this gate did not preempt
+  // an unyielding Atomics loop; the Node witness covers hard CPU-bound termination.
+  setInterval(() => {
+    Atomics.add(progress, 0, 1n);
+  }, 1);
+};
+`);
       return;
     }
 
