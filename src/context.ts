@@ -10,6 +10,7 @@ import {
 import {
   NodeRegistry,
   type AccountedResource,
+  type PendingPhysicalEffect,
   type RealNode,
   type RegistryEntry,
   type SafeNode,
@@ -206,6 +207,19 @@ function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeD
   return resolved;
 }
 
+export type StyleMutationResult =
+  | { readonly status: "committed" }
+  | {
+      readonly status: "rejected";
+      readonly rollbackProven: true;
+    }
+  | {
+      readonly status: "rejected";
+      readonly rollbackProven: false;
+      readonly observedValue?: string;
+      readonly retryRollback: () => boolean;
+    };
+
 export interface DocumentContext {
   readonly root: ShadowRoot;
   readonly ownerDocument: Document;
@@ -257,12 +271,24 @@ export interface DocumentContext {
   getLocalIdReference(real: Element, attributeName: string): string | undefined;
   lookupLocalId(local: string, specializedKind?: SpecializedElementKind): SafeElement | null;
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
+  setIDL<Value extends string | number | boolean>(
+    real: Element,
+    value: Value,
+    read: () => Value,
+    write: (next: Value) => void,
+    validate?: () => void,
+  ): void;
   setURLAttribute(
     real: Element,
     name: string,
     decide: () => SafeURLDecision,
   ): SafeURLDecision;
-  setStyle(real: Element, property: string, value: string, action: () => boolean): boolean;
+  setStyle(
+    real: Element,
+    property: string,
+    value: string,
+    action: () => StyleMutationResult,
+  ): boolean;
   addEventListener(
     real: Element,
     eventName: string,
@@ -478,7 +504,12 @@ class DocumentContextImplementation implements DocumentContext {
   setText(real: RealNode, slot: string, value: string, action: () => void): void {
     this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
-      this.#updateResources(entry, [{ resource: "text", slot, amount: utf8ByteLength(value) }], action);
+      this.#updateResources(entry, [{
+        resource: "text",
+        slot,
+        value,
+        amount: utf8ByteLength(value),
+      }], action);
     });
   }
 
@@ -492,6 +523,7 @@ class DocumentContextImplementation implements DocumentContext {
       this.#updateResources(entry, changes.map((change): ResourceChange => ({
         resource: change.resource,
         slot: change.slot,
+        value: change.value,
         amount: change.value === null
           ? 0
           : utf8ByteLength(change.value)
@@ -512,6 +544,7 @@ class DocumentContextImplementation implements DocumentContext {
       const changes: ResourceChange[] = [{
         resource: "attribute",
         slot: name,
+        value: value ?? null,
         amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }];
       this.#updateResources(entry, changes, () => {
@@ -576,8 +609,58 @@ class DocumentContextImplementation implements DocumentContext {
       this.#updateResources(entry, [{
         resource: "attribute",
         slot: name,
+        value,
         amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }], action);
+    });
+  }
+
+  setIDL<Value extends string | number | boolean>(
+    real: Element,
+    value: Value,
+    read: () => Value,
+    write: (next: Value) => void,
+    validate?: () => void,
+  ): void {
+    this.nodeOperation(real, () => {
+      validate?.();
+      const entry = this.#requireEntryByReal(real);
+      const previous = read();
+      const restorePrevious = (): boolean => {
+        try {
+          if (Object.is(read(), previous)) return true;
+        } catch {
+          // A failed read cannot prove that no restoration write is needed.
+        }
+        try {
+          write(previous);
+        } catch {
+          // Readback below decides whether the throwing restoration took effect.
+        }
+        try {
+          return Object.is(read(), previous);
+        } catch {
+          return false;
+        }
+      };
+      try {
+        write(value);
+      } catch (mutationError) {
+        if (!restorePrevious()) {
+          const pending: PendingPhysicalEffect = {
+            cleanup: (): void => {
+              if (!restorePrevious()) {
+                throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.idlRollback");
+              }
+            },
+          };
+          entry.pendingEffects.add(pending);
+          entry.state = "revoked";
+          throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.idlRollback");
+        }
+        if (isSafeDOMError(mutationError)) throw mutationError;
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "The DOM mutation could not be completed");
+      }
     });
   }
 
@@ -597,9 +680,10 @@ class DocumentContextImplementation implements DocumentContext {
         {
           resource: "attribute",
           slot: name,
+          value,
           amount: utf8ByteLength(name) + utf8ByteLength(value),
         },
-        { resource: "request", slot: name, amount: 1 },
+        { resource: "request", slot: name, value, amount: 1 },
       ], () => this.platform.setAttribute(real, name, value));
       return decision;
     });
@@ -609,7 +693,7 @@ class DocumentContextImplementation implements DocumentContext {
     real: Element,
     property: string,
     value: string,
-    action: () => boolean,
+    action: () => StyleMutationResult,
   ): boolean {
     return this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
@@ -621,24 +705,49 @@ class DocumentContextImplementation implements DocumentContext {
       }
       this.#usage.styleBytes += delta;
 
-      let committed: boolean;
+      let result: StyleMutationResult;
       try {
-        committed = action();
-      } catch (error) {
+        result = action();
+      } catch {
         this.#usage.styleBytes -= delta;
-        if (isSafeDOMError(error)) throw error;
         throw createSafeDOMError(
           "DOM_OPERATION_FAILED",
-          "The DOM mutation could not be completed",
+          "The style transaction could not be completed",
         );
       }
-      if (!committed) {
+      if (result.status === "rejected" && result.rollbackProven) {
         this.#usage.styleBytes -= delta;
+        return false;
+      }
+
+      if (result.status === "rejected") {
+        this.#usage.styleBytes -= delta;
+        const observedAmount = result.observedValue === undefined
+          ? 0
+          : utf8ByteLength(result.observedValue);
+        const retainedAmount = Math.max(previous, amount, observedAmount);
+        this.#usage.styleBytes += retainedAmount - previous;
+        if (retainedAmount === 0) entry.resources.style.delete(property);
+        else entry.resources.style.set(property, retainedAmount);
+        const pending: PendingPhysicalEffect = {
+          cleanup: (): void => {
+            if (!result.retryRollback()) {
+              throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.styleRollback");
+            }
+            const retainedAmount = entry.resources.style.get(property) ?? 0;
+            this.#usage.styleBytes += previous - retainedAmount;
+            if (previous === 0) entry.resources.style.delete(property);
+            else entry.resources.style.set(property, previous);
+          },
+        };
+        entry.pendingEffects.add(pending);
+        entry.state = "revoked";
         return false;
       }
 
       if (amount === 0) entry.resources.style.delete(property);
       else entry.resources.style.set(property, amount);
+      entry.styleCleanupRequired = entry.resources.style.size > 0;
       return true;
     });
   }
@@ -918,8 +1027,21 @@ class DocumentContextImplementation implements DocumentContext {
   }
 
   #clearOwnedResources(entry: RegistryEntry): void {
-    if (!this.platform.isElement(entry.real)) return;
     let firstFailure: SafeDOMError | undefined;
+    for (const pending of [...entry.pendingEffects]) {
+      try {
+        pending.cleanup();
+        entry.pendingEffects.delete(pending);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.clearPendingEffect");
+      }
+    }
+    if (!this.platform.isElement(entry.real)) {
+      if (firstFailure !== undefined) throw firstFailure;
+      return;
+    }
     try {
       this.#identifierNamespace.clearPhysicalEffects(entry);
     } catch (error) {
@@ -936,7 +1058,7 @@ class DocumentContextImplementation implements DocumentContext {
           : createSafeDOMError("DOM_OPERATION_FAILED", "SafeElement.clearRequest");
       }
     }
-    if (entry.resources.style.size > 0) {
+    if (entry.styleCleanupRequired) {
       try {
         this.platform.removeAttribute(entry.real, "style");
       } catch (error) {
@@ -1035,12 +1157,12 @@ class DocumentContextImplementation implements DocumentContext {
     changes: readonly ResourceChange[],
     action: () => void,
   ): void {
-    const deltas = new Map<ResourceQuota, number>();
-    for (const change of changes) {
-      const previous = entry.resources[change.resource].get(change.slot) ?? 0;
-      const quota = RESOURCE_QUOTA[change.resource];
-      deltas.set(quota, (deltas.get(quota) ?? 0) + change.amount - previous);
-    }
+    const slots = this.#snapshotMutationSlots(entry, changes);
+    const previousChanges = changes.map((change): ResourceChange => ({
+      ...change,
+      amount: entry.resources[change.resource].get(change.slot) ?? 0,
+    }));
+    const deltas = this.#resourceDeltas(entry, changes);
 
     for (const [quota, delta] of deltas) {
       if (delta > 0 && this.#usage[quota] + delta > this.#quotas[quota]) {
@@ -1052,7 +1174,32 @@ class DocumentContextImplementation implements DocumentContext {
     try {
       action();
     } catch (error) {
+      const restored = this.#restoreMutationSlots(slots);
       for (const [quota, delta] of deltas) this.#usage[quota] -= delta;
+      if (!restored) {
+        const retained = this.#observeRetainedChanges(entry, changes, slots);
+        for (const [quota, delta] of this.#resourceDeltas(entry, retained)) {
+          this.#usage[quota] += delta;
+        }
+        this.#recordResourceChanges(entry, retained);
+        const pending: PendingPhysicalEffect = {
+          cleanup: (): void => {
+            if (!this.#restoreMutationSlots(slots)) {
+              throw createSafeDOMError(
+                "DOM_OPERATION_FAILED",
+                "SafeDocument.resourceRollback",
+              );
+            }
+            for (const [quota, delta] of this.#resourceDeltas(entry, previousChanges)) {
+              this.#usage[quota] += delta;
+            }
+            this.#recordResourceChanges(entry, previousChanges);
+          },
+        };
+        entry.pendingEffects.add(pending);
+        entry.state = "revoked";
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.resourceRollback");
+      }
       if (isSafeDOMError(error)) throw error;
       throw createSafeDOMError(
         "DOM_OPERATION_FAILED",
@@ -1060,17 +1207,169 @@ class DocumentContextImplementation implements DocumentContext {
       );
     }
 
+    this.#recordResourceChanges(entry, changes);
+  }
+
+  #resourceDeltas(
+    entry: RegistryEntry,
+    changes: readonly ResourceChange[],
+  ): Map<ResourceQuota, number> {
+    const deltas = new Map<ResourceQuota, number>();
+    for (const change of changes) {
+      const previous = entry.resources[change.resource].get(change.slot) ?? 0;
+      const quota = RESOURCE_QUOTA[change.resource];
+      deltas.set(quota, (deltas.get(quota) ?? 0) + change.amount - previous);
+    }
+    return deltas;
+  }
+
+  #recordResourceChanges(entry: RegistryEntry, changes: readonly ResourceChange[]): void {
     for (const change of changes) {
       if (change.amount === 0) entry.resources[change.resource].delete(change.slot);
       else entry.resources[change.resource].set(change.slot, change.amount);
     }
+  }
+
+  #snapshotMutationSlots(
+    entry: RegistryEntry,
+    changes: readonly ResourceChange[],
+  ): readonly MutationSlot[] {
+    const slots = new Map<string, MutationSlot>();
+    for (const change of changes) {
+      const kind = change.resource === "text" ? "text" : "attribute";
+      const key = `${kind}:${change.slot}`;
+      if (slots.has(key)) continue;
+      const access = this.#physicalSlotAccess(entry, kind, change.slot);
+      slots.set(key, {
+        key,
+        kind,
+        slot: change.slot,
+        attempted: change.value,
+        previous: access.read(),
+        read: access.read,
+        write: access.write,
+      });
+    }
+    return [...slots.values()];
+  }
+
+  #physicalSlotAccess(
+    entry: RegistryEntry,
+    kind: "attribute" | "text",
+    slot: string,
+  ): Pick<MutationSlot, "read" | "write"> {
+    if (kind === "attribute") {
+      if (!this.platform.isElement(entry.real)) {
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.attributeSlot");
+      }
+      const element = entry.real;
+      return {
+        read: () => this.platform.getAttribute(element, slot),
+        write: (value) => {
+          if (value === null) this.platform.removeAttribute(element, slot);
+          else this.platform.setAttribute(element, slot, value);
+        },
+      };
+    }
+
+    if (slot === "textContent" || slot === "data") {
+      return {
+        read: () => this.platform.getTextContent(entry.real),
+        write: (value) => this.platform.setTextContent(entry.real, value ?? ""),
+      };
+    }
+    if (slot === "value" && entry.specializedKind === "input") {
+      const element = entry.real as HTMLInputElement;
+      return {
+        read: () => this.platform.getInputValue(element),
+        write: (value) => this.platform.setInputValue(element, value ?? ""),
+      };
+    }
+    if (slot === "value" && entry.specializedKind === "textarea") {
+      const element = entry.real as HTMLTextAreaElement;
+      return {
+        read: () => this.platform.getTextareaValue(element),
+        write: (value) => this.platform.setTextareaValue(element, value ?? ""),
+      };
+    }
+    if (slot === "value" && entry.specializedKind === "select") {
+      const element = entry.real as HTMLSelectElement;
+      return {
+        read: () => this.platform.getSelectValue(element),
+        write: (value) => this.platform.setSelectValue(element, value ?? ""),
+      };
+    }
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.textSlot");
+  }
+
+  #restoreMutationSlots(slots: readonly MutationSlot[]): boolean {
+    for (const slot of slots) {
+      try {
+        if (slot.read() === slot.previous) continue;
+      } catch {
+        // A failed read cannot prove that no restoration write is needed.
+      }
+      try {
+        slot.write(slot.previous);
+      } catch {
+        // Readback below decides whether a throwing restoration took effect.
+      }
+    }
+    let restored = true;
+    for (const slot of slots) {
+      try {
+        if (slot.read() !== slot.previous) restored = false;
+      } catch {
+        restored = false;
+      }
+    }
+    return restored;
+  }
+
+  #observeRetainedChanges(
+    entry: RegistryEntry,
+    changes: readonly ResourceChange[],
+    slots: readonly MutationSlot[],
+  ): readonly ResourceChange[] {
+    const byKey = new Map(slots.map((slot) => [slot.key, slot]));
+    return changes.map((change): ResourceChange => {
+      const kind = change.resource === "text" ? "text" : "attribute";
+      const physical = byKey.get(`${kind}:${change.slot}`);
+      const previousAmount = entry.resources[change.resource].get(change.slot) ?? 0;
+      if (physical === undefined) {
+        return { ...change, amount: Math.max(previousAmount, change.amount) };
+      }
+      try {
+        const observed = physical.read();
+        const amount = change.resource === "request"
+          ? observed === null ? 0 : 1
+          : observed === null
+            ? 0
+            : utf8ByteLength(observed)
+              + (change.resource === "attribute" ? utf8ByteLength(change.slot) : 0);
+        return { ...change, value: observed, amount };
+      } catch {
+        return { ...change, amount: Math.max(previousAmount, change.amount) };
+      }
+    });
   }
 }
 
 interface ResourceChange {
   readonly resource: AccountedResource;
   readonly slot: string;
+  readonly value: string | null;
   readonly amount: number;
+}
+
+interface MutationSlot {
+  readonly key: string;
+  readonly kind: "attribute" | "text";
+  readonly slot: string;
+  readonly attempted: string | null;
+  readonly previous: string | null;
+  readonly read: () => string | null;
+  readonly write: (value: string | null) => void;
 }
 
 export interface ContentResourceChange {

@@ -217,10 +217,13 @@ function createReal(quotas: SafeDocumentQuotas): Real {
     capturedElements,
     capturedTexts,
     destroy(): void {
-      try { safeDocument.dispose(); } catch { /* Best-effort fixture teardown. */ }
-      host.remove();
-      outsideSentinel.remove();
-      external.remove();
+      try {
+        safeDocument.dispose();
+      } finally {
+        host.remove();
+        outsideSentinel.remove();
+        external.remove();
+      }
     },
   };
 }
@@ -1223,14 +1226,30 @@ const TINY_QUOTAS = fc.tuple(
 
 function runCommands(quotas: SafeDocumentQuotas, commands: Iterable<Command<Model, Real>>): void {
   let currentReal: Real | undefined;
+  let modelFailed = false;
+  let modelFailure: unknown;
   try {
     fc.modelRun(() => {
       currentReal = createReal(quotas);
       return { model: createModel(quotas), real: currentReal };
     }, commands);
-  } finally {
-    currentReal?.destroy();
+  } catch (error) {
+    modelFailed = true;
+    modelFailure = error;
   }
+
+  try {
+    currentReal?.destroy();
+  } catch (cleanupError) {
+    if (modelFailed) {
+      throw new AggregateError(
+        [modelFailure, cleanupError],
+        "Lifecycle model and fixture disposal both failed",
+      );
+    }
+    throw cleanupError;
+  }
+  if (modelFailed) throw modelFailure;
 }
 
 function fixedCommand(spec: CommandSpec): Command<Model, Real> {
@@ -1240,6 +1259,42 @@ function fixedCommand(spec: CommandSpec): Command<Model, Real> {
 describe.sequential("lifecycle command model", () => {
   beforeEach(() => {
     document.body.replaceChildren();
+  });
+
+  it("surfaces an unexpected fixture disposal failure and permits cleanup retry", () => {
+    const prototype = window.Node.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeChild");
+    if (descriptor === undefined || typeof descriptor.value !== "function") {
+      throw new Error("expected Node.removeChild");
+    }
+    const nativeRemoveChild = descriptor.value;
+    let failNext = false;
+    Object.defineProperty(prototype, "removeChild", {
+      ...descriptor,
+      value(this: Node, child: Node): Node {
+        if (failNext) {
+          failNext = false;
+          throw document.body;
+        }
+        return Reflect.apply(nativeRemoveChild, this, [child]);
+      },
+    });
+
+    let real: Real | undefined;
+    try {
+      real = createReal(TOPOLOGY_QUOTAS);
+      const wrapper = real.safeDocument.createDiv();
+      real.safeDocument.appendChild(wrapper);
+      failNext = true;
+
+      expect(() => real?.destroy()).toThrowError(expect.objectContaining({
+        code: "DOM_OPERATION_FAILED",
+      }));
+      expect(() => real?.destroy()).not.toThrow();
+    } finally {
+      Object.defineProperty(prototype, "removeChild", descriptor);
+      real?.destroy();
+    }
   });
 
   it("runs the mandatory cleanup and exact quota-reacquisition witness", () => {

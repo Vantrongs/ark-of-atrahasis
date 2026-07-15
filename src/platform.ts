@@ -127,6 +127,7 @@ export interface PlatformOps {
   setTextareaCols(element: HTMLTextAreaElement, value: number): void;
   getSelectValue(element: HTMLSelectElement): string;
   setSelectValue(element: HTMLSelectElement, value: string): void;
+  getOptionSelected(element: HTMLOptionElement): boolean;
   setOptionSelected(element: HTMLOptionElement, value: boolean): void;
   setButtonType(element: HTMLButtonElement, value: string): void;
   setImageWidth(element: HTMLImageElement, value: number): void;
@@ -136,6 +137,7 @@ export interface PlatformOps {
   setMediaControls(element: HTMLMediaElement, value: boolean): void;
   setMediaAutoplay(element: HTMLMediaElement, value: boolean): void;
   setMediaLoop(element: HTMLMediaElement, value: boolean): void;
+  getMediaMuted(element: HTMLMediaElement): boolean;
   setMediaMuted(element: HTMLMediaElement, value: boolean): void;
   getCanvasWidth(element: HTMLCanvasElement): number;
   setCanvasWidth(element: HTMLCanvasElement, value: number): void;
@@ -204,6 +206,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
   readonly #textareaColsSetter: NumberSetter<HTMLTextAreaElement>;
   readonly #selectValueGetter: StringGetter<HTMLSelectElement>;
   readonly #selectValueSetter: StringSetter<HTMLSelectElement>;
+  readonly #optionSelectedGetter: BooleanGetter<HTMLOptionElement>;
   readonly #optionSelectedSetter: BooleanSetter<HTMLOptionElement>;
   readonly #buttonTypeSetter: StringSetter<HTMLButtonElement>;
   readonly #imageWidthSetter: NumberSetter<HTMLImageElement>;
@@ -213,6 +216,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
   readonly #mediaControlsSetter: BooleanSetter<HTMLMediaElement>;
   readonly #mediaAutoplaySetter: BooleanSetter<HTMLMediaElement>;
   readonly #mediaLoopSetter: BooleanSetter<HTMLMediaElement>;
+  readonly #mediaMutedGetter: BooleanGetter<HTMLMediaElement>;
   readonly #mediaMutedSetter: BooleanSetter<HTMLMediaElement>;
   readonly #canvasWidthGetter: NumberGetter<HTMLCanvasElement>;
   readonly #canvasWidthSetter: NumberSetter<HTMLCanvasElement>;
@@ -352,8 +356,15 @@ class OwnerRealmPlatformOps implements PlatformOps {
     const selectPrototype = view.HTMLSelectElement.prototype;
     this.#selectValueGetter = captureAccessor(selectPrototype, "value", "get", "HTMLSelectElement.value.get.capture");
     this.#selectValueSetter = captureAccessor(selectPrototype, "value", "set", "HTMLSelectElement.value.set.capture");
+    const optionPrototype = view.HTMLOptionElement.prototype;
+    this.#optionSelectedGetter = captureAccessor(
+      optionPrototype,
+      "selected",
+      "get",
+      "HTMLOptionElement.selected.get.capture",
+    );
     this.#optionSelectedSetter = captureAccessor(
-      view.HTMLOptionElement.prototype,
+      optionPrototype,
       "selected",
       "set",
       "HTMLOptionElement.selected.set.capture",
@@ -376,6 +387,7 @@ class OwnerRealmPlatformOps implements PlatformOps {
     this.#mediaControlsSetter = captureAccessor(mediaPrototype, "controls", "set", "HTMLMediaElement.controls.set.capture");
     this.#mediaAutoplaySetter = captureAccessor(mediaPrototype, "autoplay", "set", "HTMLMediaElement.autoplay.set.capture");
     this.#mediaLoopSetter = captureAccessor(mediaPrototype, "loop", "set", "HTMLMediaElement.loop.set.capture");
+    this.#mediaMutedGetter = captureAccessor(mediaPrototype, "muted", "get", "HTMLMediaElement.muted.get.capture");
     this.#mediaMutedSetter = captureAccessor(mediaPrototype, "muted", "set", "HTMLMediaElement.muted.set.capture");
 
     const canvasPrototype = view.HTMLCanvasElement.prototype;
@@ -642,6 +654,10 @@ class OwnerRealmPlatformOps implements PlatformOps {
     this.#invoke("HTMLSelectElement.value.set", this.#selectValueSetter, element, [value]);
   }
 
+  getOptionSelected(element: HTMLOptionElement): boolean {
+    return this.#invoke("HTMLOptionElement.selected.get", this.#optionSelectedGetter, element, []);
+  }
+
   setOptionSelected(element: HTMLOptionElement, value: boolean): void {
     this.#invoke("HTMLOptionElement.selected.set", this.#optionSelectedSetter, element, [value]);
   }
@@ -676,6 +692,10 @@ class OwnerRealmPlatformOps implements PlatformOps {
 
   setMediaLoop(element: HTMLMediaElement, value: boolean): void {
     this.#invoke("HTMLMediaElement.loop.set", this.#mediaLoopSetter, element, [value]);
+  }
+
+  getMediaMuted(element: HTMLMediaElement): boolean {
+    return this.#invoke("HTMLMediaElement.muted.get", this.#mediaMutedGetter, element, []);
   }
 
   setMediaMuted(element: HTMLMediaElement, value: boolean): void {

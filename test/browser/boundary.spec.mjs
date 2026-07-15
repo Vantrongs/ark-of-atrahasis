@@ -114,6 +114,46 @@ test("denied image, link, media, and form actions leave the host and browser led
   expectNoUnapprovedActivity(browserLedger);
 });
 
+test("canvas validation failure preserves the trusted bitmap", async ({ page, browserLedger }) => {
+  await openHarness(page, browserLedger);
+
+  const result = await page.evaluate(() => {
+    const mount = document.querySelector("#mount");
+    if (!(mount instanceof HTMLElement)) throw new Error("host fixture is incomplete");
+    const root = mount.attachShadow({ mode: "open" });
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const wrapper = safeDocument.createCanvas();
+    safeDocument.appendChild(wrapper);
+    wrapper.setWidth(4_096);
+    wrapper.setHeight(4_096);
+    const canvas = root.querySelector("canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error("safe canvas was not created");
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("2d canvas context is unavailable");
+    context.fillStyle = "rgb(255, 0, 0)";
+    context.fillRect(0, 0, 1, 1);
+
+    let code;
+    try {
+      wrapper.setWidth(4_097);
+    } catch (error) {
+      code = error?.code;
+    }
+    return {
+      code,
+      dimensions: [canvas.width, canvas.height],
+      pixel: [...context.getImageData(0, 0, 1, 1).data],
+    };
+  });
+
+  expect(result).toEqual({
+    code: "ERR_INVALID_ARGUMENT",
+    dimensions: [4_096, 4_096],
+    pixel: [255, 0, 0, 255],
+  });
+  expectNoUnapprovedActivity(browserLedger);
+});
+
 test("opaque identifier and form namespace leaves host form, named access, and autofill state unchanged", async ({
   page,
   browserLedger,
