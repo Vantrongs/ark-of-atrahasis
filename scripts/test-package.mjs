@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractReadmeFences } from "./readme-examples.mjs";
+import { EXPECTED_RUNTIME_EXPORTS } from "./runtime-export-contract.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputFlag = process.argv.indexOf("--output");
@@ -459,6 +460,12 @@ try {
   writeFileSync(
     join(consumerDirectory, "runtime-smoke.mjs"),
     `import * as api from "ark-of-atrahasis";
+
+const expectedRuntimeExports = ${JSON.stringify(EXPECTED_RUNTIME_EXPORTS)};
+const actualRuntimeExports = Object.keys(api).sort();
+if (JSON.stringify(actualRuntimeExports) !== JSON.stringify(expectedRuntimeExports)) {
+  throw new Error(\`installed ESM package runtime exports differ: expected \${JSON.stringify(expectedRuntimeExports)}, received \${JSON.stringify(actualRuntimeExports)}\`);
+}
 
 if (typeof api.createSafeDocument !== "function") {
   throw new Error("installed ESM package does not export createSafeDocument");

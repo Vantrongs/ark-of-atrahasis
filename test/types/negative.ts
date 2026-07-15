@@ -266,10 +266,10 @@ const invalidRatePrimitive: SafeDocumentOptions = { harden: value => value, rate
 const incompleteRate: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: 1 } } };
 
 // @ts-expect-error the explicit form-control grant accepts only literal true
-const _disabledFormControlGrant: SafeFormControlPolicy = { allowGuestReadableNonCredentialValues: false };
+const _disabledFormControlGrant: SafeFormControlPolicy = { allowNonCredentialFormElements: false };
 
 // @ts-expect-error non-primitive grant values are rejected by the public type
-const _statefulFormControlGrant: SafeFormControlPolicy = { allowGuestReadableNonCredentialValues: new Boolean(true) };
+const _statefulFormControlGrant: SafeFormControlPolicy = { allowNonCredentialFormElements: new Boolean(true) };
 
 declare const textNode: SafeTextNode;
 declare const element: SafeElement;
@@ -340,7 +340,7 @@ rateLimit.limit = 2;
 // @ts-expect-error rate-map entries are readonly
 documentRates.operations = rateLimit;
 // @ts-expect-error form-control policy fields are readonly
-formControlPolicy.allowGuestReadableNonCredentialValues = true;
+formControlPolicy.allowNonCredentialFormElements = true;
 // @ts-expect-error text-node functions are readonly
 textNode.setText = replacementTextNode.setText;
 // @ts-expect-error common-element functions are readonly

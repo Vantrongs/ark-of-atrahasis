@@ -17,7 +17,7 @@ treating `npm install ark-of-atrahasis` as this release candidate.
 ## Public capability boundary
 
 The package has one ESM root export and no package subpaths. Its runtime exports
-are exactly:
+are exactly the sorted allowlist in `scripts/runtime-export-contract.mjs`:
 
 - the authority-bearing `createSafeDocument` factory;
 - `DEFAULT_SAFE_DOCUMENT_QUOTAS` and `DEFAULT_SAFE_DOCUMENT_RATES`;
@@ -131,13 +131,17 @@ event records, cleanups, decisions, and errors. JavaScript cannot prove the
 hardener's provenance: a test double outside tests does not satisfy the security
 precondition.
 
-The default strict profile does not create native `input`, `textarea`, or
-`select` controls because each has a live value that browser Autofill or an
-extension may populate and guest code could then read. Those factories fail
-before native node creation with `FORM_CONTROL_POLICY_REQUIRED`. A host that
-needs same-origin, non-credential form structure must explicitly acknowledge
-the weaker surface with the exact own-data option
-`formControlPolicy: { allowGuestReadableNonCredentialValues: true }`.
+The default strict profile does not create any element in the complete public
+form surface: `button`, `fieldset`, `img`, `input`, `label`, `legend`,
+`optgroup`, `option`, `output`, `select`, and `textarea`. This includes the
+HTML Standard's form-associated elements represented by the API, including the
+historically form-associated `img`, plus their public label/grouping helpers
+([WHATWG form categories](https://html.spec.whatwg.org/multipage/forms.html#categories)).
+Each factory consumes an operation call and then fails before native node
+creation with `FORM_CONTROL_POLICY_REQUIRED`. A host that needs same-origin,
+non-credential form structure must explicitly acknowledge the weaker surface
+with the exact own-data option
+`formControlPolicy: { allowNonCredentialFormElements: true }`.
 
 The policy and its grant are read once through own data descriptors. Accessors,
 non-records, extra keys, and values other than primitive `true` fail with
@@ -151,14 +155,17 @@ states and does not promise autofill or PII confidentiality.
   `ShadowRoot`. Wrappers are canonical and owner-branded. Cross-owner/forged
   wrappers fail. Each operation audits actual owner-document placement; raw-host
   reparent, adoption, or detach-then-external insertion revokes the affected
-  wrappers before a later guest mutation can touch external DOM.
+  wrappers before a later guest mutation can touch external DOM. Revocation
+  aborts wrapper-owned listeners and releases logical registry, namespace, and
+  live-resource accounting, but does not write the external node's attributes,
+  style, text, IDL state, or tree placement.
 - **Identifiers and forms:** logical IDs, names, IDREFs, and IDREF lists map to
-  per-document opaque physical tokens. The strict default denies the three
-  guest-readable native value factories (`input`, `textarea`, and `select`).
-  The explicit non-credential opt-in initializes them with structural non-form
-  defaults; buttons remain `type="button"`, and password, hidden, file,
-  submit, and reset states remain unavailable. Address, email, telephone, or
-  username-like values may still be autofilled and read by the guest despite
+  per-document opaque physical tokens. The strict default denies all eleven
+  public form-surface factories listed above. The explicit non-credential
+  opt-in initializes applicable controls with structural non-form defaults;
+  buttons remain `type="button"`, and password, hidden, file, submit, and reset
+  states remain unavailable. Address, email, telephone, or username-like
+  values may still be autofilled and read by the guest despite
   `autocomplete="off"`, opaque identifiers, `form === null`, and Shadow DOM.
   The HTML autofill standard permits user-agent override of author hints and
   does not make a ShadowRoot a no-autofill boundary
@@ -195,11 +202,13 @@ states and does not promise autofill or PII confidentiality.
   wrapper mutation, aborts wrapper-owned listeners, removes tracked URL/style
   and identifier effects, detaches owned nodes still in the mount, releases live
   accounting, and returns stable disposed/revoked errors on later operations.
-  Safe ordinary attributes, text, and IDL state are not all tracked resources;
-  if trusted raw DOM has already moved a node outside the mount, such inert state
-  may remain after revocation/disposal. The contract is removal of wrapper-owned
-  capabilities and tracked effects, not a promise to erase every ordinary DOM
-  field from an externally retained raw node.
+  Those physical cleanup writes apply only while the node remains owned. If the
+  trusted host has already moved a raw node outside the mount, revocation leaves
+  its complete physical DOM state unchanged—including tracked ID/name/IDREF,
+  style, and URL attributes as well as ordinary text/IDL state—while aborting
+  wrapper listeners and releasing logical/accounting state. Guest setters are
+  then revoked; an already-issued raw URL/request remains under host ownership
+  and is not cleared by the wrapper.
 - **Layout and host authority:** required paint containment clips guest paint
   and hit testing to the bounded host even when the host grants fixed,
   viewport-sized, high-z-index styles. The event fence is deliberately
@@ -228,7 +237,9 @@ safe integers. The defaults are:
 
 Resource accounting is released only after terminal cleanup succeeds.
 `operations` and `requestAttempts` are lifetime call ceilings and are not
-released; they are not rates.
+released; they are not rates. Strict form-policy denials count against the
+`operations` lifetime quota and fixed window before failing, so a denied
+factory cannot bypass either call budget; no native element is created.
 
 `SafeDocumentOptions.rates` independently applies fixed windows to the same two
 call categories. A supplied entry must be an own data record with a
@@ -274,7 +285,8 @@ termination semantics match the hostile workload.
 - Source and output target ES2022 plus standard DOM APIs.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
-- The standard three-engine projects prove strict default denial plus external
+- The standard three-engine projects prove full eleven-factory strict default
+  denial plus external
   host form/submission/named-access/label/radio isolation for the explicit
   non-credential profile. A separate `chromium-autofill` project uses the
   Chrome-for-Testing `chromium` channel and Chromium's address Autofill CDP
@@ -324,7 +336,7 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run test:browser` | Run boundary, SES, and unyielding-Worker termination tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
-| `npm run test:package` | Build and test a tarball from a pristine Git archive, including literal typecheck/browser execution of every executable packed README fence |
+| `npm run test:package` | Build and test a tarball from a pristine Git archive, including the exact root runtime-export namespace and literal typecheck/browser execution of every executable packed README fence |
 | `npm run check` | Run the complete CI gate |
 | `npm run pack:verified` | Test and write the exact tarball, CycloneDX SBOM, and SHA-256 checksums |
 

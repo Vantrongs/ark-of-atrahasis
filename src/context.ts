@@ -74,6 +74,20 @@ type ResourceQuota = Exclude<
   "nodes" | "listeners" | "operations" | "requestAttempts"
 >;
 
+type FormElementTag =
+  | "button"
+  | "fieldset"
+  | "img"
+  | "input"
+  | "label"
+  | "legend"
+  | "optgroup"
+  | "option"
+  | "output"
+  | "select"
+  | "textarea";
+type TerminalCleanup = "owned-physical" | "logical-only";
+
 const RESOURCE_QUOTA: Record<AccountedResource, ResourceQuota> = {
   text: "textBytes",
   attribute: "attributeBytes",
@@ -216,7 +230,7 @@ function resolveFormControlPolicy(supplied: SafeFormControlPolicy | undefined): 
   } catch {
     throw createSafeDOMError("ERR_INVALID_POLICY", policyOperation);
   }
-  const grantName = "allowGuestReadableNonCredentialValues";
+  const grantName = "allowNonCredentialFormElements";
   if (keys.length !== 1 || keys[0] !== grantName) {
     throw createSafeDOMError("ERR_INVALID_POLICY", policyOperation);
   }
@@ -377,9 +391,10 @@ export interface DocumentContext {
   ): Node;
   createElement<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K];
   createElement(tag: string): HTMLElement;
-  createGuestReadableFormControl(tag: "input", operation: string): HTMLInputElement;
-  createGuestReadableFormControl(tag: "textarea", operation: string): HTMLTextAreaElement;
-  createGuestReadableFormControl(tag: "select", operation: string): HTMLSelectElement;
+  createFormElement<Tag extends FormElementTag>(
+    tag: Tag,
+    operation: string,
+  ): HTMLElementTagNameMap[Tag];
   createTextNode(value: string): Text;
   documentOperation<T>(action: () => T): T;
   nodeOperation<T>(real: RealNode, action: () => T): T;
@@ -485,7 +500,7 @@ class DocumentContextImplementation implements DocumentContext {
   readonly #harden: Hardener;
   readonly #quotas: SafeDocumentQuotas;
   readonly #rates: SafeDocumentRates;
-  readonly #allowGuestReadableNonCredentialValues: boolean;
+  readonly #allowNonCredentialFormElements: boolean;
   readonly #rateWindows: Record<RateName, RateWindowState> = {
     operations: { count: 0, failed: false },
     requestAttempts: { count: 0, failed: false },
@@ -521,7 +536,7 @@ class DocumentContextImplementation implements DocumentContext {
     this.ownerRealm = view;
     this.#quotas = resolveQuotas(normalizedOptions.quotas);
     this.#rates = resolveRates(normalizedOptions.rates);
-    this.#allowGuestReadableNonCredentialValues = resolveFormControlPolicy(
+    this.#allowNonCredentialFormElements = resolveFormControlPolicy(
       normalizedOptions.formControlPolicy,
     );
     this.platform = createPlatformOps(ownerDocument, view);
@@ -568,22 +583,16 @@ class DocumentContextImplementation implements DocumentContext {
     return this.documentOperation(() => this.platform.createElement(tag));
   }
 
-  createGuestReadableFormControl(tag: "input", operation: string): HTMLInputElement;
-  createGuestReadableFormControl(tag: "textarea", operation: string): HTMLTextAreaElement;
-  createGuestReadableFormControl(tag: "select", operation: string): HTMLSelectElement;
-  createGuestReadableFormControl(
-    tag: "input" | "textarea" | "select",
+  createFormElement<Tag extends FormElementTag>(
+    tag: Tag,
     operation: string,
-  ): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
-    this.#prepareDocumentOperation();
-    if (!this.#allowGuestReadableNonCredentialValues) {
-      throw createSafeDOMError("FORM_CONTROL_POLICY_REQUIRED", operation);
-    }
-    this.#reserveCall("operations");
-    return this.platform.createElement(tag) as
-      | HTMLInputElement
-      | HTMLTextAreaElement
-      | HTMLSelectElement;
+  ): HTMLElementTagNameMap[Tag] {
+    return this.documentOperation(() => {
+      if (!this.#allowNonCredentialFormElements) {
+        throw createSafeDOMError("FORM_CONTROL_POLICY_REQUIRED", operation);
+      }
+      return this.platform.createElement(tag) as HTMLElementTagNameMap[Tag];
+    });
   }
 
   createTextNode(value: string): Text {
@@ -660,18 +669,15 @@ class DocumentContextImplementation implements DocumentContext {
   }
 
   documentOperation<T>(action: () => T): T {
-    this.#prepareDocumentOperation();
-    this.#reserveCall("operations");
-    return action();
-  }
-
-  #prepareDocumentOperation(): void {
     this.#assertDocumentActive();
+    this.#reserveCall("operations");
     this.#auditPlacements();
+    return action();
   }
 
   nodeOperation<T>(real: RealNode, action: () => T): T {
     this.#assertDocumentActive();
+    this.#reserveCall("operations");
     const entry = this.#requireEntryByReal(real);
     const compromised = this.#auditPlacements();
     if (compromised.has(entry)) {
@@ -681,7 +687,6 @@ class DocumentContextImplementation implements DocumentContext {
       );
     }
     this.#assertEntryActive(entry);
-    this.#reserveCall("operations");
     return action();
   }
 
@@ -1011,21 +1016,18 @@ class DocumentContextImplementation implements DocumentContext {
     const compromised = this.#auditPlacements();
     if (compromised.has(entry) || entry.state !== "active") return;
 
-    const subtree = this.registry.entries().filter((candidate) => (
-      candidate.state === "active" && this.#isWithin(candidate.real, real)
-    ));
-    for (const candidate of subtree) candidate.state = "disposed";
     this.#finalizeTerminalSubtree(entry, "disposed", "always");
   }
 
   disposeDocument(): void {
     if (this.#disposalComplete) return;
     if (!this.#disposed) this.#auditPlacements();
-    const trackedEntries = this.registry.entries();
+    const terminalEntries = this.registry.entries().map((entry) => ({
+      cleanup: this.#terminalCleanup(entry),
+      entry,
+      state: entry.state === "revoked" ? "revoked" as const : "disposed" as const,
+    }));
     this.#disposed = true;
-    for (const entry of trackedEntries) {
-      if (entry.state === "active") entry.state = "disposed";
-    }
 
     let firstFailure: SafeDOMError | undefined;
     try {
@@ -1035,10 +1037,9 @@ class DocumentContextImplementation implements DocumentContext {
         ? error
         : createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.dispose.eventBoundary");
     }
-    for (const entry of trackedEntries) {
+    for (const { cleanup, entry, state } of terminalEntries) {
       try {
-        const state = entry.state === "revoked" ? "revoked" : "disposed";
-        this.#finalizeEntry(entry, state, "from-root");
+        this.#finalizeEntry(entry, state, "from-root", cleanup);
       } catch (error) {
         firstFailure ??= isSafeDOMError(error)
           ? error
@@ -1287,14 +1288,31 @@ class DocumentContextImplementation implements DocumentContext {
 
   #auditPlacements(): Set<RegistryEntry> {
     const compromised = new Set<RegistryEntry>();
-    for (const entry of this.registry.entries()) {
-      if (entry.state === "active" && !this.#hasSafePlacement(entry)) compromised.add(entry);
+    const trackedEntries = this.registry.entries();
+    for (const entry of trackedEntries) {
+      if (entry.state === "active" && !this.#hasSafePlacement(entry)) {
+        compromised.add(entry);
+      }
     }
-    for (const entry of compromised) entry.state = "revoked";
+    const compromisedEntries = [...compromised];
+    // Snapshot the complete terminal worklist before revoking or untracking
+    // any ancestor. Descendants may already be revoked or disposed after an
+    // unproven rollback and still retain logical accounting.
+    const terminalEntries = trackedEntries.filter((entry) => (
+      !entry.accountingReleased
+      && compromisedEntries.some((rootEntry) => this.#isWithin(entry.real, rootEntry.real))
+    )).map((entry) => ({
+      cleanup: this.#terminalCleanup(entry),
+      entry,
+      state: entry.state === "active" ? "revoked" as const : entry.state,
+    }));
+    for (const { entry } of terminalEntries) {
+      if (entry.state === "active") entry.state = "revoked";
+    }
     let firstFailure: SafeDOMError | undefined;
-    for (const entry of compromised) {
+    for (const { cleanup, entry, state } of terminalEntries) {
       try {
-        this.#finalizeEntry(entry, "revoked");
+        this.#finalizeEntry(entry, state, "none", cleanup);
       } catch (error) {
         firstFailure ??= isSafeDOMError(error)
           ? error
@@ -1315,6 +1333,22 @@ class DocumentContextImplementation implements DocumentContext {
       if (parentEntry?.state !== "active") return false;
       current = parent;
     }
+  }
+
+  #hasOwnedPlacement(entry: RegistryEntry): boolean {
+    if (this.platform.ownerDocument(entry.real) !== this.ownerDocument) return false;
+    let current: Node = entry.real;
+    for (;;) {
+      const parent = this.platform.parentNode(current);
+      if (parent === null || parent === this.root) return true;
+      const parentEntry = this.registry.getEntryByReal(parent as RealNode);
+      if (parentEntry === undefined) return false;
+      current = parent;
+    }
+  }
+
+  #terminalCleanup(entry: RegistryEntry): TerminalCleanup {
+    return this.#hasOwnedPlacement(entry) ? "owned-physical" : "logical-only";
   }
 
   #isWithin(candidate: RealNode, ancestor: Node): boolean {
@@ -1377,13 +1411,19 @@ class DocumentContextImplementation implements DocumentContext {
   ): void {
     const pendingDescendants = this.registry.entries().filter((candidate) => (
       candidate !== rootEntry
-      && candidate.state === state
+      && !candidate.accountingReleased
       && this.#isWithin(candidate.real, rootEntry.real)
-    ));
+    )).map((candidate) => ({
+      cleanup: this.#terminalCleanup(candidate),
+      entry: candidate,
+      state: candidate.state === "active" ? state : candidate.state,
+    }));
+    const rootCleanup = this.#terminalCleanup(rootEntry);
+    const rootState = rootEntry.state === "active" ? state : rootEntry.state;
     let firstFailure: SafeDOMError | undefined;
     for (const candidate of pendingDescendants) {
       try {
-        this.#finalizeEntry(candidate, state);
+        this.#finalizeEntry(candidate.entry, candidate.state, "none", candidate.cleanup);
       } catch (error) {
         firstFailure ??= isSafeDOMError(error)
           ? error
@@ -1391,7 +1431,7 @@ class DocumentContextImplementation implements DocumentContext {
       }
     }
     try {
-      this.#finalizeEntry(rootEntry, state, rootDetach);
+      this.#finalizeEntry(rootEntry, rootState, rootDetach, rootCleanup);
     } catch (error) {
       firstFailure ??= isSafeDOMError(error)
         ? error
@@ -1403,21 +1443,30 @@ class DocumentContextImplementation implements DocumentContext {
   #finalizeEntry(
     entry: RegistryEntry,
     state: "disposed" | "revoked",
-    detach: "none" | "always" | "from-root" = "none",
+    detach: "none" | "always" | "from-root",
+    cleanup: TerminalCleanup,
   ): void {
     if (entry.accountingReleased) return;
     if (entry.state === "active") entry.state = state;
     else if (entry.state !== state) return;
 
-    // Capability revocation happens before cleanup, but live accounting is
-    // retained until every request/style/listener effect is physically gone.
+    // Capability revocation happens before cleanup. Physical cleanup is only
+    // allowed while the raw node remains in an owned placement. Once the host
+    // has moved it outside the mount, the raw bytes belong to the host: abort
+    // wrapper listeners and release logical state/accounting without writing
+    // attributes, style, text, IDL state, or tree placement.
     let firstFailure: SafeDOMError | undefined;
-    try {
-      this.#clearOwnedResources(entry);
-    } catch (error) {
-      firstFailure ??= isSafeDOMError(error)
-        ? error
-        : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.resources`);
+    if (cleanup === "owned-physical") {
+      try {
+        this.#clearOwnedResources(entry);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", `SafeElement.${state}.resources`);
+      }
+    } else {
+      entry.pendingEffects.clear();
+      entry.styleCleanupRequired = false;
     }
     for (const cleanup of [...entry.listeners]) {
       try {

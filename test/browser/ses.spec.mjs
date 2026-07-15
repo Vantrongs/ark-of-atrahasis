@@ -120,7 +120,7 @@ test("real browser SES hardens the completed public capability graph", async ({
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
       stylePolicy: { allowedProperties: ["color"] },
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const input = safeDocument.createInput();
     const guest = new Compartment({ safeDocument });
@@ -227,7 +227,7 @@ test("post-lockdown dispatches every advertised public event type through its fe
     document.body.append(host);
     const root = host.attachShadow({ mode: "closed" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const target = safeDocument.createInput();
     safeDocument.appendChild(target);
@@ -305,7 +305,7 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
       stylePolicy: { allowedProperties: ["color"] },
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
 
     const foreignHost = document.createElement("div");
@@ -396,9 +396,9 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     outside.append(rawInput);
     const placementError = guest.evaluate(`capture(() => input.getId())`);
     const terminalError = guest.evaluate(`capture(() => input.getValue())`);
-    const placementCleanup = {
-      idRemoved: !rawInput.hasAttribute("id"),
-      nameRemoved: !rawInput.hasAttribute("name"),
+    const placementRevocation = {
+      idPreserved: rawInput.hasAttribute("id"),
+      namePreserved: rawInput.hasAttribute("name"),
       stillOutside: outside.firstElementChild === rawInput,
     };
 
@@ -426,7 +426,7 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     outside.remove();
     foreignHost.remove();
     quotaHost.remove();
-    return { formIsolation, guestResult, placementCleanup, placementError, terminalError };
+    return { formIsolation, guestResult, placementError, placementRevocation, terminalError };
   });
 
   await flushBrowserWork(page);
@@ -450,7 +450,7 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
       topologyError: { code: "DOM_OPERATION_FAILED", frozen: true, noCause: true, noStack: true },
       urlDenied: { allowed: false, code: "ERR_URL_DENIED" },
     },
-    placementCleanup: { idRemoved: true, nameRemoved: true, stillOutside: true },
+    placementRevocation: { idPreserved: true, namePreserved: true, stillOutside: true },
     placementError: { code: "PLACEMENT_VIOLATION", frozen: true, noCause: true, noStack: true },
     terminalError: { code: "NODE_REVOKED", frozen: true, noCause: true, noStack: true },
   });
@@ -477,6 +477,7 @@ test("real browser SES enforces operation and request-attempt time windows", asy
       rates: { operations: { limit: 2, windowMs: 40 } },
     });
     const requestDocument = globalThis.arkPublicAPI.createSafeDocument(requestFixture.root, {
+      formControlPolicy: { allowNonCredentialFormElements: true },
       quotas: { operations: 20, requestAttempts: 20 },
       rates: {
         operations: { limit: 20, windowMs: 40 },
@@ -568,7 +569,7 @@ test("real browser SES snapshots every advertised event family and public field"
     document.body.append(host);
     const root = host.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const target = safeDocument.createInput();
     target.setId("event-target");

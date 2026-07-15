@@ -56,7 +56,9 @@ test("strict-root event fence blocks delegated click, hotkey, form, focus, and b
     });
 
     const root = host.attachShadow({ mode: "open" });
-    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+    const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowNonCredentialFormElements: true },
+    });
     const button = safeDocument.createButton();
     button.onBlur(() => { observed.internalBlur += 1; });
     button.onClick(() => { observed.internalClick += 1; });
@@ -136,7 +138,7 @@ test("denied image, link, media, and form actions leave the host and browser led
     }
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const image = safeDocument.createImage();
     const anchor = safeDocument.createAnchor();
@@ -285,9 +287,17 @@ test("strict default exposes no guest-readable native form-value sink", async ({
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
     const errors = [];
     for (const factory of [
+      () => safeDocument.createButton(),
       () => safeDocument.createInput(),
-      () => safeDocument.createTextarea(),
       () => safeDocument.createSelect(),
+      () => safeDocument.createOption(),
+      () => safeDocument.createOptgroup(),
+      () => safeDocument.createTextarea(),
+      () => safeDocument.createLabel(),
+      () => safeDocument.createFieldset(),
+      () => safeDocument.createLegend(),
+      () => safeDocument.createOutput(),
+      () => safeDocument.createImage(),
     ]) {
       try {
         factory();
@@ -302,18 +312,28 @@ test("strict default exposes no guest-readable native form-value sink", async ({
     return {
       errors,
       rootHTML: root.innerHTML,
-      valueSinkCount: root.querySelectorAll("input, textarea, select").length,
+      formSurfaceCount: root.querySelectorAll(
+        "button, fieldset, img, input, label, legend, optgroup, option, output, select, textarea",
+      ).length,
     };
   });
 
   expect(result).toEqual({
     errors: [
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createButton.policy" },
       { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createInput.policy" },
-      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createTextarea.policy" },
       { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createSelect.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createOption.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createOptgroup.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createTextarea.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createLabel.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createFieldset.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createLegend.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createOutput.policy" },
+      { code: "FORM_CONTROL_POLICY_REQUIRED", frozen: true, operation: "SafeDocument.createImage.policy" },
     ],
     rootHTML: "",
-    valueSinkCount: 0,
+    formSurfaceCount: 0,
   });
   expectNoUnapprovedActivity(browserLedger);
 });
@@ -363,7 +383,7 @@ test("opt-in non-credential form controls preserve host form and named access wi
 
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const input = safeDocument.createInput();
     const textarea = safeDocument.createTextarea();
@@ -418,7 +438,7 @@ test("opt-in non-credential form controls preserve host form and named access wi
     document.body.append(secondMount);
     const secondRoot = secondMount.attachShadow({ mode: "open" });
     const secondDocument = globalThis.arkPublicAPI.createSafeDocument(secondRoot, {
-      formControlPolicy: { allowGuestReadableNonCredentialValues: true },
+      formControlPolicy: { allowNonCredentialFormElements: true },
     });
     const secondInput = secondDocument.createInput();
     secondInput.setId("shared-key");
@@ -512,9 +532,9 @@ test("opt-in non-credential form controls preserve host form and named access wi
     } catch (error) {
       revokedCode = error?.code ?? null;
     }
-    const reparentCleanup = {
-      idRemoved: !physicalInput.hasAttribute("id"),
-      nameRemoved: !physicalInput.hasAttribute("name"),
+    const reparentRevocation = {
+      idPreserved: physicalInput.hasAttribute("id"),
+      namePreserved: physicalInput.hasAttribute("name"),
       revokedCode,
       lookupNull: safeDocument.getElement("shared-key") === null,
     };
@@ -536,7 +556,7 @@ test("opt-in non-credential form controls preserve host form and named access wi
       },
       autofillFacing,
       passwordError,
-      reparentCleanup,
+      reparentRevocation,
     };
   });
 
@@ -567,9 +587,9 @@ test("opt-in non-credential form controls preserve host form and named access wi
       code: "ERR_INVALID_ARGUMENT",
       operation: "SafeInputElement.setType.type",
     },
-    reparentCleanup: {
-      idRemoved: true,
-      nameRemoved: true,
+    reparentRevocation: {
+      idPreserved: true,
+      namePreserved: true,
       revokedCode: "NODE_REVOKED",
       lookupNull: true,
     },
@@ -588,6 +608,7 @@ test("committed shrunk CSS, URL, ID, and lifecycle corpus has no browser-side es
     if (!(mount instanceof HTMLElement)) throw new Error("host fixture is incomplete");
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowNonCredentialFormElements: true },
       stylePolicy: { allowedProperties: ["color", "cursor"] },
       urlPolicy: {
         baseURL: "http://127.0.0.1:4173/",
@@ -650,6 +671,7 @@ test("committed shrunk CSS, URL, ID, and lifecycle corpus has no browser-side es
     const external = document.createElement("section");
     document.body.append(external);
     external.append(rawImage);
+    const beforeExternalBytes = [...new TextEncoder().encode(rawImage.outerHTML)];
     let placementCode = null;
     try {
       image.setAlt("guest mutation");
@@ -664,17 +686,15 @@ test("committed shrunk CSS, URL, ID, and lifecycle corpus has no browser-side es
       rawIds,
       physicalIdWasOpaque,
       placementCode,
-      cleanup: {
-        id: rawImage.hasAttribute("id"),
-        src: rawImage.hasAttribute("src"),
-        style: rawImage.style.cssText,
-        logicalLookup: safeDocument.getElement("__proto__") === null,
-      },
+      beforeExternalBytes,
+      afterExternalBytes: [...new TextEncoder().encode(rawImage.outerHTML)],
+      logicalLookupNull: safeDocument.getElement("__proto__") === null,
     };
   });
   await flushBrowserWork(page);
 
-  expect(result).toEqual({
+  expect(result.afterExternalBytes).toEqual(result.beforeExternalBytes);
+  expect({ ...result, beforeExternalBytes: undefined, afterExternalBytes: undefined }).toEqual({
     approved: true,
     cssResults: [
       { accepted: false, preserved: "pointer" },
@@ -704,7 +724,9 @@ test("committed shrunk CSS, URL, ID, and lifecycle corpus has no browser-side es
     ],
     physicalIdWasOpaque: true,
     placementCode: "PLACEMENT_VIOLATION",
-    cleanup: { id: false, src: false, style: "", logicalLookup: true },
+    beforeExternalBytes: undefined,
+    afterExternalBytes: undefined,
+    logicalLookupNull: true,
   });
   expect(
     browserLedger.requests.filter(({ url }) => new URL(url).pathname === "/allowed/pixel.png"),
@@ -741,11 +763,54 @@ test("raw host reparent, adopt, and detach-to-external placement revoke before g
       if (kind === "adopt") foreignDocument.body.append(external);
       else document.body.append(external);
       const root = host.attachShadow({ mode: "open" });
-      const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root);
+      const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+        formControlPolicy: { allowNonCredentialFormElements: true },
+        stylePolicy: { allowedProperties: ["color"] },
+        urlPolicy: {
+          baseURL: "http://127.0.0.1:4173/",
+          sinks: {
+            "anchor.href": {
+              allowedOrigins: ["http://127.0.0.1:4173"],
+              allowedProtocols: ["http:"],
+            },
+          },
+        },
+      });
       const wrapper = safeDocument.createDiv();
+      const input = safeDocument.createInput();
+      const label = safeDocument.createLabel();
+      const cell = safeDocument.createTh();
+      const anchor = safeDocument.createAnchor();
+      wrapper.setData("ordinary", "guest-state");
+      wrapper.style.set("color", "red");
+      input.setId("owned-control");
+      input.setName("owned-name");
+      input.setAria("controls", "owned-control");
+      input.setValue("guest IDL state");
+      label.setFor("owned-control");
+      cell.setHeaders("owned-control");
+      anchor.setHref("/allowed/no-request");
+      let listenerCalls = 0;
+      input.onInput(() => { listenerCalls += 1; });
+      wrapper.appendChild(input);
+      wrapper.appendChild(label);
+      wrapper.appendChild(cell);
+      wrapper.appendChild(anchor);
       safeDocument.appendChild(wrapper);
       const raw = root.firstElementChild;
-      if (!(raw instanceof Element)) throw new Error("owned element was not mounted");
+      const rawInput = raw?.querySelector("input");
+      const rawLabel = raw?.querySelector("label");
+      const rawCell = raw?.querySelector("th");
+      const rawAnchor = raw?.querySelector("a");
+      if (
+        !(raw instanceof Element)
+        || !(rawInput instanceof HTMLInputElement)
+        || !(rawLabel instanceof HTMLLabelElement)
+        || !(rawCell instanceof HTMLTableCellElement)
+        || !(rawAnchor instanceof HTMLAnchorElement)
+      ) {
+        throw new Error("owned placement corpus was not mounted");
+      }
 
       if (kind === "reparent") external.append(raw);
       if (kind === "adopt") {
@@ -757,25 +822,64 @@ test("raw host reparent, adopt, and detach-to-external placement revoke before g
         external.append(raw);
       }
 
+      raw.setAttribute("data-host-state", "preserve");
+      rawInput.value = "host live IDL state";
+      const beforeMarkup = [...new TextEncoder().encode(raw.outerHTML)];
+      const beforeIDL = [...new TextEncoder().encode(JSON.stringify({
+        value: rawInput.value,
+        checked: rawInput.checked,
+      }))];
+
       const errors = [];
       try {
-        wrapper.setText("guest mutation");
+        wrapper.setTitle("guest mutation");
       } catch (error) {
         errors.push(error?.code);
       }
       try {
-        wrapper.setTitle("second mutation");
+        input.onInput(() => undefined);
       } catch (error) {
         errors.push(error?.code);
       }
+      const replacement = safeDocument.createDiv();
+      try {
+        wrapper.appendChild(replacement);
+      } catch (error) {
+        errors.push(error?.code);
+      }
+      try {
+        anchor.setHref("/allowed/revoked");
+      } catch (error) {
+        errors.push(error?.code);
+      }
+      rawInput.dispatchEvent(new rawInput.ownerDocument.defaultView.Event("input"));
+      const afterMarkup = [...new TextEncoder().encode(raw.outerHTML)];
+      const afterIDL = [...new TextEncoder().encode(JSON.stringify({
+        value: rawInput.value,
+        checked: rawInput.checked,
+      }))];
+      replacement.dispose();
 
       return {
         kind,
         errors,
         ownerIsForeign: raw.ownerDocument === foreignDocument,
-        text: raw.textContent,
-        title: raw.getAttribute("title"),
-        externalHTML: external.innerHTML,
+        beforeMarkup,
+        afterMarkup,
+        beforeIDL,
+        afterIDL,
+        listenerCalls,
+        logicalLookupNull: safeDocument.getElement("owned-control") === null,
+        trackedStatePresent: {
+          id: rawInput.hasAttribute("id"),
+          name: rawInput.hasAttribute("name"),
+          aria: rawInput.hasAttribute("aria-controls"),
+          labelFor: rawLabel.hasAttribute("for"),
+          headers: rawCell.hasAttribute("headers"),
+          href: rawAnchor.hasAttribute("href"),
+          style: raw.hasAttribute("style"),
+          hostState: raw.getAttribute("data-host-state"),
+        },
       };
     };
 
@@ -789,32 +893,38 @@ test("raw host reparent, adopt, and detach-to-external placement revoke before g
   await flushBrowserWork(page);
 
   expect(result.after).toBe(result.before);
-  expect(result.cases).toEqual([
-    {
-      kind: "reparent",
-      errors: ["PLACEMENT_VIOLATION", "NODE_REVOKED"],
-      ownerIsForeign: false,
-      text: "",
-      title: null,
-      externalHTML: "<div></div>",
+  expect(result.cases.map(({ kind, errors, ownerIsForeign, listenerCalls, logicalLookupNull, trackedStatePresent }) => ({
+    kind,
+    errors,
+    ownerIsForeign,
+    listenerCalls,
+    logicalLookupNull,
+    trackedStatePresent,
+  }))).toEqual([
+    ["reparent", false],
+    ["adopt", true],
+    ["detach-to-external", false],
+  ].map(([kind, ownerIsForeign]) => ({
+    kind,
+    errors: ["PLACEMENT_VIOLATION", "NODE_REVOKED", "NODE_REVOKED", "NODE_REVOKED"],
+    ownerIsForeign,
+    listenerCalls: 0,
+    logicalLookupNull: true,
+    trackedStatePresent: {
+      id: true,
+      name: true,
+      aria: true,
+      labelFor: true,
+      headers: true,
+      href: true,
+      style: true,
+      hostState: "preserve",
     },
-    {
-      kind: "adopt",
-      errors: ["PLACEMENT_VIOLATION", "NODE_REVOKED"],
-      ownerIsForeign: true,
-      text: "",
-      title: null,
-      externalHTML: "<div></div>",
-    },
-    {
-      kind: "detach-to-external",
-      errors: ["PLACEMENT_VIOLATION", "NODE_REVOKED"],
-      ownerIsForeign: false,
-      text: "",
-      title: null,
-      externalHTML: "<div></div>",
-    },
-  ]);
+  })));
+  for (const placementCase of result.cases) {
+    expect(placementCase.afterMarkup).toEqual(placementCase.beforeMarkup);
+    expect(placementCase.afterIDL).toEqual(placementCase.beforeIDL);
+  }
   expectNoUnapprovedActivity(browserLedger);
 });
 
@@ -829,6 +939,7 @@ test("host sink policy grants one image request while navigation and media remai
     if (!(mount instanceof HTMLElement)) throw new Error("host fixture is incomplete");
     const root = mount.attachShadow({ mode: "open" });
     const safeDocument = globalThis.arkPublicAPI.createSafeDocument(root, {
+      formControlPolicy: { allowNonCredentialFormElements: true },
       urlPolicy: {
         baseURL: "http://127.0.0.1:4173/",
         sinks: {

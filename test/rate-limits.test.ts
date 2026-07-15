@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { isSafeDOMError } from "../src/index.ts";
+import { createSafeDocument as createStrictSafeDocument, isSafeDOMError } from "../src/index.ts";
 import { createContainedRoot } from "./support/contained-root.ts";
 import { createControlledOwnerClock } from "./support/controlled-owner-clock.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
+import { testHarden } from "./support/harden.ts";
 
 function expectSafeRateError(action: () => unknown, operation: string): void {
   let caught: unknown;
@@ -28,6 +29,75 @@ afterEach(() => {
 });
 
 describe("fixed-window operation rates", () => {
+  it("counts strict policy denials at exact N/N+1 and resets at the window boundary", () => {
+    const clock = createControlledOwnerClock(0);
+    try {
+      const safeDocument = createStrictSafeDocument(clock.root, {
+        harden: testHarden,
+        quotas: { operations: 10 },
+        rates: { operations: { limit: 2, windowMs: 1_000 } },
+      });
+
+      expect(() => safeDocument.createInput()).toThrowError(expect.objectContaining({
+        code: "FORM_CONTROL_POLICY_REQUIRED",
+      }));
+      expect(() => safeDocument.createTextarea()).toThrowError(expect.objectContaining({
+        code: "FORM_CONTROL_POLICY_REQUIRED",
+      }));
+      expectSafeRateError(
+        () => safeDocument.createSelect(),
+        "SafeDocument rate exceeded: operations",
+      );
+
+      clock.set(999.999);
+      expectSafeRateError(
+        () => safeDocument.createInput(),
+        "SafeDocument rate exceeded: operations",
+      );
+      clock.set(1_000);
+      expect(() => safeDocument.createInput()).toThrowError(expect.objectContaining({
+        code: "FORM_CONTROL_POLICY_REQUIRED",
+      }));
+      expect(() => safeDocument.createTextarea()).toThrowError(expect.objectContaining({
+        code: "FORM_CONTROL_POLICY_REQUIRED",
+      }));
+      expectSafeRateError(
+        () => safeDocument.createSelect(),
+        "SafeDocument rate exceeded: operations",
+      );
+      expect(clock.root.childNodes).toHaveLength(0);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it("fails closed when the owner clock rolls back during a strict policy denial", () => {
+    const clock = createControlledOwnerClock(10);
+    try {
+      const safeDocument = createStrictSafeDocument(clock.root, {
+        harden: testHarden,
+        rates: { operations: { limit: 3, windowMs: 100 } },
+      });
+      expect(() => safeDocument.createInput()).toThrowError(expect.objectContaining({
+        code: "FORM_CONTROL_POLICY_REQUIRED",
+      }));
+
+      clock.set(9);
+      expectSafeRateError(
+        () => safeDocument.createTextarea(),
+        "SafeDocument rate clock failed: operations",
+      );
+      clock.set(11);
+      expectSafeRateError(
+        () => safeDocument.createSelect(),
+        "SafeDocument rate clock failed: operations",
+      );
+      expect(clock.root.childNodes).toHaveLength(0);
+    } finally {
+      clock.restore();
+    }
+  });
+
   it("allows exact N operations, rejects N+1, and resets at the exact window boundary", () => {
     const clock = createControlledOwnerClock(50);
     try {

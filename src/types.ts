@@ -224,14 +224,9 @@ export interface SafeDocumentRates {
   readonly requestAttempts: SafeDocumentRateLimit;
 }
 
-/**
- * Explicit host acknowledgement for same-origin, guest-readable form values.
- *
- * This grant does not provide autofill, PII, or credential confidentiality and
- * does not widen the public input/button type vocabularies.
- */
+/** Explicit host acknowledgement for the complete non-credential form surface. */
 export interface SafeFormControlPolicy {
-  readonly allowGuestReadableNonCredentialValues: true;
+  readonly allowNonCredentialFormElements: true;
 }
 
 export interface SafeDocumentOptions {
@@ -248,8 +243,8 @@ export interface SafeDocumentOptions {
   /** Missing policy means every inline style property is denied. */
   readonly stylePolicy?: SafeStylePolicy;
   /**
-   * Missing policy denies factories whose native value may be autofilled and
-   * read by guest code: input, textarea, and select.
+   * Missing policy denies every public form-surface factory, including the
+   * historically form-associated image element.
    */
   readonly formControlPolicy?: SafeFormControlPolicy;
 }

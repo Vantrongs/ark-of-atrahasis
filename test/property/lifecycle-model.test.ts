@@ -46,6 +46,7 @@ interface ModelNode {
   readonly requests: Map<string, string>;
   readonly listeners: Set<number>;
   accountingReleased: boolean;
+  externalSnapshot?: string;
 }
 
 interface ListenerModel {
@@ -194,6 +195,7 @@ function createReal(quotas: SafeDocumentQuotas): Real {
     safeDocument = createSafeDocument(root, {
       harden: testHarden,
       quotas,
+      formControlPolicy: { allowNonCredentialFormElements: true },
       urlPolicy: MODEL_URL_POLICY,
       stylePolicy: { allowedProperties: ["color", "opacity"] },
     });
@@ -429,6 +431,10 @@ function assertInvariants(model: Model, real: Real): void {
                 : model.physicalTokens.get(node.reference),
           );
         }
+      } else if (node.state === "revoked" && node.externalSnapshot !== undefined) {
+        expect(raw.outerHTML, `external markup changed for node ${node.id}`).toBe(
+          node.externalSnapshot,
+        );
       } else {
         expect(raw.style.cssText, `style survived termination for node ${node.id}`).toBe("");
         expect(raw.hasAttribute("src"), `request survived termination for node ${node.id}`).toBe(false);
@@ -619,6 +625,16 @@ function executeDetach(model: Model, real: Real, spec: Extract<CommandSpec, { ty
 function executeRawMove(model: Model, real: Real, spec: Extract<CommandSpec, { type: "raw-move" }>): void {
   const node = requireNode(model, spec.nodeId);
   const raw = requireRaw(real, spec.nodeId);
+  const priorStateCode = nodeStateCode(node);
+  if (model.documentState === "active" && priorStateCode === undefined) {
+    for (const id of subtreeIds(model, spec.nodeId)) {
+      const subtreeNode = requireNode(model, id);
+      const subtreeRaw = requireRaw(real, id);
+      if (subtreeNode.state === "active" && subtreeRaw instanceof Element) {
+        subtreeNode.externalSnapshot = subtreeRaw.outerHTML;
+      }
+    }
+  }
   if (spec.mode === "reparent") real.external.append(raw);
   else {
     real.foreignDocument.adoptNode(raw);
@@ -626,7 +642,6 @@ function executeRawMove(model: Model, real: Real, spec: Extract<CommandSpec, { t
   }
   node.placement = spec.mode === "reparent" ? { kind: "external" } : { kind: "foreign-document" };
 
-  const priorStateCode = nodeStateCode(node);
   const expectedCode = model.documentState === "disposed"
     ? "DOCUMENT_DISPOSED"
     : priorStateCode ?? "PLACEMENT_VIOLATION";
