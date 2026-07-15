@@ -108,18 +108,21 @@ runtime ownership and policy checks.
 - Source and output target ES2022 plus standard DOM APIs.
 - The package is intended for modern browsers. The current release does not yet
   claim a qualified cross-browser security matrix.
-- Declarations and the packed artifact are checked with the pinned development
-  TypeScript version. TypeScript is not a consumer peer dependency.
+- Packed declarations are checked with TypeScript 5.0.4 (the documented
+  consumer minimum) and 7.0.2 (the pinned current compiler); source is checked
+  with the build compiler and TypeScript 7. The build uses pinned TypeScript
+  6.0.3 because tsup 8's declaration bundler is not compatible with the
+  TypeScript 7 compiler API. TypeScript is not a consumer peer dependency.
 - Node can import the module for packaging/tooling checks, but DOM operations
   require a browser-like host.
 
 ## Development
 
-Use the package manager version recorded in `packageManager` and install exactly
-the lockfile:
+Development and release automation use Node.js 22.22.2 and npm 11.18.0. Install
+exactly `npm-shrinkwrap.json` without dependency lifecycle scripts:
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run check
 ```
 
@@ -130,9 +133,10 @@ Available gates:
 | `npm run lint` | Lint TypeScript and test/release scripts |
 | `npm run typecheck` | Strict source typecheck without emitting |
 | `npm test` | Build from source and run runtime smoke tests |
+| `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run test:package` | Test a tarball built from a pristine Git archive |
 | `npm run check` | Run the complete CI gate |
-| `npm run pack:verified` | Write an already-tested tarball to `.artifacts/` |
+| `npm run pack:verified` | Write the tested tarball, SBOM, and checksums |
 
 Browser, SES-compartment, policy-fuzzing, and cross-realm security suites belong
 with the strict API. Adding placeholder green tests for the insecure 0.3.1

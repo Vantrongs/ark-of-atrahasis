@@ -14,22 +14,27 @@
     }
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
+    "npm-shrinkwrap.json",
+    "scripts",
     "src",
+    "test",
     "tsconfig.json",
     "tsup.config.ts",
     "RELEASING.md"
   ],
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && node node_modules/typescript-current/bin/tsc --noEmit -p tsconfig.json",
     "lint": "biome lint src test scripts tsup.config.ts",
-    "test": "npm run build && node --test test/api.test.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",
     "pack:verified": "node scripts/test-package.mjs --output .artifacts",
-    "check": "npm run lint && npm run typecheck && npm test && npm run test:package",
+    "audit": "npm audit --audit-level=low",
+    "check": "npm run lint && npm run typecheck && npm test && npm run audit && npm run test:package",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "node scripts/reject-direct-publish.mjs"
   },
   "keywords": [
     "sandbox",
@@ -47,17 +52,24 @@
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Vantrongs/ark-of-atrahasis.git"
+    "url": "git+https://github.com/notwindstone/ark-of-atrahasis.git"
   },
-  "homepage": "https://github.com/Vantrongs/ark-of-atrahasis#readme",
+  "homepage": "https://github.com/notwindstone/ark-of-atrahasis#readme",
   "bugs": {
-    "url": "https://github.com/Vantrongs/ark-of-atrahasis/issues"
+    "url": "https://github.com/notwindstone/ark-of-atrahasis/issues"
   },
-  "packageManager": "npm@11.9.0",
+  "packageManager": "npm@11.18.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
     "tsup": "8.5.1",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "typescript-current": "npm:typescript@7.0.2",
+    "typescript-min": "npm:typescript@5.0.4"
   },
   "overrides": {
     "esbuild": "0.27.2"
