@@ -77,7 +77,7 @@ interface ReferenceSlot {
 
 const TOKEN_BYTES = 24;
 const TOKEN_ATTEMPTS = 8;
-export const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
+const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
 const ASCII_WHITESPACE_RUN = /[\t\n\f\r ]+/;
 
@@ -95,6 +95,49 @@ function quotaDeltas(
 
 function increment<RecordType>(map: Map<RecordType, number>, record: RecordType): void {
   map.set(record, (map.get(record) ?? 0) + 1);
+}
+
+interface LocalNamespaceRecord {
+  readonly physical: string;
+  readonly localBytes: number;
+}
+
+function unchangedMutation(
+  attributeName: "id" | "name",
+  physicalValue: string,
+): PreparedNamespaceMutation {
+  return {
+    attributeName,
+    physicalValue,
+    reserveTokens: [],
+    failureQuotaReservations: quotaDeltas(0, 0, 0),
+    quotaDeltas: quotaDeltas(0, 0, 0),
+    commit: () => undefined,
+  };
+}
+
+function mappedMutation(
+  attributeName: "id" | "name",
+  previous: LocalNamespaceRecord | undefined,
+  next: LocalNamespaceRecord | undefined,
+  created: boolean,
+  removesPrevious: boolean,
+  commit: () => void,
+): PreparedNamespaceMutation {
+  const createdBytes = created ? next?.localBytes ?? 0 : 0;
+  const removedBytes = removesPrevious ? previous?.localBytes ?? 0 : 0;
+  return {
+    attributeName,
+    physicalValue: next?.physical ?? null,
+    reserveTokens: created && next !== undefined ? [next.physical] : [],
+    failureQuotaReservations: quotaDeltas(created ? 1 : 0, 0, createdBytes),
+    quotaDeltas: quotaDeltas(
+      (created ? 1 : 0) - (removesPrevious ? 1 : 0),
+      0,
+      createdBytes - removedBytes,
+    ),
+    commit,
+  };
 }
 
 class IdentifierNamespaceImplementation implements IdentifierNamespace {
@@ -125,14 +168,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
   prepareId(entry: RegistryEntry, local: string): PreparedNamespaceMutation {
     const previous = this.#idByEntry.get(entry);
     if (previous?.local === local) {
-      return {
-        attributeName: "id",
-        physicalValue: previous.physical,
-        reserveTokens: [],
-        failureQuotaReservations: quotaDeltas(0, 0, 0),
-        quotaDeltas: quotaDeltas(0, 0, 0),
-        commit: () => undefined,
-      };
+      return unchangedMutation("id", previous.physical);
     }
 
     let next = local === "" ? undefined : this.#idByLocal.get(local);
@@ -152,21 +188,14 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     }
 
     const removesPrevious = previous !== undefined && previous.references === 0;
-    const mappingDelta = (created ? 1 : 0) - (removesPrevious ? 1 : 0);
-    const byteDelta = (created ? next?.localBytes ?? 0 : 0)
-      - (removesPrevious ? previous?.localBytes ?? 0 : 0);
     const preparedNext = next;
-    return {
-      attributeName: "id",
-      physicalValue: preparedNext?.physical ?? null,
-      reserveTokens: created && preparedNext !== undefined ? [preparedNext.physical] : [],
-      failureQuotaReservations: quotaDeltas(
-        created ? 1 : 0,
-        0,
-        created ? preparedNext?.localBytes ?? 0 : 0,
-      ),
-      quotaDeltas: quotaDeltas(mappingDelta, 0, byteDelta),
-      commit: () => {
+    return mappedMutation(
+      "id",
+      previous,
+      preparedNext,
+      created,
+      removesPrevious,
+      () => {
         if (created && preparedNext !== undefined) this.#installIdRecord(preparedNext);
         if (previous !== undefined) {
           this.#idByEntry.delete(entry);
@@ -181,7 +210,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
           this.#refreshEntryTracking(entry);
         }
       },
-    };
+    );
   }
 
   readId(entry: RegistryEntry): string {
@@ -191,14 +220,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
   prepareName(entry: RegistryEntry, local: string): PreparedNamespaceMutation {
     const previous = this.#nameByEntry.get(entry);
     if (previous?.local === local) {
-      return {
-        attributeName: "name",
-        physicalValue: previous.physical,
-        reserveTokens: [],
-        failureQuotaReservations: quotaDeltas(0, 0, 0),
-        quotaDeltas: quotaDeltas(0, 0, 0),
-        commit: () => undefined,
-      };
+      return unchangedMutation("name", previous.physical);
     }
 
     let next = local === "" ? undefined : this.#nameByLocal.get(local);
@@ -214,21 +236,14 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     }
 
     const removesPrevious = previous?.users === 1;
-    const mappingDelta = (created ? 1 : 0) - (removesPrevious ? 1 : 0);
-    const byteDelta = (created ? next?.localBytes ?? 0 : 0)
-      - (removesPrevious ? previous?.localBytes ?? 0 : 0);
     const preparedNext = next;
-    return {
-      attributeName: "name",
-      physicalValue: preparedNext?.physical ?? null,
-      reserveTokens: created && preparedNext !== undefined ? [preparedNext.physical] : [],
-      failureQuotaReservations: quotaDeltas(
-        created ? 1 : 0,
-        0,
-        created ? preparedNext?.localBytes ?? 0 : 0,
-      ),
-      quotaDeltas: quotaDeltas(mappingDelta, 0, byteDelta),
-      commit: () => {
+    return mappedMutation(
+      "name",
+      previous,
+      preparedNext,
+      created,
+      removesPrevious,
+      () => {
         if (created && preparedNext !== undefined) this.#installNameRecord(preparedNext);
         if (previous !== undefined) {
           this.#nameByEntry.delete(entry);
@@ -243,7 +258,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
           this.#refreshEntryTracking(entry);
         }
       },
-    };
+    );
   }
 
   prepareReference(

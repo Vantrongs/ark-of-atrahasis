@@ -1,5 +1,6 @@
 import type {
   SafeEvent,
+  SafeEventBase,
   SafeEventKind,
   SafeEventTargetSnapshot,
   SafeFocusEvent,
@@ -12,24 +13,16 @@ import type {
   SafeTouchSnapshot,
 } from "./types.ts";
 import type { EventTargetResolution } from "./identifier-namespace.ts";
+import {
+  captureRealmPlatformFunctions,
+  getOwnPlatformFunction,
+  getRealmConstructorPrototype,
+  type PlatformFunction,
+} from "./realm-reflection.ts";
 
-type PlatformFunction = (...arguments_: unknown[]) => unknown;
-type GetterRecord = Readonly<Record<string, PlatformFunction | undefined>>;
-
-interface EventAccessors {
-  readonly event: GetterRecord;
-  readonly eventMethods: GetterRecord;
-  readonly keyboard: GetterRecord;
-  readonly mouse: GetterRecord;
-  readonly pointer: GetterRecord;
-  readonly touchEvent: GetterRecord;
-  readonly focus: GetterRecord;
-  readonly input: GetterRecord;
-  readonly inputElement: GetterRecord;
-  readonly controlValueGetters: readonly (PlatformFunction | undefined)[];
-  readonly touchList: GetterRecord;
-  readonly touch: GetterRecord;
-}
+type GetterRecord<Name extends string> = Readonly<
+  Record<Name, PlatformFunction | undefined>
+>;
 
 export interface SafeEventDispatch<Event extends SafeEvent = SafeEvent> {
   readonly event: Event;
@@ -49,69 +42,54 @@ type Completer = <Value>(value: Value) => Value;
 const apply = Reflect.apply;
 const EMPTY_TOUCHES: readonly SafeTouchSnapshot[] = Object.freeze([]);
 
-function realmPrototype(realm: unknown, name: string): unknown {
-  if ((typeof realm !== "object" && typeof realm !== "function") || realm === null) return undefined;
-  try {
-    const realmConstructor = (realm as Record<string, unknown>)[name];
-    if (typeof realmConstructor !== "function") return undefined;
-    return (realmConstructor as { prototype?: unknown }).prototype;
-  } catch {
-    return undefined;
-  }
+function captureGetters<const Names extends readonly string[]>(
+  realm: unknown,
+  constructorName: string,
+  names: Names,
+): GetterRecord<Names[number]> {
+  return captureRealmPlatformFunctions(realm, constructorName, names, "getter");
 }
 
-function ownGetter(prototype: unknown, name: string): PlatformFunction | undefined {
-  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
-    return undefined;
-  }
-  try {
-    const getter = Object.getOwnPropertyDescriptor(prototype, name)?.get;
-    return typeof getter === "function" ? getter as PlatformFunction : undefined;
-  } catch {
-    return undefined;
-  }
+function captureMethods<const Names extends readonly string[]>(
+  realm: unknown,
+  constructorName: string,
+  names: Names,
+): GetterRecord<Names[number]> {
+  return captureRealmPlatformFunctions(realm, constructorName, names, "method");
 }
 
-function ownMethod(prototype: unknown, name: string): PlatformFunction | undefined {
-  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
-    return undefined;
-  }
-  try {
-    const method = Object.getOwnPropertyDescriptor(prototype, name)?.value;
-    return typeof method === "function" ? method as PlatformFunction : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function captureGetters(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
-  const prototype = realmPrototype(realm, constructorName);
-  const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
-    string,
-    PlatformFunction | undefined
-  >;
-  for (const name of names) result[name] = ownGetter(prototype, name);
-  return Object.freeze(result);
-}
-
-function captureMethods(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
-  const prototype = realmPrototype(realm, constructorName);
-  const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
-    string,
-    PlatformFunction | undefined
-  >;
-  for (const name of names) result[name] = ownMethod(prototype, name);
-  return Object.freeze(result);
-}
-
-function captureEventAccessors(realm: unknown): EventAccessors {
+function captureEventAccessors(realm: unknown) {
   const valueGetters = [
-    ownGetter(realmPrototype(realm, "HTMLInputElement"), "value"),
-    ownGetter(realmPrototype(realm, "HTMLTextAreaElement"), "value"),
-    ownGetter(realmPrototype(realm, "HTMLSelectElement"), "value"),
-    ownGetter(realmPrototype(realm, "HTMLButtonElement"), "value"),
-    ownGetter(realmPrototype(realm, "HTMLOptionElement"), "value"),
-    ownGetter(realmPrototype(realm, "HTMLOutputElement"), "value"),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLInputElement"),
+      "value",
+      "getter",
+    ),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLTextAreaElement"),
+      "value",
+      "getter",
+    ),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLSelectElement"),
+      "value",
+      "getter",
+    ),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLButtonElement"),
+      "value",
+      "getter",
+    ),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLOptionElement"),
+      "value",
+      "getter",
+    ),
+    getOwnPlatformFunction(
+      getRealmConstructorPrototype(realm, "HTMLOutputElement"),
+      "value",
+      "getter",
+    ),
   ];
 
   return Object.freeze({
@@ -187,8 +165,16 @@ function captureEventAccessors(realm: unknown): EventAccessors {
     inputElement: captureGetters(realm, "HTMLInputElement", ["checked"]),
     controlValueGetters: Object.freeze(valueGetters),
     touchList: Object.freeze({
-      length: ownGetter(realmPrototype(realm, "TouchList"), "length"),
-      item: ownMethod(realmPrototype(realm, "TouchList"), "item"),
+      length: getOwnPlatformFunction(
+        getRealmConstructorPrototype(realm, "TouchList"),
+        "length",
+        "getter",
+      ),
+      item: getOwnPlatformFunction(
+        getRealmConstructorPrototype(realm, "TouchList"),
+        "item",
+        "method",
+      ),
     }),
     touch: captureGetters(realm, "Touch", [
       "identifier",
@@ -206,6 +192,8 @@ function captureEventAccessors(realm: unknown): EventAccessors {
     ]),
   });
 }
+
+type EventAccessors = ReturnType<typeof captureEventAccessors>;
 
 function readUnknown(getter: PlatformFunction | undefined, receiver: unknown): unknown {
   if (getter === undefined) return undefined;
@@ -274,7 +262,10 @@ function snapshotRelatedTarget(
     : snapshotTarget(target, accessors, resolveTarget);
 }
 
-function modifiers(getters: GetterRecord, nativeEvent: Event): SafeModifierSnapshotRecord {
+function modifiers(
+  getters: GetterRecord<"ctrlKey" | "altKey" | "shiftKey" | "metaKey">,
+  nativeEvent: Event,
+): SafeModifierSnapshotRecord {
   return {
     ctrlKey: readBoolean(getters.ctrlKey, nativeEvent),
     altKey: readBoolean(getters.altKey, nativeEvent),
@@ -338,21 +329,7 @@ function baseSnapshot(
   };
 }
 
-interface SafeEventBaseRecord {
-  readonly kind: SafeEventKind;
-  readonly type: string;
-  readonly bubbles: boolean;
-  readonly cancelable: boolean;
-  readonly composed: boolean;
-  readonly defaultPrevented: boolean;
-  readonly eventPhase: number;
-  readonly timeStamp: number;
-  readonly target: SafeEventTargetSnapshot;
-  readonly currentTarget: SafeEventTargetSnapshot;
-  readonly preventDefault: () => boolean;
-  readonly stopPropagation: () => boolean;
-  readonly stopImmediatePropagation: () => boolean;
-}
+type SafeEventBaseRecord = SafeEventBase<SafeEventKind>;
 
 function mouseFields(
   nativeEvent: Event,

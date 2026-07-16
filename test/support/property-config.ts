@@ -2,10 +2,16 @@ import { expect } from "vitest";
 import type { Parameters } from "fast-check";
 import { isSafeDOMError, type SafeDOMErrorCode } from "../../src/index.ts";
 
-export const DEFAULT_PROPERTY_SEED = 0x0a7a4515;
+const DEFAULT_PROPERTY_SEED = 0x0a7a4515;
+export const propertyEnvironment: NodeJS.ProcessEnv & {
+  FC_COMMAND_REPLAY_PATH?: string;
+  FC_END_ON_FAILURE?: string;
+  FC_PATH?: string;
+  FC_SEED?: string;
+} = process.env;
 
 function readSeed(): number {
-  const configured = process.env.FC_SEED;
+  const configured = propertyEnvironment.FC_SEED;
   if (configured === undefined || configured === "") return DEFAULT_PROPERTY_SEED;
   const parsed = Number(configured);
   if (!Number.isInteger(parsed) || parsed < -0x8000_0000 || parsed > 0xffff_ffff) {
@@ -15,18 +21,18 @@ function readSeed(): number {
 }
 
 export function propertyParameters<T>(numRuns: number): Parameters<T> {
-  const path = process.env.FC_PATH ?? "";
+  const path = propertyEnvironment.FC_PATH ?? "";
   return {
     seed: readSeed(),
     path,
     numRuns,
     verbose: true,
-    ...(process.env.FC_END_ON_FAILURE === "1" ? { endOnFailure: true } : {}),
+    ...(propertyEnvironment.FC_END_ON_FAILURE === "1" ? { endOnFailure: true } : {}),
   };
 }
 
 export function commandReplayPath(): string | undefined {
-  const replayPath = process.env.FC_COMMAND_REPLAY_PATH;
+  const replayPath = propertyEnvironment.FC_COMMAND_REPLAY_PATH;
   return replayPath === undefined || replayPath === "" ? undefined : replayPath;
 }
 

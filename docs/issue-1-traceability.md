@@ -227,7 +227,7 @@ non-goal.
 | 10 | **Satisfied** | `src/types.ts` and `src/vocabularies.ts` encode readonly snapshots, literal vocabularies, specialized lookup, list overloads, container/void shapes, language/direction/translation states, media-track kinds, and semantic bidi isolation. Runtime/API/type tests require preferred factory/casing names and exact deprecated same-function aliases, uniformly detached list helpers, reusable descendants after `setText()`, localized `optgroup`/`track` operations, and password rejection; package tests compile declarations with TypeScript 5.0.4 and 7.0.2. | `createStyle` is gone; void/table shapes are corrected. `time`, `data`, `output`, and `col` remain deliberately shallow rather than gaining speculative authority or being removed incompatibly. |
 | 11 | **Satisfied with dedicated-Worker termination scope** | `DEFAULT_SAFE_DOCUMENT_QUOTAS` fixes all eleven lifetime limits. `DEFAULT_SAFE_DOCUMENT_RATES` adds real fixed owner-clock windows for operations and request attempts; strict policy denials reserve the operation rate/lifetime call before policy evaluation. Unit/property/API/three-engine SES tests exercise denial metering, exact `N`/`N+1`/reset, hostile configuration/clock failure, generated traces, lifetime separation, and stable errors. Browser Worker tests prove termination of a real unyielding shared-memory loop in all three engines; Node proves an unyielding CPU/Atomics loop terminates. | No arbitrary same-agent browser-page main-thread preemption claim. Lifetime `operations`/`requestAttempts` ceilings remain cumulative while their independent rate windows reset. |
 | 12 | **Satisfied under the layered exact gate** | In Chromium, Firefox, and WebKit, boundary and containment suites exercise browser geometry/network/form/realm and delegated-event behavior; the real-Compartment SES matrix dispatches all 21 catalog-derived event types, covers every public event family/field plus rates and browser-relevant criteria 1–12, and the Worker suite proves unyielding-loop termination. The separate Chromium-channel project executes the non-portable CDP address-Autofill witness exactly once. TypeScript, property/model, Node SES, release, and packed-artifact invariants remain exact dedicated gates because they are not browser-runtime contracts. | Standard Firefox/WebKit/Chromium projects do not run a Chromium-only protocol test. WebKit uses the documented trusted-touch substitute because scripted `Touch` construction is rejected. No portable password-store or same-agent page-main-thread preemption coverage is claimed. |
-| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive, builds twice byte-identically, installs the exact tarball offline, rejects any missing or extra root runtime export against `scripts/runtime-export-contract.mjs`, checks declarations, executes every literal executable packed README fence in TypeScript 5.0.4/7.0.2 and Chromium, rebuilds packed `dist`, and emits the tested tarball, checksum manifest, and a strict-schema-validated CycloneDX 1.7 SBOM. The SBOM generation is itself byte-reproducible, removes time/random fields, records the pinned npm/normalizer/validator toolchain, and binds the root component SHA-256 to the exact tested tarball. Release metadata requires empty `[Unreleased]` before the dated target heading; shared `scripts/stable-version.mjs`, recovery tests, and the workflow enforce one stable version contract plus exact interrupted-publication recovery and artifact handoff. | No repository evidence here claims a `0.4.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. |
+| 13 | **Repository-complete; publication outstanding** | `scripts/test-package.mjs` creates a pristine Git archive under exact Node 26.5.0/npm 11.18.0, builds rolling-ESNext output twice byte-identically, installs the exact tarball offline, rejects any missing or extra root runtime export against `scripts/runtime-export-contract.mjs`, checks declarations, executes every literal executable packed README fence in TypeScript 5.0.4/7.0.2 and Chromium, rebuilds packed `dist`, and emits the tested tarball, checksum manifest, and a strict-schema-validated CycloneDX 1.7 SBOM. The SBOM generation is itself byte-reproducible, removes time/random fields, records the pinned npm/normalizer/validator toolchain, and binds the root component SHA-256 to the exact tested tarball. Release metadata requires empty `[Unreleased]` before the dated target heading; shared `scripts/stable-version.mjs`, recovery tests, and the workflow enforce one stable version contract plus exact interrupted-publication recovery and artifact handoff. `.github/workflows/security.yml` adds SHA-pinned all-scope dependency review at `low` severity plus frozen scheduled/push/manual advisory and npm signature/attestation checks. | No repository evidence here claims a `0.5.0` tag/publication. npm trusted publisher, protected environment/tag policy, signed-tag trust, immutable releases, and actual publish/provenance evidence are external owner actions. Dependency graph, Dependabot, CodeQL, and required-check settings must still be configured in each receiving repository. |
 
 The repository strict runtime/type/browser contract in criteria 1–12 is covered
 by committed gates. Criterion 13 still requires external owner configuration,
@@ -251,7 +251,8 @@ release is externally complete.
   with limits 0–8 and up to 24 commands, deterministic command-family traces,
   external raw-markup preservation after logical revocation, and runner/command
   replay paths.
-- `scripts/test-package.mjs` requires Node 22.22.2 and the npm 11.18.0 CLI via
+- `scripts/test-package.mjs` requires Node 26.5.0 from the packed
+  `.node-version` and the npm 11.18.0 CLI via
   `npm_execpath`, a clean committed tree, no pre-existing `dist/` in the Git
   archive, exact manifest/lock pins and registry integrity records, relative
   source maps with embedded content, two byte-identical prepack tarballs, an
@@ -261,6 +262,15 @@ release is externally complete.
   byte-for-byte `dist` rebuild. `scripts/readme-examples.mjs` recognizes CommonMark backtick/tilde,
   length, and indentation forms and structurally rejects unclosed or unsupported
   executable fences instead of maintaining a copied example.
+- `.node-version` is the single checkout-job runtime source and is handed from
+  the credential-free release job to the no-checkout publish job. The same
+  source, strict TS 6/7 configs, isolated tsdown tooling config, and Fallow
+  3.6.0 report configuration are present in the verified source package. Native
+  `Temporal.PlainDate` rejects calendar-impossible changelog headings without
+  adding a browser dependency; pinned WebKit 26.5 still lacks `Temporal`.
+  The packed source now includes the check/release/security workflow fixtures
+  consumed by the release tests, preserving the same Fallow graph outside the
+  worktree.
 - `scripts/sbom.mjs` upgrades npm 11.18.0's locked-dependency graph to the
   current CycloneDX 1.7 JSON envelope, removes UUID/time nondeterminism, binds
   the root component to the exact tarball SHA-256, and requires two consecutive
@@ -336,8 +346,17 @@ integrated into PR #7 and then completed by these merged PRs to
   `2360347`; and
 - [#24](https://github.com/Vantrongs/ark-of-atrahasis/pull/24) final contract
   closure for external raw preservation, form-surface policy metering, and the
-  exact runtime namespace (this PR; its mutable head SHA is intentionally not
-  embedded here).
+  exact runtime namespace, merged at `d685401`;
+- [#25](https://github.com/Vantrongs/ark-of-atrahasis/pull/25) i18n and
+  deterministic CycloneDX 1.7 completion, merged at `57a40bf`; and
+- [#26](https://github.com/Vantrongs/ark-of-atrahasis/pull/26) deprecated
+  dependency-path removal, merged at `f538767`.
+
+Fork umbrella [#27](https://github.com/Vantrongs/ark-of-atrahasis/pull/27)
+collects the complete issue branch for review against `main` and adds the
+continuous dependency, registry-signature, Dependabot, and CodeQL security
+layer. Its mutable head and CI results remain live PR evidence rather than
+being copied into this document.
 
 Exact check counts, artifact digests, and links are intentionally not copied
 into this mutable document. They belong to the CI check for the immutable head

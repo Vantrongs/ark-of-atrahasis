@@ -83,6 +83,7 @@ import type {
 	TableScopeValue,
 	TextareaWrapValue,
 	TrackKind,
+	URLConstructor,
 	URLPolicyEngine,
 	URLSink,
 } from "ark-of-atrahasis";
@@ -390,6 +391,7 @@ const styleAllows: StylePolicyEngine["allows"] = stylePolicyEngine.allows;
 declare const urlPolicyEngine: URLPolicyEngine;
 const decideURL: (sink: URLSink, input: unknown) => SafeURLDecision =
 	urlPolicyEngine.decide;
+const urlConstructor: URLConstructor = URL;
 const urlDecision: SafeURLDecision = decideURL(
 	"anchor.href",
 	"https://example.test/",
@@ -536,5 +538,6 @@ void styleGet;
 void styleSet;
 void styleRemove;
 void styleAllows;
+void urlConstructor;
 void inspectEvent;
 void eventKinds;

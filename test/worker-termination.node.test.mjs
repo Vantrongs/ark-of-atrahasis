@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { expect, test } from "vitest";
 
@@ -21,8 +22,8 @@ test("Node terminates an unyielding isolated Worker after proven shared progress
     expect(started).toBe("started");
 
     const observed = new Set();
-    const deadline = Date.now() + 2_000;
-    while (observed.size < 2 && Date.now() < deadline) {
+    const deadline = performance.now() + 2_000;
+    while (observed.size < 2 && performance.now() < deadline) {
       observed.add(Atomics.load(progress, 0));
       await new Promise((resolve) => setTimeout(resolve, 5));
     }

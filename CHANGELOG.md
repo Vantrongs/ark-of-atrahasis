@@ -7,6 +7,78 @@ the tag, npm package, or GitHub release exists.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-16
+
+This is the ESNext/Node 26 modernization release candidate. As of 2026-07-16,
+npm `latest` remains `0.3.1`; no `v0.5.0` tag, npm publication, or immutable
+GitHub release is claimed here.
+
+### Changed
+
+- Raised the exact build, test, package, and release runtime from Node.js
+  22.22.2 to Node.js 26.5.0 and the published engine floor to `>=26.5.0`.
+- Moved TypeScript libraries, emitted syntax, declaration fixtures, packed
+  README examples, and bundled output from fixed ES2022 to rolling `ESNext`, which
+  is the TypeScript 6/7 spelling for the TC39-next surface because neither
+  compiler accepts a literal `ES2026` target.
+- Upgraded Biome from 2.5.3 to 2.5.4 and Vitest from 3.2.7 to 4.1.10, and added
+  Fallow 3.6.0 report-mode dead-code/cycle/duplication analysis to the complete
+  gate. The report wrapper verifies the signed platform binary and accepts exit
+  1 only for well-formed findings. Its entry roots name only directly invoked
+  scripts, and no redundant self-ignore can hide future dependency drift.
+  Ark-specific rule severities and clone parameters are now explicit, and a
+  repository-local tooling skill preserves the same evidence-first workflow
+  without copying MS-specific monorepo or framework settings. Entry exports are
+  analyzed with exact externally loaded config-default exceptions.
+- Replaced unmaintained tsup 8.5.1 with its recommended successor, tsdown
+  0.22.8 and Rolldown 1.1.5. This removes tsup's TypeScript 6 DTS failure caused
+  by its unconditional deprecated `baseUrl` injection while preserving the
+  exact `dist/index.js`, declaration, and source-map artifact contract. The
+  verified package now also requires and reproducibly rebuilds the declaration
+  map referenced by `dist/index.d.ts`. The obsolete direct `esbuild` override
+  is gone: the resolved tsdown/Rolldown/Vite graph does not install esbuild, and
+  Vite declares it only as an optional peer.
+- Included the check and release workflow fixtures in the source package so its
+  packed release tests and Fallow graph retain the same workflow inputs as the
+  repository instead of reporting unresolved repo-only imports.
+- Added a least-privilege security workflow with SHA-pinned dependency review
+  that blocks new advisories at `low` severity in every dependency scope. Push,
+  weekly, and manual runs use the exact frozen Node/npm toolchain to repeat the
+  vulnerability audit and verify npm registry signatures plus attestations.
+  The workflow fixture and its exact contract are included in the reproducible
+  source package and structurally validated in release tests with pinned,
+  dependency-free YAML 2.9.0.
+- Addressed the initial CodeQL extended findings in the npm registry preflight
+  by requiring the immutable package identity and reconstructing a canonical
+  stable version before either value can enter the fixed registry request.
+- Updated the check workflow to the pinned `actions/checkout` 7.0.0 revision
+  already used by the release workflow, and made the exact `.node-version` the
+  single Node source for checkout jobs and the no-checkout publish handoff.
+- Strengthened the TypeScript 6/7 source and property configurations with exact
+  optional properties, checked indexed access, index-signature syntax,
+  side-effect-import checks, explicit returns/overrides, erasable syntax, and
+  unreachable/unused-label errors. Production declarations now run with full
+  library checking; only the isolated tsdown config skips its uninstalled
+  optional-feature peer declarations.
+- Began native Temporal adoption in Node-only release tooling: changelog dates
+  are parsed as `Temporal.PlainDate`, rejecting calendar-impossible headings.
+  Browser runtime code stays Temporal-free because Playwright 1.61.1's WebKit
+  26.5 still has no `Temporal` global. The Node Worker termination test now
+  measures its deadline with monotonic `performance.now()` rather than wall
+  time.
+- Retained npm 11.18.0 because npm 12.0.1 no longer accepts the publishable
+  `npm-shrinkwrap.json` for `npm ci` or `npm sbom`; the reproducible install,
+  exact dependency inventory, and CycloneDX 1.7 gates therefore stay on the
+  latest compatible npm line.
+- Retained TypeScript 5.0.4 as the minimum consumer declaration fixture and
+  TypeScript 6.0.3 for release declaration generation while continuing to
+  check the source and packed declarations with current TypeScript 7.0.2.
+- Resolved the confirmed Fallow hygiene/design backlog by removing unnecessary
+  internal export edges, naming the public `URLConstructor` type, sharing the
+  hostile-realm reflection and event-record contracts, consolidating exact
+  identifier quota bookkeeping while preserving distinct ID/name commits, and
+  sharing date-part validation between date and local-date-time parsing.
+
 ## [0.4.0] - 2026-07-15
 
 This is the repository release candidate. As of 2026-07-15, npm `latest` remains
@@ -147,6 +219,7 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 - Restored `createListItem()`, `createTerm()`, and `createDescription()` on
   `SafeDocument`.
 
-[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.3.1...v0.4.0
 [0.3.1]: https://www.npmjs.com/package/ark-of-atrahasis/v/0.3.1

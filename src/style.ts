@@ -3,8 +3,10 @@ import type { DocumentContext, StyleMutationResult } from "./context.ts";
 import { canonicalizeStyleProperty } from "./style-policy.ts";
 import { scanCSSNetworkRisk } from "./validation.ts";
 import { requireString } from "./attribute-contract.ts";
-
-type PlatformFunction = (...arguments_: unknown[]) => unknown;
+import {
+  getOwnPlatformFunction,
+  getRealmConstructorPrototype,
+} from "./realm-reflection.ts";
 
 interface StyleState {
   readonly value: string;
@@ -13,41 +15,6 @@ interface StyleState {
 }
 
 const apply = Reflect.apply;
-
-function getOwnGetter(prototype: unknown, property: string): PlatformFunction | undefined {
-  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
-    return undefined;
-  }
-  try {
-    const getter = Object.getOwnPropertyDescriptor(prototype, property)?.get;
-    return typeof getter === "function" ? getter as PlatformFunction : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function getOwnMethod(prototype: unknown, property: string): PlatformFunction | undefined {
-  if ((typeof prototype !== "object" && typeof prototype !== "function") || prototype === null) {
-    return undefined;
-  }
-  try {
-    const method = Object.getOwnPropertyDescriptor(prototype, property)?.value;
-    return typeof method === "function" ? method as PlatformFunction : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function getRealmConstructorPrototype(realm: unknown, name: string): unknown {
-  if ((typeof realm !== "object" && typeof realm !== "function") || realm === null) return undefined;
-  try {
-    const realmConstructor = (realm as Record<string, unknown>)[name];
-    if (typeof realmConstructor !== "function") return undefined;
-    return (realmConstructor as { prototype?: unknown }).prototype;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * An explicit, reflection-coherent style facade. It never exposes cssText,
@@ -62,11 +29,19 @@ export function createSafeStyle(
 
   const htmlElementPrototype = getRealmConstructorPrototype(realm, "HTMLElement");
   const declarationPrototype = getRealmConstructorPrototype(realm, "CSSStyleDeclaration");
-  const styleGetter = getOwnGetter(htmlElementPrototype, "style");
-  const getPropertyValue = getOwnMethod(declarationPrototype, "getPropertyValue");
-  const getPropertyPriority = getOwnMethod(declarationPrototype, "getPropertyPriority");
-  const setProperty = getOwnMethod(declarationPrototype, "setProperty");
-  const removeProperty = getOwnMethod(declarationPrototype, "removeProperty");
+  const styleGetter = getOwnPlatformFunction(htmlElementPrototype, "style", "getter");
+  const getPropertyValue = getOwnPlatformFunction(
+    declarationPrototype,
+    "getPropertyValue",
+    "method",
+  );
+  const getPropertyPriority = getOwnPlatformFunction(
+    declarationPrototype,
+    "getPropertyPriority",
+    "method",
+  );
+  const setProperty = getOwnPlatformFunction(declarationPrototype, "setProperty", "method");
+  const removeProperty = getOwnPlatformFunction(declarationPrototype, "removeProperty", "method");
 
   let declaration: unknown;
   if (styleGetter !== undefined) {

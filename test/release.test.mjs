@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parse } from "yaml";
 
 import {
   assertNpmProvenance,
@@ -49,6 +50,11 @@ const checkWorkflow = readFileSync(
   new URL("../.github/workflows/check.yml", import.meta.url),
   "utf8",
 );
+const securityWorkflowSource = readFileSync(
+  new URL("../.github/workflows/security.yml", import.meta.url),
+  "utf8",
+);
+const securityWorkflow = parse(securityWorkflowSource);
 const releaseRecoverySource = readFileSync(
   new URL("../scripts/release-recovery.mjs", import.meta.url),
   "utf8",
@@ -57,11 +63,32 @@ const packageGateSource = readFileSync(
   new URL("../scripts/test-package.mjs", import.meta.url),
   "utf8",
 );
+const fallowReportSource = readFileSync(
+  new URL("../scripts/fallow-report.mjs", import.meta.url),
+  "utf8",
+);
 const sourceManifest = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const sourceShrinkwrap = JSON.parse(
   readFileSync(new URL("../npm-shrinkwrap.json", import.meta.url), "utf8"),
+);
+const sourceNodeVersion = readFileSync(
+  new URL("../.node-version", import.meta.url),
+  "utf8",
+).trim();
+const sourceTsconfig = JSON.parse(
+  readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"),
+);
+const sourceToolingTsconfig = JSON.parse(
+  readFileSync(new URL("../tsconfig.tooling.json", import.meta.url), "utf8"),
+);
+const sourceFallowConfig = JSON.parse(
+  readFileSync(new URL("../.fallowrc.json", import.meta.url), "utf8"),
+);
+const sourceTsdownConfig = readFileSync(
+  new URL("../tsdown.config.ts", import.meta.url),
+  "utf8",
 );
 
 test("release SBOM normalization is reproducible, current, and bound to the tarball", () => {
@@ -535,6 +562,23 @@ function createProvenanceAudit(fixture) {
 test("release metadata binds the tag to a dated changelog version", () => {
   assert.doesNotThrow(() => verifyReleaseMetadata({ changelog, manifest, tag: "v0.4.0" }));
   assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog,
+        manifest: { ...manifest, name: "unexpected-package" },
+        tag: "v0.4.0",
+      }),
+    /package name must remain ark-of-atrahasis/u,
+  );
+  assert.throws(
+    () => verifyReleaseMetadata({
+      changelog: "## [Unreleased]\n\n## [0.4.0] - 2026-02-29\n",
+      manifest,
+      tag: "v0.4.0",
+    }),
+    /invalid ISO date/u,
+  );
+  assert.throws(
     () => verifyReleaseMetadata({ changelog, manifest, tag: "v0.4.1" }),
     /does not match package version/u,
   );
@@ -597,7 +641,7 @@ test("release metadata binds the tag to a dated changelog version", () => {
   );
 });
 
-test("release metadata in the repository is synchronized at 0.4.0", () => {
+test("release metadata in the repository is synchronized at 0.5.0", () => {
   const sourceManifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   );
@@ -606,14 +650,14 @@ test("release metadata in the repository is synchronized at 0.4.0", () => {
   );
   const sourceChangelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 
-  assert.equal(sourceManifest.version, "0.4.0");
+  assert.equal(sourceManifest.version, "0.5.0");
   assert.equal(shrinkwrap.version, sourceManifest.version);
   assert.equal(shrinkwrap.packages[""].version, sourceManifest.version);
   assert.doesNotThrow(() =>
     verifyReleaseMetadata({
       changelog: sourceChangelog,
       manifest: sourceManifest,
-      tag: "v0.4.0",
+      tag: "v0.5.0",
     }),
   );
 });
@@ -724,6 +768,21 @@ test("annotated release tags must resolve to the checked-out HEAD", () => {
 });
 
 test("registry preflight distinguishes a new version from a recoverable publication", async () => {
+  let rejectedRequestCount = 0;
+  const rejectedRequest = async () => {
+    rejectedRequestCount += 1;
+    return { status: 500 };
+  };
+  await assert.rejects(
+    inspectVersionForRelease("unexpected-package", manifest.version, rejectedRequest),
+    /package name must remain ark-of-atrahasis/u,
+  );
+  await assert.rejects(
+    inspectVersionForRelease(manifest.name, "0.4.0/private-data", rejectedRequest),
+    /must be a stable release version/u,
+  );
+  assert.equal(rejectedRequestCount, 0);
+
   const unpublishedNextVersion = async (url) =>
     url.endsWith("/0.4.0")
       ? { status: 404 }
@@ -1121,7 +1180,17 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
     releaseWorkflow,
     /concurrency:\n {2}group: release\n {2}cancel-in-progress: false/u,
   );
-  assert.equal((releaseWorkflow.match(/node-version: 22\.22\.2/gu) ?? []).length, 2);
+  assert.equal((releaseWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
+  assert.equal(
+    (releaseWorkflow.match(/node-version: \$\{\{ needs\.verify\.outputs\.node-version \}\}/gu) ?? [])
+      .length,
+    1,
+  );
+  assert.match(
+    releaseWorkflow,
+    /outputs:\n {6}node-version: \$\{\{ steps\.toolchain\.outputs\.node-version \}\}/u,
+  );
+  assert.doesNotMatch(releaseWorkflow, /node-version: 26\.5\.0/u);
   assert.equal((releaseWorkflow.match(/npm@11\.18\.0/gu) ?? []).length, 2);
   assert.equal((releaseWorkflow.match(/package-manager-cache: false/gu) ?? []).length, 2);
   assert.doesNotMatch(releaseWorkflow, /^\s+cache:/mu);
@@ -1144,6 +1213,208 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
     new Set(actionUses.map(([, action]) => action)),
     new Set(expectedActionPins.keys()),
   );
+});
+
+test("security workflow blocks vulnerable dependency changes and audits registry trust", () => {
+  assert.deepEqual(Object.keys(securityWorkflow).sort(), [
+    "concurrency",
+    "jobs",
+    "name",
+    "on",
+    "permissions",
+  ]);
+  assert.equal(securityWorkflow.name, "security");
+  assert.deepEqual(
+    securityWorkflow.on,
+    {
+      pull_request: null,
+      push: { branches: ["main"] },
+      schedule: [{ cron: "0 6 * * 1" }],
+      workflow_dispatch: null,
+    },
+  );
+  assert.deepEqual(securityWorkflow.permissions, { contents: "read" });
+  assert.deepEqual(securityWorkflow.concurrency, {
+    group: "security-$" + "{{ github.event.pull_request.number || github.ref }}",
+    "cancel-in-progress": true,
+  });
+  assert.deepEqual(Object.keys(securityWorkflow.jobs).sort(), [
+    "dependency-review",
+    "registry-audit",
+  ]);
+
+  const dependencyReview = securityWorkflow.jobs["dependency-review"];
+  assert.deepEqual(Object.keys(dependencyReview).sort(), [
+    "if",
+    "runs-on",
+    "steps",
+    "timeout-minutes",
+  ]);
+  assert.equal(dependencyReview.if, "github.event_name == 'pull_request'");
+  assert.equal(dependencyReview["runs-on"], "ubuntu-24.04");
+  assert.equal(dependencyReview["timeout-minutes"], 10);
+  assert.deepEqual(dependencyReview.steps, [
+    {
+      name: "Check out the pull request",
+      uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+      with: { "persist-credentials": false },
+    },
+    {
+      name: "Review dependency changes",
+      uses: "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+      with: {
+        "fail-on-severity": "low",
+        "fail-on-scopes": "runtime, development, unknown",
+        "license-check": false,
+        "show-patched-versions": true,
+        "vulnerability-check": true,
+      },
+    },
+  ]);
+
+  const registryAudit = securityWorkflow.jobs["registry-audit"];
+  assert.deepEqual(Object.keys(registryAudit).sort(), [
+    "if",
+    "runs-on",
+    "steps",
+    "timeout-minutes",
+  ]);
+  assert.equal(registryAudit.if, "github.event_name != 'pull_request'");
+  assert.equal(registryAudit["runs-on"], "ubuntu-24.04");
+  assert.equal(registryAudit["timeout-minutes"], 15);
+  assert.deepEqual(
+    registryAudit.steps.map((step) => step.name),
+    [
+      "Check out the audited commit",
+      "Set up Node.js",
+      "Install the pinned npm CLI without replacing the runner npm",
+      "Verify toolchain versions",
+      "Install frozen dependencies",
+      "Reject known vulnerabilities",
+      "Verify registry signatures and attestations",
+    ],
+  );
+  const registrySteps = Object.fromEntries(registryAudit.steps.map((step) => [step.name, step]));
+  assert.deepEqual(registrySteps["Check out the audited commit"], {
+    name: "Check out the audited commit",
+    uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+    with: { "persist-credentials": false },
+  });
+  assert.deepEqual(registrySteps["Set up Node.js"], {
+    name: "Set up Node.js",
+    uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    with: {
+      "node-version-file": ".node-version",
+      "package-manager-cache": false,
+    },
+  });
+  assert.equal(
+    registrySteps["Install the pinned npm CLI without replacing the runner npm"].run.trim(),
+    [
+      'mkdir -p "$RUNNER_TEMP/npm-cli"',
+      'npm install --prefix "$RUNNER_TEMP/npm-cli" npm@11.18.0 \\',
+      "  --ignore-scripts --no-audit --no-fund --no-package-lock",
+      'echo "NPM_CLI=$RUNNER_TEMP/npm-cli/node_modules/npm/bin/npm-cli.js" >> "$GITHUB_ENV"',
+      'echo "$RUNNER_TEMP/npm-cli/node_modules/.bin" >> "$GITHUB_PATH"',
+    ].join("\n"),
+  );
+  assert.equal(
+    registrySteps["Verify toolchain versions"].run.trim(),
+    [
+      'test "$(node --version)" = "v$(tr -d \'\\r\\n\' < .node-version)"',
+      'test "$(node "$NPM_CLI" --version)" = "11.18.0"',
+    ].join("\n"),
+  );
+  assert.equal(
+    registrySteps["Install frozen dependencies"].run,
+    'node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund',
+  );
+  assert.equal(
+    registrySteps["Reject known vulnerabilities"].run,
+    'node "$NPM_CLI" audit --audit-level=low',
+  );
+  assert.equal(
+    registrySteps["Verify registry signatures and attestations"].run,
+    'node "$NPM_CLI" audit signatures --include-attestations',
+  );
+});
+
+test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistently", () => {
+  assert.equal(sourceNodeVersion, "26.5.0");
+  assert.equal(sourceManifest.engines?.node, `>=${sourceNodeVersion}`);
+  assert.equal(sourceManifest.packageManager, "npm@11.18.0");
+  assert.equal(sourceManifest.devDependencies?.["@biomejs/biome"], "2.5.4");
+  assert.equal(sourceManifest.devDependencies?.fallow, "3.6.0");
+  assert.equal(sourceManifest.devDependencies?.tsdown, "0.22.8");
+  assert.equal(sourceManifest.devDependencies?.vitest, "4.1.10");
+  assert.deepEqual(sourceTsconfig.compilerOptions?.lib, ["ESNext", "DOM"]);
+  assert.equal(sourceTsconfig.compilerOptions?.target, "ESNext");
+  assert.equal(sourceTsconfig.compilerOptions?.strict, true);
+  assert.equal(sourceTsconfig.compilerOptions?.exactOptionalPropertyTypes, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noUncheckedIndexedAccess, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noPropertyAccessFromIndexSignature, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noImplicitReturns, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noImplicitOverride, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noUncheckedSideEffectImports, true);
+  assert.equal(sourceTsconfig.compilerOptions?.erasableSyntaxOnly, true);
+  assert.equal(sourceTsconfig.compilerOptions?.skipLibCheck, false);
+  assert.equal(sourceToolingTsconfig.compilerOptions?.skipLibCheck, true);
+  assert.deepEqual(sourceToolingTsconfig.include, ["tsdown.config.ts"]);
+  assert.deepEqual(sourceFallowConfig.entry?.slice(0, 6), [
+    "src/index.ts",
+    "scripts/fallow-report.mjs",
+    "scripts/reject-direct-publish.mjs",
+    "scripts/release-recovery.mjs",
+    "scripts/test-package.mjs",
+    "scripts/verify-release.mjs",
+  ]);
+  assert.ok(!sourceFallowConfig.ignoreDependencies?.includes("fallow"));
+  assert.equal(sourceFallowConfig.rules?.["private-type-leaks"], "warn");
+  assert.match(sourceManifest.scripts?.check ?? "", /npm run analyze/u);
+  assert.equal(sourceManifest.scripts?.audit, "npm audit --audit-level=low");
+  assert.equal(
+    sourceManifest.scripts?.["audit:signatures"],
+    "npm audit signatures --include-attestations",
+  );
+  assert.ok(sourceManifest.files?.includes(".github/workflows/security.yml"));
+  assert.match(fallowReportSource, /\["dead-code", "--format", "compact"\]/u);
+  assert.match(fallowReportSource, /\["dupes", "--format", "compact"\]/u);
+  assert.match(fallowReportSource, /runFallow\(\["--version"\]\)/u);
+  assert.match(fallowReportSource, /\^verified: yes/u);
+  assert.match(fallowReportSource, /hasCompactFinding/u);
+  assert.match(fallowReportSource, /result\.status === 1 && result\.stderr === ""/u);
+  assert.doesNotMatch(fallowReportSource, /\|\| true|health/u);
+  assert.match(sourceTsdownConfig, /dts: \{ sourcemap: true \}/u);
+  assert.match(sourceTsdownConfig, /target: "esnext"/u);
+  assert.match(sourceTsdownConfig, /outExtensions: \(\) => \(\{ js: "\.js", dts: "\.d\.ts" \}\)/u);
+  assert.match(packageGateSource, /const allowedGitHubEntries = new Set/u);
+  assert.match(packageGateSource, /entry\.startsWith\("package\/\.git\/"\)/u);
+  assert.match(
+    packageGateSource,
+    /entry\.startsWith\("package\/\.github\/"\) && !allowedGitHubEntries\.has\(entry\)/u,
+  );
+  assert.equal((checkWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
+  assert.equal((releaseWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
+  assert.match(
+    checkWorkflow,
+    /actions\/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\.0\.0/u,
+  );
+});
+
+test("Node 26.5 exposes the checked ES2026 surface and records its runtime limit", () => {
+  assert.equal(process.version, "v26.5.0");
+  assert.equal(typeof Temporal, "object");
+  assert.equal(typeof Map.prototype.getOrInsert, "function");
+  assert.equal(typeof Map.prototype.getOrInsertComputed, "function");
+  assert.equal(typeof Iterator.concat, "function");
+  assert.equal(typeof Uint8Array.fromBase64, "function");
+  assert.equal(typeof Uint8Array.prototype.toBase64, "function");
+  assert.equal(typeof Error.isError, "function");
+  assert.equal(
+    JSON.parse("9007199254740993", (_key, _value, context) => context?.source),
+    "9007199254740993",
+  );
+  assert.equal(typeof Math.sumPrecise, "undefined");
 });
 
 test("release workflow isolates write and OIDC authority in the protected job", () => {

@@ -3,16 +3,17 @@
 This document records reproducible packaging and source-correspondence measures.
 It is an engineering checklist, not legal advice or a legal conclusion.
 
-The repository contains the `0.4.0` release candidate. A live observation on
-2026-07-15 found npm `latest` at `0.3.1`, `0.4.0` absent, and no `v0.4.0` tag or
-GitHub release. That observation is historical and must be repeated before an
+The repository contains the `0.5.0` ESNext/Node 26 release candidate. A live
+observation on 2026-07-16 found npm `latest` at `0.3.1`, both `0.4.0` and `0.5.0`
+absent, and no corresponding version tag or GitHub release. That observation is
+historical and must be repeated before an
 owner release. The repository evidence below is code-complete release
 engineering, not evidence that external owner controls are configured or that a
 release has occurred.
 
 ## Prerequisites
 
-- Use Node.js 22.22.2 and the exact npm version in
+- Use Node.js 26.5.0 from `.node-version` and the exact npm version in
   `package.json#packageManager`.
 - Start from the release commit with a clean index and working tree.
 - Use `npm ci --ignore-scripts --no-audit --no-fund`; never refresh dependencies
@@ -74,6 +75,25 @@ placements with the same alias/version collapse to one component. The root
 component digest is the exact-artifact link.
 These local artifacts are for inspection; do not publish from the worktree or a
 developer credential.
+
+The dated changelog heading is parsed by Node 26's native
+`Temporal.PlainDate`, so a canonical `YYYY-MM-DD` spelling must also represent a
+real ISO calendar date. Browser-runtime code deliberately does not depend on
+Temporal while the pinned WebKit matrix lacks it.
+
+The complete gate also runs pinned Fallow 3.6.0 in report mode for dead code,
+cycles, private-type leaks, and duplication. It first requires a successful
+signed-binary verification; exit 1 is advisory only when compact findings are
+present and stderr is empty. Missing/tampered binaries and configuration or
+runtime failures remain fatal. Review the report rather than auto-applying
+removals.
+
+npm 11.18.0 is the newest supported release-tool line for this contract. npm
+12.0.1 requires `package-lock.json` for both `npm ci` and lock-only SBOM
+generation and rejects `npm-shrinkwrap.json`; adopting it would remove the
+publishable frozen build graph that the tarball, inventory-equality, recovery,
+and source-correspondence gates verify. Revisit npm 12 only with an explicit
+replacement for those guarantees.
 
 ## Immutable artifact handoff
 
@@ -174,6 +194,9 @@ Before enabling releases, repository/package owners must:
   signed-tag policy where the hosting plan supports it;
 - require review from `.github/CODEOWNERS` for workflow, manifest, lockfile, and
   release-script changes;
+- enable the dependency graph, Dependabot vulnerability alerts and security
+  updates, and CodeQL default setup with the extended query suite; require the
+  `security` dependency-review result for pull requests alongside `check`;
 - enable immutable GitHub releases, retain Actions logs/artifacts according to
   the release retention policy, and record the source commit, tag, checksum,
   SBOM, and npm provenance; and
@@ -206,7 +229,8 @@ The npm tarball includes:
 - the TypeScript preferred form for modification under `src/`;
 - `package.json`, the publishable `npm-shrinkwrap.json`, exact development
   dependency resolutions and integrity digests;
-- the tests, release/build scripts, `tsconfig.json`, and `tsup.config.ts`;
+- the tests, CI/release workflows, release/build scripts, `tsconfig.json`, and
+  `tsdown.config.ts`;
 - this release procedure, README, and GPLv3 license; and
 - generated ESM, declarations, and source maps under `dist/`.
 

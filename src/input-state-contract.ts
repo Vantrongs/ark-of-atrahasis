@@ -51,7 +51,7 @@ export function getInputType(
   return current;
 }
 
-export function requireInputState(
+function requireInputState(
   platform: PlatformOps,
   element: HTMLInputElement,
   applicable: readonly InputType[],
@@ -236,17 +236,25 @@ function parseMonth(value: string, operation: string): ParsedRangeValue {
 
 function parseDate(value: string, operation: string): ParsedRangeValue {
   const match = HTML_DATE.exec(value);
-  const yearText = match?.[1];
-  const monthText = match?.[2];
-  const dayText = match?.[3];
-  if (yearText === undefined || monthText === undefined || dayText === undefined) throw invalidArgument(operation);
+  return { comparable: parseDateParts(match?.[1], match?.[2], match?.[3], operation) };
+}
+
+function parseDateParts(
+  yearText: string | undefined,
+  monthText: string | undefined,
+  dayText: string | undefined,
+  operation: string,
+): readonly ComparablePart[] {
+  if (yearText === undefined || monthText === undefined || dayText === undefined) {
+    throw invalidArgument(operation);
+  }
   const year = BigInt(yearText);
   const month = Number.parseInt(monthText, 10);
   const day = Number.parseInt(dayText, 10);
   if (year <= 0n || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
     throw invalidArgument(operation);
   }
-  return { comparable: [year, month, day] };
+  return [year, month, day];
 }
 
 function parseWeek(value: string, operation: string): ParsedRangeValue {
@@ -268,13 +276,9 @@ function parseTime(value: string, operation: string): ParsedRangeValue {
 
 function parseLocalDateTime(value: string, operation: string): ParsedRangeValue {
   const match = HTML_LOCAL_DATE_TIME.exec(value);
-  const yearText = match?.[1];
-  const monthText = match?.[2];
-  const dayText = match?.[3];
-  if (yearText === undefined || monthText === undefined || dayText === undefined) throw invalidArgument(operation);
-  const date = parseDate(`${yearText}-${monthText}-${dayText}`, operation);
+  const date = parseDateParts(match?.[1], match?.[2], match?.[3], operation);
   const time = parseTimeMatch(match?.[5], match?.[6], match?.[7], match?.[8], operation);
-  return { comparable: [...date.comparable, ...time.comparable] };
+  return { comparable: [...date, ...time.comparable] };
 }
 
 function parseTimeMatch(

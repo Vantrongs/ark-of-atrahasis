@@ -52,7 +52,7 @@ interface CompiledSinkPolicy {
   readonly maxLength: number;
 }
 
-type URLConstructor = new (url: string, base?: string | URL) => URL;
+export type URLConstructor = new (url: string, base?: string | URL) => URL;
 
 const URL_SINK_SET: ReadonlySet<string> = new Set(URL_SINKS);
 const DEFAULT_MAX_URL_LENGTH = 2048;

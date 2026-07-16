@@ -1,6 +1,6 @@
 import type { SafeEventKind } from "./types.ts";
 
-export type EventFence = "root-bubble" | "target";
+type EventFence = "root-bubble" | "target";
 
 function eventMetadata<
   Type extends string,
@@ -34,9 +34,6 @@ export const PUBLIC_EVENT_CATALOG = Object.freeze({
   onChange: eventMetadata("change", "input", "root-bubble"),
   onInput: eventMetadata("input", "input", "root-bubble"),
 });
-
-export type PublicEventMethod = keyof typeof PUBLIC_EVENT_CATALOG;
-export type PublicEventType = (typeof PUBLIC_EVENT_CATALOG)[PublicEventMethod]["type"];
 
 /** Native events fenced for host integration although no public handler advertises them. */
 export const ROOT_BUBBLE_FENCE_ONLY_EVENT_TYPES = Object.freeze([

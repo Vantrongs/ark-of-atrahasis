@@ -3,7 +3,6 @@ import type { SpecializedElementKind } from "./vocabularies.ts";
 import { createSafeDOMError } from "./errors.ts";
 
 export type SafeNode = SafeElement | SafeTextNode;
-export type SafeChildNode = SafeElement | SafeTextNode;
 export type RealNode = Element | Text;
 export type NodeState = "active" | "disposed" | "revoked";
 export type AccountedResource = "text" | "attribute" | "style" | "request";

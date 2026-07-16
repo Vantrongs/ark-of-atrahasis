@@ -182,9 +182,12 @@ async function runPackedReadmeBrowserExamples({
 
 const sourceManifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
 const packageManagerMatch = /^npm@(\d+\.\d+\.\d+)$/u.exec(sourceManifest.packageManager ?? "");
+const requiredNodeVersion = readFileSync(join(repositoryRoot, ".node-version"), "utf8").trim();
 
-if (process.version !== "v22.22.2") {
-  throw new Error(`package smoke tests require Node.js v22.22.2, received ${process.version}`);
+if (process.version !== `v${requiredNodeVersion}`) {
+  throw new Error(
+    `package smoke tests require Node.js v${requiredNodeVersion}, received ${process.version}`,
+  );
 }
 
 if (!packageManagerMatch) {
@@ -310,17 +313,24 @@ try {
     .filter(Boolean)
     .map((entry) => `package/${entry}`);
   const requiredEntries = [
+    "package/.github/workflows/check.yml",
+    "package/.github/workflows/release.yml",
+    "package/.github/workflows/security.yml",
+    "package/.fallowrc.json",
+    "package/.node-version",
     "package/CHANGELOG.md",
     "package/LICENSE",
     "package/README.md",
     "package/RELEASING.md",
     "package/dist/index.d.ts",
+    "package/dist/index.d.ts.map",
     "package/dist/index.js",
     "package/dist/index.js.map",
     "package/npm-shrinkwrap.json",
     "package/package.json",
     "package/tsconfig.json",
-    "package/tsup.config.ts",
+    "package/tsconfig.tooling.json",
+    "package/tsdown.config.ts",
     ...trackedCorrespondingSource,
   ];
 
@@ -330,12 +340,25 @@ try {
     }
   }
 
+  if (
+    readArchiveEntry(tarballPath, "package/.node-version", sourceDirectory).trim() !==
+      requiredNodeVersion
+  ) {
+    throw new Error("packed Node version differs from the verified build runtime");
+  }
+
+  const allowedGitHubEntries = new Set([
+    "package/.github/workflows/check.yml",
+    "package/.github/workflows/release.yml",
+    "package/.github/workflows/security.yml",
+  ]);
   const forbiddenEntries = ["bun.lockb", "package-lock.json", "node_modules/"];
   if (
     [...archiveEntries].some(
       (entry) =>
-        entry.startsWith("package/.git") ||
-        entry.startsWith("package/.github/") ||
+        entry === "package/.git" ||
+        entry.startsWith("package/.git/") ||
+        (entry.startsWith("package/.github/") && !allowedGitHubEntries.has(entry)) ||
         forbiddenEntries.some((forbiddenEntry) => entry.includes(forbiddenEntry)),
     )
   ) {
@@ -352,6 +375,10 @@ try {
 
   if (packedManifest.sideEffects !== false) {
     throw new Error("packed manifest must declare sideEffects: false");
+  }
+
+  if (packedManifest.engines?.node !== `>=${requiredNodeVersion}`) {
+    throw new Error("packed manifest Node engine must match the exact build baseline");
   }
 
   if (
@@ -383,15 +410,21 @@ try {
   }
 
   if (
+    packedManifest.devDependencies?.["@biomejs/biome"] !== "2.5.4" ||
+    packedManifest.devDependencies?.fallow !== "3.6.0" ||
+    packedManifest.devDependencies?.tsdown !== "0.22.8" ||
     packedManifest.devDependencies?.typescript !== "6.0.3" ||
     packedManifest.devDependencies?.["typescript-current"] !== "npm:typescript@7.0.2" ||
     packedManifest.devDependencies?.["typescript-min"] !== "npm:typescript@5.0.4" ||
+    packedManifest.devDependencies?.vitest !== "4.1.10" ||
     packedManifest.devDependencies?.["fast-check"] !== "4.9.0" ||
     packedManifest.devDependencies?.ses !== "2.2.0" ||
     packedManifest.devDependencies?.["@endo/pass-style"] !== "1.8.1" ||
     packedManifest.devDependencies?.["@endo/eventual-send"] !== "1.5.0"
   ) {
-    throw new Error("packed manifest must pin TypeScript, fast-check, and the SES verification toolchain");
+    throw new Error(
+      "packed manifest must pin Fallow, tsdown, TypeScript, fast-check, and the SES verification toolchain",
+    );
   }
 
   const packedLock = JSON.parse(
@@ -434,6 +467,29 @@ try {
     sourceMap.sourcesContent.some((source) => typeof source !== "string")
   ) {
     throw new Error("packed JavaScript source map must contain complete, relative source content");
+  }
+
+  const declaration = readArchiveEntry(
+    tarballPath,
+    "package/dist/index.d.ts",
+    sourceDirectory,
+  );
+  const declarationMap = JSON.parse(
+    readArchiveEntry(tarballPath, "package/dist/index.d.ts.map", sourceDirectory),
+  );
+  if (
+    !declaration.endsWith("//# sourceMappingURL=index.d.ts.map") ||
+    declarationMap.file !== "index.d.ts" ||
+    !Array.isArray(declarationMap.sources) ||
+    declarationMap.sources.length === 0 ||
+    declarationMap.sources.some(
+      (source) =>
+        typeof source !== "string" ||
+        !/^\.\.\/src\/.+\.ts$/u.test(source) ||
+        !archiveEntries.has(`package/${source.slice(3)}`),
+    )
+  ) {
+    throw new Error("packed declaration map must resolve only to included TypeScript source");
   }
 
   const packedReadme = readArchiveEntry(
@@ -550,12 +606,12 @@ declare class Compartment {
       compilerOptions: {
         allowJs: true,
         checkJs: true,
-        lib: ["ES2022", "DOM"],
+        lib: ["ESNext", "DOM"],
         module: "NodeNext",
         moduleResolution: "NodeNext",
         noEmit: true,
         strict: true,
-        target: "ES2022",
+        target: "ESNext",
         types: [],
       },
       files: ["readme-example-globals.d.ts", ...readmeExampleFiles],
@@ -607,7 +663,7 @@ declare class Compartment {
     env: offlineRebuildEnvironment,
   });
 
-  for (const artifact of ["index.d.ts", "index.js", "index.js.map"]) {
+  for (const artifact of ["index.d.ts", "index.d.ts.map", "index.js", "index.js.map"]) {
     const packedContents = readArchiveEntry(
       tarballPath,
       `package/dist/${artifact}`,

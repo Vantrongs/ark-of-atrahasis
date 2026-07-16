@@ -361,7 +361,7 @@ export async function inspectRegistryTarball({
   return { state: "matching" };
 }
 
-export async function inspectReleaseRegistryState({
+async function inspectReleaseRegistryState({
   verifyProvenanceImplementation = verifyNpmProvenance,
   ...options
 }) {
@@ -539,7 +539,7 @@ async function verifyNpmProvenance({ name, tarballPath, version }) {
   }
 }
 
-export async function waitForMatchingRegistry(options) {
+async function waitForMatchingRegistry(options) {
   const { attempts = 10, delayImplementation = setTimeout, delayMilliseconds = 3_000 } = options;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {

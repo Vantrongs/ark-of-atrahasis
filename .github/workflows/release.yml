@@ -16,6 +16,8 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      node-version: ${{ steps.toolchain.outputs.node-version }}
     steps:
       - name: Check out the annotated release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -26,7 +28,7 @@ jobs:
       - name: Set up Node.js without a package-manager cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.22.2
+          node-version-file: .node-version
           package-manager-cache: false
 
       - name: Install the pinned npm CLI without replacing the runner npm
@@ -38,9 +40,12 @@ jobs:
           echo "$RUNNER_TEMP/npm-cli/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Verify toolchain versions
+        id: toolchain
         run: |
-          test "$(node --version)" = "v22.22.2"
+          required_node_version="$(tr -d '\r\n' < .node-version)"
+          test "$(node --version)" = "v$required_node_version"
           test "$(node "$NPM_CLI" --version)" = "11.18.0"
+          echo "node-version=$required_node_version" >> "$GITHUB_OUTPUT"
 
       - name: Install frozen dependencies
         run: node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund
@@ -97,7 +102,7 @@ jobs:
       - name: Set up Node.js without a package-manager cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.22.2
+          node-version: ${{ needs.verify.outputs.node-version }}
           registry-url: https://registry.npmjs.org/
           package-manager-cache: false
 
@@ -110,7 +115,7 @@ jobs:
 
       - name: Verify toolchain versions
         run: |
-          test "$(node --version)" = "v22.22.2"
+          test "$(node --version)" = "v${{ needs.verify.outputs.node-version }}"
           test "$(node "$NPM_CLI" --version)" = "11.18.0"
 
       - name: Download the verified release artifacts
