@@ -356,7 +356,10 @@ URL policy compares owner-realm canonical origins. Internationalized hostnames
 therefore become ASCII punycode and non-ASCII paths become UTF-8 percent-encoded
 before allow/deny and `maxLength` checks. Hosts should review and log canonical
 ASCII origins and must not present a raw guest URL as trusted identity;
-confusable detection is an integration/UI responsibility.
+confusable detection is an integration/UI responsibility. The optional
+owner-realm/test constructor accepted by `createURLPolicy` is named by the
+exported `URLConstructor` type, so the complete public signature is importable
+without referring to a private declaration.
 
 Keyboard and input snapshots preserve the primitive `isComposing` state.
 Composition start/update/end and `beforeinput` lifecycle control are not
@@ -457,7 +460,12 @@ analyze` verifies the signed platform binary, then reports dead code, circular
 dependencies, private-type leaks, and duplication. Exit 1 is accepted only
 with well-formed compact findings and no stderr; installation, integrity,
 configuration, and runtime failures remain fatal. No finding is auto-deleted or
-hidden behind `|| true`.
+hidden behind `|| true`. The rule severities and clone thresholds are explicit
+in `.fallowrc.json`; entry exports are checked except for the externally loaded
+Playwright and tsdown config defaults. The repository-local
+`oxlint-oxfmt-fallow` skill records the required evidence and validation
+workflow without importing MS-specific Bun, Svelte, CSS, workspace, or baseline
+policy.
 
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with

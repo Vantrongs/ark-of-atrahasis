@@ -9,7 +9,7 @@ import { testHarden } from "./harden.ts";
 type TestOptions = Omit<SafeDocumentOptions, "harden">;
 
 /** Explicit opt-in for legacy tests that intentionally exercise native values. */
-export const TEST_FORM_CONTROL_POLICY = Object.freeze({
+const TEST_FORM_CONTROL_POLICY = Object.freeze({
   allowNonCredentialFormElements: true,
 }) satisfies SafeFormControlPolicy;
 

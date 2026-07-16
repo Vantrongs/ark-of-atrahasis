@@ -146,6 +146,7 @@ export {
   createURLPolicy,
   type SafeURLDecision,
   type SafeURLPolicy,
+  type URLConstructor,
   type URLPolicyEngine,
   type URLProtocol,
   type URLSink,

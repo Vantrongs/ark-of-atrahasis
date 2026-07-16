@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import type { Parameters } from "fast-check";
 import { isSafeDOMError, type SafeDOMErrorCode } from "../../src/index.ts";
 
-export const DEFAULT_PROPERTY_SEED = 0x0a7a4515;
+const DEFAULT_PROPERTY_SEED = 0x0a7a4515;
 export const propertyEnvironment: NodeJS.ProcessEnv & {
   FC_COMMAND_REPLAY_PATH?: string;
   FC_END_ON_FAILURE?: string;

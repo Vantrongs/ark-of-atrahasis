@@ -26,6 +26,10 @@ GitHub release is claimed here.
   gate. The report wrapper verifies the signed platform binary and accepts exit
   1 only for well-formed findings. Its entry roots name only directly invoked
   scripts, and no redundant self-ignore can hide future dependency drift.
+  Ark-specific rule severities and clone parameters are now explicit, and a
+  repository-local tooling skill preserves the same evidence-first workflow
+  without copying MS-specific monorepo or framework settings. Entry exports are
+  analyzed with exact externally loaded config-default exceptions.
   esbuild remains 0.27.2 because later 0.27.x releases are affected by
   GHSA-g7r4-m6w7-qqqr and Vite 8's range does not accept fixed 0.28.1.
 - Replaced unmaintained tsup 8.5.1 with its recommended successor, tsdown
@@ -59,6 +63,11 @@ GitHub release is claimed here.
 - Retained TypeScript 5.0.4 as the minimum consumer declaration fixture and
   TypeScript 6.0.3 for release declaration generation while continuing to
   check the source and packed declarations with current TypeScript 7.0.2.
+- Resolved the confirmed Fallow hygiene/design backlog by removing unnecessary
+  internal export edges, naming the public `URLConstructor` type, sharing the
+  hostile-realm reflection and event-record contracts, consolidating exact
+  identifier quota bookkeeping while preserving distinct ID/name commits, and
+  sharing date-part validation between date and local-date-time parsing.
 
 ## [0.4.0] - 2026-07-15
 
