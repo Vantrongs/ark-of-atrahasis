@@ -158,7 +158,9 @@ controls and must be audited separately.
 2. requires the annotated tag to resolve to the checked-out commit and requires
    the npm version to be absent or a byte-identical, exact-provenance
    interrupted-run recovery;
-3. reruns the complete gate without publishing credentials;
+3. installs the exact Chromium, Firefox, and WebKit binaries, reruns the
+   complete gate without publishing credentials, and verifies registry
+   signatures and available attestations for that frozen install;
 4. transfers only the verified tarball, SBOM, and checksums into the protected
    `npm` environment;
 5. creates or resumes only an exact draft, publishes the tarball at most once
@@ -196,7 +198,8 @@ Before enabling releases, repository/package owners must:
   release-script changes;
 - enable the dependency graph, Dependabot vulnerability alerts and security
   updates, and CodeQL default setup with the extended query suite; require the
-  `security` dependency-review result for pull requests alongside `check`;
+  `dependency-review` result for pull requests alongside `check`, including a
+  fresh result after the pull request base branch changes;
 - enable immutable GitHub releases, retain Actions logs/artifacts according to
   the release retention policy, and record the source commit, tag, checksum,
   SBOM, and npm provenance; and

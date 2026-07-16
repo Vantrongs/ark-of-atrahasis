@@ -50,6 +50,7 @@ const checkWorkflow = readFileSync(
   new URL("../.github/workflows/check.yml", import.meta.url),
   "utf8",
 );
+const parsedCheckWorkflow = parse(checkWorkflow);
 const securityWorkflowSource = readFileSync(
   new URL("../.github/workflows/security.yml", import.meta.url),
   "utf8",
@@ -1194,6 +1195,16 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
   assert.equal((releaseWorkflow.match(/npm@11\.18\.0/gu) ?? []).length, 2);
   assert.equal((releaseWorkflow.match(/package-manager-cache: false/gu) ?? []).length, 2);
   assert.doesNotMatch(releaseWorkflow, /^\s+cache:/mu);
+  const installBrowsersIndex = releaseWorkflow.indexOf(
+    "node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit",
+  );
+  const checkIndex = releaseWorkflow.indexOf('node "$NPM_CLI" run check');
+  const signatureIndex = releaseWorkflow.indexOf('node "$NPM_CLI" run audit:signatures');
+  const packIndex = releaseWorkflow.indexOf('node "$NPM_CLI" run pack:verified');
+  assert.ok(installBrowsersIndex > 0);
+  assert.ok(installBrowsersIndex < checkIndex);
+  assert.ok(checkIndex < signatureIndex);
+  assert.ok(signatureIndex < packIndex);
 
   const expectedActionPins = new Map([
     ["actions/checkout", "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"],
@@ -1215,6 +1226,30 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
   );
 });
 
+test("check workflow revalidates base edits without package-manager cache duplication", () => {
+  assert.deepEqual(parsedCheckWorkflow.on, {
+    pull_request: {
+      types: ["opened", "synchronize", "reopened", "edited"],
+    },
+    push: { branches: ["main"] },
+  });
+  const checkJob = parsedCheckWorkflow.jobs.check;
+  assert.equal(
+    checkJob.if,
+    "github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base.ref.from != ''",
+  );
+  const checkSteps = Object.fromEntries(checkJob.steps.map((step) => [step.name, step]));
+  assert.deepEqual(checkSteps["Set up Node.js without a package-manager cache"].with, {
+    "node-version-file": ".node-version",
+    "package-manager-cache": false,
+  });
+  assert.deepEqual(checkSteps["Verify registry signatures and attestations"], {
+    if: "github.event_name == 'push'",
+    name: "Verify registry signatures and attestations",
+    run: 'node "$NPM_CLI" run audit:signatures',
+  });
+});
+
 test("security workflow blocks vulnerable dependency changes and audits registry trust", () => {
   assert.deepEqual(Object.keys(securityWorkflow).sort(), [
     "concurrency",
@@ -1227,8 +1262,9 @@ test("security workflow blocks vulnerable dependency changes and audits registry
   assert.deepEqual(
     securityWorkflow.on,
     {
-      pull_request: null,
-      push: { branches: ["main"] },
+      pull_request: {
+        types: ["opened", "synchronize", "reopened", "edited"],
+      },
       schedule: [{ cron: "0 6 * * 1" }],
       workflow_dispatch: null,
     },
@@ -1250,7 +1286,10 @@ test("security workflow blocks vulnerable dependency changes and audits registry
     "steps",
     "timeout-minutes",
   ]);
-  assert.equal(dependencyReview.if, "github.event_name == 'pull_request'");
+  assert.equal(
+    dependencyReview.if,
+    "github.event_name == 'pull_request' && (github.event.action != 'edited' || github.event.changes.base.ref.from != '')",
+  );
   assert.equal(dependencyReview["runs-on"], "ubuntu-24.04");
   assert.equal(dependencyReview["timeout-minutes"], 10);
   assert.deepEqual(dependencyReview.steps, [
@@ -1279,7 +1318,10 @@ test("security workflow blocks vulnerable dependency changes and audits registry
     "steps",
     "timeout-minutes",
   ]);
-  assert.equal(registryAudit.if, "github.event_name != 'pull_request'");
+  assert.equal(
+    registryAudit.if,
+    "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+  );
   assert.equal(registryAudit["runs-on"], "ubuntu-24.04");
   assert.equal(registryAudit["timeout-minutes"], 15);
   assert.deepEqual(
@@ -1335,7 +1377,7 @@ test("security workflow blocks vulnerable dependency changes and audits registry
   );
   assert.equal(
     registrySteps["Verify registry signatures and attestations"].run,
-    'node "$NPM_CLI" audit signatures --include-attestations',
+    'node "$NPM_CLI" run audit:signatures',
   );
 });
 
@@ -1374,7 +1416,7 @@ test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistentl
   assert.equal(sourceManifest.scripts?.audit, "npm audit --audit-level=low");
   assert.equal(
     sourceManifest.scripts?.["audit:signatures"],
-    "npm audit signatures --include-attestations",
+    "npm audit signatures",
   );
   assert.ok(sourceManifest.files?.includes(".github/workflows/security.yml"));
   assert.match(fallowReportSource, /\["dead-code", "--format", "compact"\]/u);
