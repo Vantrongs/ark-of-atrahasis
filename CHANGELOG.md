@@ -41,6 +41,16 @@ GitHub release is claimed here.
 - Included the check and release workflow fixtures in the source package so its
   packed release tests and Fallow graph retain the same workflow inputs as the
   repository instead of reporting unresolved repo-only imports.
+- Added a least-privilege security workflow with SHA-pinned dependency review
+  that blocks new advisories at `low` severity in every dependency scope. Push,
+  weekly, and manual runs use the exact frozen Node/npm toolchain to repeat the
+  vulnerability audit and verify npm registry signatures plus attestations.
+  The workflow fixture and its exact contract are included in the reproducible
+  source package and structurally validated in release tests with pinned,
+  dependency-free YAML 2.9.0.
+- Addressed the initial CodeQL extended findings in the npm registry preflight
+  by requiring the immutable package identity and reconstructing a canonical
+  stable version before either value can enter the fixed registry request.
 - Updated the check workflow to the pinned `actions/checkout` 7.0.0 revision
   already used by the release workflow, and made the exact `.node-version` the
   single Node source for checkout jobs and the no-checkout publish handoff.

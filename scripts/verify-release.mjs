@@ -8,12 +8,20 @@ import {
 } from "./stable-version.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const EXPECTED_PACKAGE_NAME = "ark-of-atrahasis";
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+function assertExpectedPackageName(name) {
+  if (name !== EXPECTED_PACKAGE_NAME) {
+    throw new Error(`release package name must remain ${EXPECTED_PACKAGE_NAME}`);
+  }
+}
+
 export function verifyReleaseMetadata({ changelog, manifest, tag }) {
+  assertExpectedPackageName(manifest.name);
   if (tag !== `v${manifest.version}`) {
     throw new Error(`release tag ${tag} does not match package version ${manifest.version}`);
   }
@@ -104,10 +112,10 @@ export function verifyAnnotatedTagAtHead(tag, cwd = repositoryRoot) {
 }
 
 export async function inspectVersionForRelease(name, version, fetchImplementation = fetch) {
-  const encodedName = encodeURIComponent(name).replaceAll("%2F", "%2f");
-  const encodedVersion = encodeURIComponent(version);
+  assertExpectedPackageName(name);
+  const canonicalVersion = parseStableVersion(version).join(".");
   const response = await fetchImplementation(
-    `https://registry.npmjs.org/${encodedName}/${encodedVersion}`,
+    `https://registry.npmjs.org/${EXPECTED_PACKAGE_NAME}/${canonicalVersion}`,
     {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
@@ -117,13 +125,13 @@ export async function inspectVersionForRelease(name, version, fetchImplementatio
   if (response.status === 200) {
     const metadata = await response.json();
     if (
-      metadata?.name !== name ||
-      metadata?.version !== version ||
+      metadata?.name !== EXPECTED_PACKAGE_NAME ||
+      metadata?.version !== canonicalVersion ||
       !/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(metadata?.dist?.integrity ?? "") ||
       !/^[0-9a-f]{40}$/u.test(metadata?.dist?.shasum ?? "") ||
       typeof metadata?.dist?.tarball !== "string"
     ) {
-      throw new Error(`${name}@${version} has invalid npm registry metadata`);
+      throw new Error(`${EXPECTED_PACKAGE_NAME}@${canonicalVersion} has invalid npm registry metadata`);
     }
     return "published";
   }
@@ -131,7 +139,7 @@ export async function inspectVersionForRelease(name, version, fetchImplementatio
     throw new Error(`npm registry returned unexpected HTTP ${response.status}`);
   }
 
-  const packageResponse = await fetchImplementation(`https://registry.npmjs.org/${encodedName}`, {
+  const packageResponse = await fetchImplementation(`https://registry.npmjs.org/${EXPECTED_PACKAGE_NAME}`, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(10_000),
   });
@@ -141,7 +149,11 @@ export async function inspectVersionForRelease(name, version, fetchImplementatio
   }
 
   const latest = (await packageResponse.json())?.["dist-tags"]?.latest;
-  assertVersionAdvancesLatest({ latest, name, version });
+  assertVersionAdvancesLatest({
+    latest,
+    name: EXPECTED_PACKAGE_NAME,
+    version: canonicalVersion,
+  });
   return "unpublished";
 }
 

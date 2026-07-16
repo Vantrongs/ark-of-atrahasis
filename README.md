@@ -467,6 +467,14 @@ Playwright and tsdown config defaults. The repository-local
 workflow without importing MS-specific Bun, Svelte, CSS, workspace, or baseline
 policy.
 
+The separate `security` workflow reviews every pull request's dependency diff
+at `low` severity across runtime, development, and unknown scopes. On each push
+to `main`, every Monday, and on manual dispatch, it performs a frozen install
+with the exact Node/npm toolchain, rejects any known advisory, and verifies npm
+registry signatures together with available attestations. This complements the
+full `check` gate without adding container-only scanners to a package with no
+runtime dependencies or shipped image.
+
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with
 the required system libraries. CI and ordinary FHS hosts leave it unset.
@@ -481,6 +489,7 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run test:browser` | Run boundary, SES, and unyielding-Worker termination tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
+| `npm run audit:signatures` | Verify npm registry signatures and available attestations for the installed dependency graph |
 | `npm run test:package` | Build and test a tarball from a pristine Git archive, including the exact root runtime-export namespace and literal typecheck/browser execution of every executable packed README fence |
 | `npm run check` | Run the complete CI gate, including advisory Fallow analysis |
 | `npm run pack:verified` | Test and write the exact tarball, strictly validated reproducible CycloneDX 1.7 SBOM bound to that tarball's SHA-256, and checksum manifest |

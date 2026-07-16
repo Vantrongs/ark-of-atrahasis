@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parse } from "yaml";
 
 import {
   assertNpmProvenance,
@@ -49,6 +50,11 @@ const checkWorkflow = readFileSync(
   new URL("../.github/workflows/check.yml", import.meta.url),
   "utf8",
 );
+const securityWorkflowSource = readFileSync(
+  new URL("../.github/workflows/security.yml", import.meta.url),
+  "utf8",
+);
+const securityWorkflow = parse(securityWorkflowSource);
 const releaseRecoverySource = readFileSync(
   new URL("../scripts/release-recovery.mjs", import.meta.url),
   "utf8",
@@ -556,6 +562,15 @@ function createProvenanceAudit(fixture) {
 test("release metadata binds the tag to a dated changelog version", () => {
   assert.doesNotThrow(() => verifyReleaseMetadata({ changelog, manifest, tag: "v0.4.0" }));
   assert.throws(
+    () =>
+      verifyReleaseMetadata({
+        changelog,
+        manifest: { ...manifest, name: "unexpected-package" },
+        tag: "v0.4.0",
+      }),
+    /package name must remain ark-of-atrahasis/u,
+  );
+  assert.throws(
     () => verifyReleaseMetadata({
       changelog: "## [Unreleased]\n\n## [0.4.0] - 2026-02-29\n",
       manifest,
@@ -753,6 +768,21 @@ test("annotated release tags must resolve to the checked-out HEAD", () => {
 });
 
 test("registry preflight distinguishes a new version from a recoverable publication", async () => {
+  let rejectedRequestCount = 0;
+  const rejectedRequest = async () => {
+    rejectedRequestCount += 1;
+    return { status: 500 };
+  };
+  await assert.rejects(
+    inspectVersionForRelease("unexpected-package", manifest.version, rejectedRequest),
+    /package name must remain ark-of-atrahasis/u,
+  );
+  await assert.rejects(
+    inspectVersionForRelease(manifest.name, "0.4.0/private-data", rejectedRequest),
+    /must be a stable release version/u,
+  );
+  assert.equal(rejectedRequestCount, 0);
+
   const unpublishedNextVersion = async (url) =>
     url.endsWith("/0.4.0")
       ? { status: 404 }
@@ -1185,6 +1215,130 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
   );
 });
 
+test("security workflow blocks vulnerable dependency changes and audits registry trust", () => {
+  assert.deepEqual(Object.keys(securityWorkflow).sort(), [
+    "concurrency",
+    "jobs",
+    "name",
+    "on",
+    "permissions",
+  ]);
+  assert.equal(securityWorkflow.name, "security");
+  assert.deepEqual(
+    securityWorkflow.on,
+    {
+      pull_request: null,
+      push: { branches: ["main"] },
+      schedule: [{ cron: "0 6 * * 1" }],
+      workflow_dispatch: null,
+    },
+  );
+  assert.deepEqual(securityWorkflow.permissions, { contents: "read" });
+  assert.deepEqual(securityWorkflow.concurrency, {
+    group: "security-$" + "{{ github.event.pull_request.number || github.ref }}",
+    "cancel-in-progress": true,
+  });
+  assert.deepEqual(Object.keys(securityWorkflow.jobs).sort(), [
+    "dependency-review",
+    "registry-audit",
+  ]);
+
+  const dependencyReview = securityWorkflow.jobs["dependency-review"];
+  assert.deepEqual(Object.keys(dependencyReview).sort(), [
+    "if",
+    "runs-on",
+    "steps",
+    "timeout-minutes",
+  ]);
+  assert.equal(dependencyReview.if, "github.event_name == 'pull_request'");
+  assert.equal(dependencyReview["runs-on"], "ubuntu-24.04");
+  assert.equal(dependencyReview["timeout-minutes"], 10);
+  assert.deepEqual(dependencyReview.steps, [
+    {
+      name: "Check out the pull request",
+      uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+      with: { "persist-credentials": false },
+    },
+    {
+      name: "Review dependency changes",
+      uses: "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+      with: {
+        "fail-on-severity": "low",
+        "fail-on-scopes": "runtime, development, unknown",
+        "license-check": false,
+        "show-patched-versions": true,
+        "vulnerability-check": true,
+      },
+    },
+  ]);
+
+  const registryAudit = securityWorkflow.jobs["registry-audit"];
+  assert.deepEqual(Object.keys(registryAudit).sort(), [
+    "if",
+    "runs-on",
+    "steps",
+    "timeout-minutes",
+  ]);
+  assert.equal(registryAudit.if, "github.event_name != 'pull_request'");
+  assert.equal(registryAudit["runs-on"], "ubuntu-24.04");
+  assert.equal(registryAudit["timeout-minutes"], 15);
+  assert.deepEqual(
+    registryAudit.steps.map((step) => step.name),
+    [
+      "Check out the audited commit",
+      "Set up Node.js",
+      "Install the pinned npm CLI without replacing the runner npm",
+      "Verify toolchain versions",
+      "Install frozen dependencies",
+      "Reject known vulnerabilities",
+      "Verify registry signatures and attestations",
+    ],
+  );
+  const registrySteps = Object.fromEntries(registryAudit.steps.map((step) => [step.name, step]));
+  assert.deepEqual(registrySteps["Check out the audited commit"], {
+    name: "Check out the audited commit",
+    uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+    with: { "persist-credentials": false },
+  });
+  assert.deepEqual(registrySteps["Set up Node.js"], {
+    name: "Set up Node.js",
+    uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    with: {
+      "node-version-file": ".node-version",
+      "package-manager-cache": false,
+    },
+  });
+  assert.equal(
+    registrySteps["Install the pinned npm CLI without replacing the runner npm"].run.trim(),
+    [
+      'mkdir -p "$RUNNER_TEMP/npm-cli"',
+      'npm install --prefix "$RUNNER_TEMP/npm-cli" npm@11.18.0 \\',
+      "  --ignore-scripts --no-audit --no-fund --no-package-lock",
+      'echo "NPM_CLI=$RUNNER_TEMP/npm-cli/node_modules/npm/bin/npm-cli.js" >> "$GITHUB_ENV"',
+      'echo "$RUNNER_TEMP/npm-cli/node_modules/.bin" >> "$GITHUB_PATH"',
+    ].join("\n"),
+  );
+  assert.equal(
+    registrySteps["Verify toolchain versions"].run.trim(),
+    [
+      'test "$(node --version)" = "v$(tr -d \'\\r\\n\' < .node-version)"',
+      'test "$(node "$NPM_CLI" --version)" = "11.18.0"',
+    ].join("\n"),
+  );
+  assert.equal(
+    registrySteps["Install frozen dependencies"].run,
+    'node "$NPM_CLI" ci --ignore-scripts --no-audit --no-fund',
+  );
+  assert.equal(
+    registrySteps["Reject known vulnerabilities"].run,
+    'node "$NPM_CLI" audit --audit-level=low',
+  );
+  assert.equal(
+    registrySteps["Verify registry signatures and attestations"].run,
+    'node "$NPM_CLI" audit signatures --include-attestations',
+  );
+});
+
 test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistently", () => {
   assert.equal(sourceNodeVersion, "26.5.0");
   assert.equal(sourceManifest.engines?.node, `>=${sourceNodeVersion}`);
@@ -1217,6 +1371,12 @@ test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistentl
   assert.ok(!sourceFallowConfig.ignoreDependencies?.includes("fallow"));
   assert.equal(sourceFallowConfig.rules?.["private-type-leaks"], "warn");
   assert.match(sourceManifest.scripts?.check ?? "", /npm run analyze/u);
+  assert.equal(sourceManifest.scripts?.audit, "npm audit --audit-level=low");
+  assert.equal(
+    sourceManifest.scripts?.["audit:signatures"],
+    "npm audit signatures --include-attestations",
+  );
+  assert.ok(sourceManifest.files?.includes(".github/workflows/security.yml"));
   assert.match(fallowReportSource, /\["dead-code", "--format", "compact"\]/u);
   assert.match(fallowReportSource, /\["dupes", "--format", "compact"\]/u);
   assert.match(fallowReportSource, /runFallow\(\["--version"\]\)/u);

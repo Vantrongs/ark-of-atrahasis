@@ -315,6 +315,7 @@ try {
   const requiredEntries = [
     "package/.github/workflows/check.yml",
     "package/.github/workflows/release.yml",
+    "package/.github/workflows/security.yml",
     "package/.fallowrc.json",
     "package/.node-version",
     "package/CHANGELOG.md",
@@ -349,6 +350,7 @@ try {
   const allowedGitHubEntries = new Set([
     "package/.github/workflows/check.yml",
     "package/.github/workflows/release.yml",
+    "package/.github/workflows/security.yml",
   ]);
   const forbiddenEntries = ["bun.lockb", "package-lock.json", "node_modules/"];
   if (

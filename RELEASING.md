@@ -194,6 +194,9 @@ Before enabling releases, repository/package owners must:
   signed-tag policy where the hosting plan supports it;
 - require review from `.github/CODEOWNERS` for workflow, manifest, lockfile, and
   release-script changes;
+- enable the dependency graph, Dependabot vulnerability alerts and security
+  updates, and CodeQL default setup with the extended query suite; require the
+  `security` dependency-review result for pull requests alongside `check`;
 - enable immutable GitHub releases, retain Actions logs/artifacts according to
   the release retention policy, and record the source commit, tag, checksum,
   SBOM, and npm provenance; and
