@@ -1,6 +1,6 @@
 {
   "name": "ark-of-atrahasis",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Capability-oriented DOM wrapper for Secure ECMAScript integrations",
   "type": "module",
   "sideEffects": false,
@@ -14,6 +14,7 @@
     }
   },
   "files": [
+    ".node-version",
     "CHANGELOG.md",
     "dist",
     "npm-shrinkwrap.json",
@@ -66,7 +67,7 @@
     "url": "https://github.com/notwindstone/ark-of-atrahasis/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=26.5.0"
   },
   "packageManager": "npm@11.18.0",
   "publishConfig": {
@@ -75,7 +76,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.3",
+    "@biomejs/biome": "2.5.4",
     "@cyclonedx/cyclonedx-library": "10.1.0",
     "@endo/eventual-send": "1.5.0",
     "@endo/pass-style": "1.8.1",
@@ -91,9 +92,9 @@
     "typescript": "6.0.3",
     "typescript-current": "npm:typescript@7.0.2",
     "typescript-min": "npm:typescript@5.0.4",
-    "vitest": "3.2.7"
+    "vitest": "4.1.10"
   },
   "overrides": {
-    "esbuild": "0.27.2"
+    "esbuild": "0.28.1"
   }
 }

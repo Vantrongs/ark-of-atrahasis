@@ -3,16 +3,17 @@
 This document records reproducible packaging and source-correspondence measures.
 It is an engineering checklist, not legal advice or a legal conclusion.
 
-The repository contains the `0.4.0` release candidate. A live observation on
-2026-07-15 found npm `latest` at `0.3.1`, `0.4.0` absent, and no `v0.4.0` tag or
-GitHub release. That observation is historical and must be repeated before an
+The repository contains the `0.5.0` ESNext/Node 26 release candidate. A live
+observation on 2026-07-16 found npm `latest` at `0.3.1`, both `0.4.0` and `0.5.0`
+absent, and no corresponding version tag or GitHub release. That observation is
+historical and must be repeated before an
 owner release. The repository evidence below is code-complete release
 engineering, not evidence that external owner controls are configured or that a
 release has occurred.
 
 ## Prerequisites
 
-- Use Node.js 22.22.2 and the exact npm version in
+- Use Node.js 26.5.0 from `.node-version` and the exact npm version in
   `package.json#packageManager`.
 - Start from the release commit with a clean index and working tree.
 - Use `npm ci --ignore-scripts --no-audit --no-fund`; never refresh dependencies
@@ -74,6 +75,13 @@ placements with the same alias/version collapse to one component. The root
 component digest is the exact-artifact link.
 These local artifacts are for inspection; do not publish from the worktree or a
 developer credential.
+
+npm 11.18.0 is the newest supported release-tool line for this contract. npm
+12.0.1 requires `package-lock.json` for both `npm ci` and lock-only SBOM
+generation and rejects `npm-shrinkwrap.json`; adopting it would remove the
+publishable frozen build graph that the tarball, inventory-equality, recovery,
+and source-correspondence gates verify. Revisit npm 12 only with an explicit
+replacement for those guarantees.
 
 ## Immutable artifact handoff
 

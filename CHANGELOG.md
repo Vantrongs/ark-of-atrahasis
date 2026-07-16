@@ -7,6 +7,35 @@ the tag, npm package, or GitHub release exists.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-16
+
+This is the ESNext/Node 26 modernization release candidate. As of 2026-07-16,
+npm `latest` remains `0.3.1`; no `v0.5.0` tag, npm publication, or immutable
+GitHub release is claimed here.
+
+### Changed
+
+- Raised the exact build, test, package, and release runtime from Node.js
+  22.22.2 to Node.js 26.5.0 and the published engine floor to `>=26.5.0`.
+- Moved TypeScript libraries, emitted syntax, declaration fixtures, packed
+  README examples, and tsup output from fixed ES2022 to rolling `ESNext`, which
+  is the TypeScript 6/7 spelling for the TC39-next surface because neither
+  compiler accepts a literal `ES2026` target.
+- Upgraded Biome from 2.5.3 to 2.5.4 and Vitest from 3.2.7 to 4.1.10. The
+  esbuild override moves from 0.27.2 to 0.28.1 because the 0.27 line is affected
+  by GHSA-g7r4-m6w7-qqqr; the complete build and release-package gates cover the
+  stable esbuild API surface used by tsup 8.5.1.
+- Updated the check workflow to the pinned `actions/checkout` 7.0.0 revision
+  already used by the release workflow, and added an exact `.node-version`
+  source/build contract to the verified package.
+- Retained npm 11.18.0 because npm 12.0.1 no longer accepts the publishable
+  `npm-shrinkwrap.json` for `npm ci` or `npm sbom`; the reproducible install,
+  exact dependency inventory, and CycloneDX 1.7 gates therefore stay on the
+  latest compatible npm line.
+- Retained TypeScript 5.0.4 as the minimum consumer declaration fixture and
+  TypeScript 6.0.3 for tsup declaration generation while continuing to check
+  current TypeScript 7.0.2; TypeScript 7 exposes no compiler API for tsup.
+
 ## [0.4.0] - 2026-07-15
 
 This is the repository release candidate. As of 2026-07-15, npm `latest` remains
@@ -147,6 +176,7 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 - Restored `createListItem()`, `createTerm()`, and `createDescription()` on
   `SafeDocument`.
 
-[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.3.1...v0.4.0
 [0.3.1]: https://www.npmjs.com/package/ark-of-atrahasis/v/0.3.1

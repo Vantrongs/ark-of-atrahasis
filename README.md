@@ -2,7 +2,7 @@
 
 `ark-of-atrahasis` is an ESM-only, capability-oriented DOM wrapper for
 host-controlled Secure ECMAScript (SES) integrations. The repository is at the
-`0.4.0` release-candidate source state: it requires a host-created `ShadowRoot`
+`0.5.0` release-candidate source state: it requires a host-created `ShadowRoot`
 whose host has effective CSS paint containment, plus a host-supplied SES
 `harden`. It exposes fixed wrapper operations rather than raw DOM nodes, denies
 URL and inline-style authority unless the host grants it, and deterministically
@@ -56,7 +56,7 @@ All public `create*` factories return detached wrappers, including
 children; wrappers for those detached descendants remain active and may be
 explicitly reattached until they are disposed or revoked.
 
-The `0.4.0` declarations retain additive transition aliases: `createText()` is
+The `0.5.0` declarations retain additive transition aliases: `createText()` is
 the exact same function as `createParagraph()`, `createRawText()` is the exact
 same function as `createTextNode()`, and the former casing of `setReadonly()`,
 `setAutofocus()`, `setColspan()`, and `setRowspan()` delegates to the preferred
@@ -367,7 +367,14 @@ deployed-browser testing.
 ## Compatibility
 
 - ESM only; CommonJS `require()` is not provided.
-- Source and output target ES2022 plus standard DOM APIs.
+- Source, declaration fixtures, packed examples, and output target rolling
+  `ESNext` plus standard DOM APIs. TypeScript 6.0.3 and 7.0.2 do not accept a
+  literal `ES2026` target; `ESNext` is their TC39-next spelling.
+- The Node packaging/tooling engine floor is 26.5.0. Node 26 is Current rather
+  than LTS until its scheduled 2026-10-28 transition. Node 26.5 exposes the
+  checked ES2026 APIs used by the toolchain, but `Math.sumPrecise` still needs a
+  disabled-by-default V8 flag, so this package does not claim complete engine
+  conformance or depend on that API.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
 - In that pinned matrix, Chromium and WebKit make an attribute-free shadow child
@@ -417,10 +424,13 @@ deployed-browser testing.
 
 ## Development
 
-The exact CI/release toolchain is Node.js 22.22.2, npm 11.18.0, and Playwright
+The exact CI/release toolchain is Node.js 26.5.0, npm 11.18.0, and Playwright
 1.61.1. First run `npm ci --ignore-scripts --no-audit --no-fund` to install the
 frozen `npm-shrinkwrap.json` without dependency lifecycle scripts. Then run
-`npm run check`.
+`npm run check`. npm 12.0.1 is intentionally not used: its `npm ci` and
+`npm sbom --package-lock-only` paths require `package-lock.json` and reject this
+package's publishable shrinkwrap, which would break the verified install and
+CycloneDX inventory contract.
 
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with

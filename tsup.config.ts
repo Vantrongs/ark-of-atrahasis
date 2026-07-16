@@ -7,5 +7,5 @@ export default defineConfig({
   clean: true,
   outDir: "dist",
   sourcemap: true,
-  target: "es2022",
+  target: "esnext",
 });

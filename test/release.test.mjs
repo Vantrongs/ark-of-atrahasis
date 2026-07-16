@@ -63,6 +63,17 @@ const sourceManifest = JSON.parse(
 const sourceShrinkwrap = JSON.parse(
   readFileSync(new URL("../npm-shrinkwrap.json", import.meta.url), "utf8"),
 );
+const sourceNodeVersion = readFileSync(
+  new URL("../.node-version", import.meta.url),
+  "utf8",
+).trim();
+const sourceTsconfig = JSON.parse(
+  readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"),
+);
+const sourceTsupConfig = readFileSync(
+  new URL("../tsup.config.ts", import.meta.url),
+  "utf8",
+);
 
 test("release SBOM normalization is reproducible, current, and bound to the tarball", () => {
   const digest = "a".repeat(64);
@@ -597,7 +608,7 @@ test("release metadata binds the tag to a dated changelog version", () => {
   );
 });
 
-test("release metadata in the repository is synchronized at 0.4.0", () => {
+test("release metadata in the repository is synchronized at 0.5.0", () => {
   const sourceManifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   );
@@ -606,14 +617,14 @@ test("release metadata in the repository is synchronized at 0.4.0", () => {
   );
   const sourceChangelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 
-  assert.equal(sourceManifest.version, "0.4.0");
+  assert.equal(sourceManifest.version, "0.5.0");
   assert.equal(shrinkwrap.version, sourceManifest.version);
   assert.equal(shrinkwrap.packages[""].version, sourceManifest.version);
   assert.doesNotThrow(() =>
     verifyReleaseMetadata({
       changelog: sourceChangelog,
       manifest: sourceManifest,
-      tag: "v0.4.0",
+      tag: "v0.5.0",
     }),
   );
 });
@@ -1121,7 +1132,7 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
     releaseWorkflow,
     /concurrency:\n {2}group: release\n {2}cancel-in-progress: false/u,
   );
-  assert.equal((releaseWorkflow.match(/node-version: 22\.22\.2/gu) ?? []).length, 2);
+  assert.equal((releaseWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 2);
   assert.equal((releaseWorkflow.match(/npm@11\.18\.0/gu) ?? []).length, 2);
   assert.equal((releaseWorkflow.match(/package-manager-cache: false/gu) ?? []).length, 2);
   assert.doesNotMatch(releaseWorkflow, /^\s+cache:/mu);
@@ -1144,6 +1155,40 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
     new Set(actionUses.map(([, action]) => action)),
     new Set(expectedActionPins.keys()),
   );
+});
+
+test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistently", () => {
+  assert.equal(sourceNodeVersion, "26.5.0");
+  assert.equal(sourceManifest.engines?.node, `>=${sourceNodeVersion}`);
+  assert.equal(sourceManifest.packageManager, "npm@11.18.0");
+  assert.equal(sourceManifest.devDependencies?.["@biomejs/biome"], "2.5.4");
+  assert.equal(sourceManifest.devDependencies?.vitest, "4.1.10");
+  assert.equal(sourceManifest.overrides?.esbuild, "0.28.1");
+  assert.deepEqual(sourceTsconfig.compilerOptions?.lib, ["ESNext", "DOM"]);
+  assert.equal(sourceTsconfig.compilerOptions?.target, "ESNext");
+  assert.match(sourceTsupConfig, /target: "esnext"/u);
+  assert.equal((checkWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 1);
+  assert.equal((releaseWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 2);
+  assert.match(
+    checkWorkflow,
+    /actions\/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\.0\.0/u,
+  );
+});
+
+test("Node 26.5 exposes the checked ES2026 surface and records its runtime limit", () => {
+  assert.equal(process.version, "v26.5.0");
+  assert.equal(typeof Temporal, "object");
+  assert.equal(typeof Map.prototype.getOrInsert, "function");
+  assert.equal(typeof Map.prototype.getOrInsertComputed, "function");
+  assert.equal(typeof Iterator.concat, "function");
+  assert.equal(typeof Uint8Array.fromBase64, "function");
+  assert.equal(typeof Uint8Array.prototype.toBase64, "function");
+  assert.equal(typeof Error.isError, "function");
+  assert.equal(
+    JSON.parse("9007199254740993", (_key, _value, context) => context?.source),
+    "9007199254740993",
+  );
+  assert.equal(typeof Math.sumPrecise, "undefined");
 });
 
 test("release workflow isolates write and OIDC authority in the protected job", () => {

@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
-    "lib": ["ES2022", "DOM"],
-    "target": "ES2022",
+    "lib": ["ESNext", "DOM"],
+    "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
+    "types": [],
 
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

@@ -182,9 +182,12 @@ async function runPackedReadmeBrowserExamples({
 
 const sourceManifest = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
 const packageManagerMatch = /^npm@(\d+\.\d+\.\d+)$/u.exec(sourceManifest.packageManager ?? "");
+const requiredNodeVersion = readFileSync(join(repositoryRoot, ".node-version"), "utf8").trim();
 
-if (process.version !== "v22.22.2") {
-  throw new Error(`package smoke tests require Node.js v22.22.2, received ${process.version}`);
+if (process.version !== `v${requiredNodeVersion}`) {
+  throw new Error(
+    `package smoke tests require Node.js v${requiredNodeVersion}, received ${process.version}`,
+  );
 }
 
 if (!packageManagerMatch) {
@@ -310,6 +313,7 @@ try {
     .filter(Boolean)
     .map((entry) => `package/${entry}`);
   const requiredEntries = [
+    "package/.node-version",
     "package/CHANGELOG.md",
     "package/LICENSE",
     "package/README.md",
@@ -328,6 +332,13 @@ try {
     if (!archiveEntries.has(requiredEntry)) {
       throw new Error(`packed artifact is missing ${requiredEntry}`);
     }
+  }
+
+  if (
+    readArchiveEntry(tarballPath, "package/.node-version", sourceDirectory).trim() !==
+      requiredNodeVersion
+  ) {
+    throw new Error("packed Node version differs from the verified build runtime");
   }
 
   const forbiddenEntries = ["bun.lockb", "package-lock.json", "node_modules/"];
@@ -352,6 +363,10 @@ try {
 
   if (packedManifest.sideEffects !== false) {
     throw new Error("packed manifest must declare sideEffects: false");
+  }
+
+  if (packedManifest.engines?.node !== `>=${requiredNodeVersion}`) {
+    throw new Error("packed manifest Node engine must match the exact build baseline");
   }
 
   if (
@@ -383,15 +398,21 @@ try {
   }
 
   if (
+    packedManifest.devDependencies?.["@biomejs/biome"] !== "2.5.4" ||
     packedManifest.devDependencies?.typescript !== "6.0.3" ||
     packedManifest.devDependencies?.["typescript-current"] !== "npm:typescript@7.0.2" ||
     packedManifest.devDependencies?.["typescript-min"] !== "npm:typescript@5.0.4" ||
+    packedManifest.devDependencies?.vitest !== "4.1.10" ||
     packedManifest.devDependencies?.["fast-check"] !== "4.9.0" ||
     packedManifest.devDependencies?.ses !== "2.2.0" ||
     packedManifest.devDependencies?.["@endo/pass-style"] !== "1.8.1" ||
     packedManifest.devDependencies?.["@endo/eventual-send"] !== "1.5.0"
   ) {
     throw new Error("packed manifest must pin TypeScript, fast-check, and the SES verification toolchain");
+  }
+
+  if (packedManifest.overrides?.esbuild !== "0.28.1") {
+    throw new Error("packed manifest must pin the audited esbuild release");
   }
 
   const packedLock = JSON.parse(
@@ -550,12 +571,12 @@ declare class Compartment {
       compilerOptions: {
         allowJs: true,
         checkJs: true,
-        lib: ["ES2022", "DOM"],
+        lib: ["ESNext", "DOM"],
         module: "NodeNext",
         moduleResolution: "NodeNext",
         noEmit: true,
         strict: true,
-        target: "ES2022",
+        target: "ESNext",
         types: [],
       },
       files: ["readme-example-globals.d.ts", ...readmeExampleFiles],
