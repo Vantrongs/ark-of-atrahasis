@@ -1193,7 +1193,6 @@ test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistentl
   assert.equal(sourceManifest.devDependencies?.fallow, "3.6.0");
   assert.equal(sourceManifest.devDependencies?.tsdown, "0.22.8");
   assert.equal(sourceManifest.devDependencies?.vitest, "4.1.10");
-  assert.equal(sourceManifest.overrides?.esbuild, "0.27.2");
   assert.deepEqual(sourceTsconfig.compilerOptions?.lib, ["ESNext", "DOM"]);
   assert.equal(sourceTsconfig.compilerOptions?.target, "ESNext");
   assert.equal(sourceTsconfig.compilerOptions?.strict, true);

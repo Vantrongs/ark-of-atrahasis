@@ -30,14 +30,14 @@ GitHub release is claimed here.
   repository-local tooling skill preserves the same evidence-first workflow
   without copying MS-specific monorepo or framework settings. Entry exports are
   analyzed with exact externally loaded config-default exceptions.
-  esbuild remains 0.27.2 because later 0.27.x releases are affected by
-  GHSA-g7r4-m6w7-qqqr and Vite 8's range does not accept fixed 0.28.1.
 - Replaced unmaintained tsup 8.5.1 with its recommended successor, tsdown
   0.22.8 and Rolldown 1.1.5. This removes tsup's TypeScript 6 DTS failure caused
   by its unconditional deprecated `baseUrl` injection while preserving the
   exact `dist/index.js`, declaration, and source-map artifact contract. The
   verified package now also requires and reproducibly rebuilds the declaration
-  map referenced by `dist/index.d.ts`.
+  map referenced by `dist/index.d.ts`. The obsolete direct `esbuild` override
+  is gone: the resolved tsdown/Rolldown/Vite graph does not install esbuild, and
+  Vite declares it only as an optional peer.
 - Included the check and release workflow fixtures in the source package so its
   packed release tests and Fallow graph retain the same workflow inputs as the
   repository instead of reporting unresolved repo-only imports.

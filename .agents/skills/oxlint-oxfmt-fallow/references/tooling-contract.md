@@ -28,6 +28,11 @@ Exit 1 from a direct analysis command may mean findings. Exit 2 means a
 validation/runtime failure. The repository runner adds a signed-binary preflight
 and must distinguish those states.
 
+Do not copy MS's `health.maxUnitSize` setting or add `fallow health` to the main
+report. This repository deliberately scopes Fallow to dead code, dependency and
+cycle integrity, and duplication. Health output is a separate on-demand design
+audit, not a version-pinned project contract.
+
 The Ark duplicate contract deliberately retains Fallow's curated default clone
 ignores. Setting `ignoreDefaults` to false was measured on this repository and
 mostly expanded repeated test fixtures rather than production design signal.

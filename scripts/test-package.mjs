@@ -425,10 +425,6 @@ try {
     );
   }
 
-  if (packedManifest.overrides?.esbuild !== "0.27.2") {
-    throw new Error("packed manifest must pin the audited Vite-compatible esbuild release");
-  }
-
   const packedLock = JSON.parse(
     readArchiveEntry(tarballPath, "package/npm-shrinkwrap.json", sourceDirectory),
   );
