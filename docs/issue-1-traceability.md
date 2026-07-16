@@ -346,8 +346,17 @@ integrated into PR #7 and then completed by these merged PRs to
   `2360347`; and
 - [#24](https://github.com/Vantrongs/ark-of-atrahasis/pull/24) final contract
   closure for external raw preservation, form-surface policy metering, and the
-  exact runtime namespace (this PR; its mutable head SHA is intentionally not
-  embedded here).
+  exact runtime namespace, merged at `d685401`;
+- [#25](https://github.com/Vantrongs/ark-of-atrahasis/pull/25) i18n and
+  deterministic CycloneDX 1.7 completion, merged at `57a40bf`; and
+- [#26](https://github.com/Vantrongs/ark-of-atrahasis/pull/26) deprecated
+  dependency-path removal, merged at `f538767`.
+
+Fork umbrella [#27](https://github.com/Vantrongs/ark-of-atrahasis/pull/27)
+collects the complete issue branch for review against `main` and adds the
+continuous dependency, registry-signature, Dependabot, and CodeQL security
+layer. Its mutable head and CI results remain live PR evidence rather than
+being copied into this document.
 
 Exact check counts, artifact digests, and links are intentionally not copied
 into this mutable document. They belong to the CI check for the immutable head
