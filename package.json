@@ -45,7 +45,7 @@
     "test:package": "node --throw-deprecation scripts/test-package.mjs",
     "pack:verified": "node --throw-deprecation scripts/test-package.mjs --output .artifacts",
     "audit": "npm audit --audit-level=low",
-    "audit:signatures": "npm audit signatures --include-attestations",
+    "audit:signatures": "npm audit signatures",
     "analyze": "node scripts/fallow-report.mjs",
     "check": "npm run lint && npm run typecheck && npm run analyze && npm test && npm run test:browser && npm run test:ses && npm run audit && npm run test:package",
     "prepack": "npm run build",

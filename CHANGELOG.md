@@ -43,8 +43,14 @@ GitHub release is claimed here.
   repository instead of reporting unresolved repo-only imports.
 - Added a least-privilege security workflow with SHA-pinned dependency review
   that blocks new advisories at `low` severity in every dependency scope. Push,
-  weekly, and manual runs use the exact frozen Node/npm toolchain to repeat the
-  vulnerability audit and verify npm registry signatures plus attestations.
+  weekly, and manual coverage uses the exact frozen Node/npm toolchain to repeat
+  the vulnerability audit and verify npm registry signatures plus attestations.
+  Base-branch edits now revalidate the current pull-request merge and dependency
+  diff without allocating runners for title/body-only edits. The `main` check
+  reuses its installed graph for registry trust instead of starting a duplicate
+  audit job, while weekly/manual temporal rechecks remain independent. The
+  release gate now installs its exact three Playwright engines before the full
+  browser matrix and verifies registry trust before creating artifacts.
   The workflow fixture and its exact contract are included in the reproducible
   source package and structurally validated in release tests with pinned,
   dependency-free YAML 2.9.0.
