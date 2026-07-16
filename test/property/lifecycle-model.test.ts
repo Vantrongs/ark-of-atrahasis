@@ -17,6 +17,7 @@ import { testHarden } from "../support/harden.ts";
 import {
   assertStableBoundaryError,
   commandReplayPath,
+  propertyEnvironment,
   propertyParameters,
 } from "../support/property-config.ts";
 
@@ -87,6 +88,11 @@ interface Real {
   destroy(): void;
 }
 
+const generateSyncCommands: (
+  commandArbitraries: Arbitrary<Command<Model, Real>>[],
+  constraints?: { maxCommands?: number; replayPath?: string },
+) => Arbitrary<Iterable<Command<Model, Real>>> = fc.commands;
+
 const ZERO_USAGE: MutableQuotas = {
   nodes: 0,
   listeners: 0,
@@ -148,7 +154,7 @@ function createReal(quotas: SafeDocumentQuotas): Real {
   const outsideSentinel = document.createElement("p");
   const external = document.createElement("section");
   outsideSentinel.id = "model-outside-sentinel";
-  outsideSentinel.dataset.state = "host-owned";
+  outsideSentinel.setAttribute("data-state", "host-owned");
   outsideSentinel.textContent = "outside-original";
   document.body.append(host, outsideSentinel, external);
   const root = host.attachShadow({ mode: "open" });
@@ -344,9 +350,9 @@ function releaseNodeAccounting(model: Model, node: ModelNode, state: Exclude<Nod
   node.attributes.clear();
   node.styles.clear();
   node.requests.clear();
-  node.logicalId = undefined;
-  node.physicalToken = undefined;
-  node.reference = undefined;
+  delete node.logicalId;
+  delete node.physicalToken;
+  delete node.reference;
   model.usage.nodes -= 1;
   node.accountingReleased = true;
 }
@@ -991,8 +997,8 @@ function executeSetId(model: Model, real: Real, spec: Extract<CommandSpec, { typ
   if (nextAttributeAmount === 0) node.attributes.delete("id");
   else node.attributes.set("id", nextAttributeAmount);
   if (spec.logicalId === "") {
-    node.logicalId = undefined;
-    node.physicalToken = undefined;
+    delete node.logicalId;
+    delete node.physicalToken;
   } else {
     node.logicalId = spec.logicalId;
     model.logicalIds.set(spec.logicalId, node.id);
@@ -1154,7 +1160,13 @@ function lifecycleCommands(
   maxCommands: number,
   replayPathOverride?: string | null,
 ): Arbitrary<Iterable<Command<Model, Real>>> {
-  const commands = [
+  const cleanupListenerCommand = commandArbitrary(
+    fc.record({ type: fc.constant("cleanup-listener"), listenerId: LISTENER_ID }),
+  );
+  const disposeNodeCommand = commandArbitrary(
+    fc.record({ type: fc.constant("dispose-node"), nodeId: NODE_ID }),
+  );
+  const commands: Arbitrary<Command<Model, Real>>[] = [
     commandArbitrary(fc.record({
       type: fc.constant("create"),
       id: NODE_ID,
@@ -1177,7 +1189,7 @@ function lifecycleCommands(
       listenerId: LISTENER_ID,
     })),
     commandArbitrary(fc.record({ type: fc.constant("dispatch"), nodeId: NODE_ID })),
-    commandArbitrary(fc.record({ type: fc.constant("cleanup-listener"), listenerId: LISTENER_ID })),
+    cleanupListenerCommand,
     commandArbitrary(fc.record({
       type: fc.constant("style"),
       nodeId: NODE_ID,
@@ -1206,15 +1218,15 @@ function lifecycleCommands(
       logicalId: LOGICAL_ID,
     })),
     commandArbitrary(fc.record({ type: fc.constant("lookup-id"), logicalId: LOGICAL_ID })),
-    commandArbitrary(fc.record({ type: fc.constant("dispose-node"), nodeId: NODE_ID })),
+    disposeNodeCommand,
     commandArbitrary(fc.record({ type: fc.constant("dispose-document") })),
   ];
   const replayPath = replayPathOverride === null ? undefined : replayPathOverride ?? commandReplayPath();
-  return fc.commands<Model, Real>([
+  return generateSyncCommands([
     ...commands,
-    commands[6],
-    commands[14],
-    commands[14],
+    cleanupListenerCommand,
+    disposeNodeCommand,
+    disposeNodeCommand,
   ], {
     maxCommands,
     ...(replayPath === undefined ? {} : { replayPath }),
@@ -1443,23 +1455,23 @@ describe.sequential("lifecycle command model", () => {
     expect(first.counterexamplePath).not.toBeNull();
     if (first.counterexamplePath === null) throw new Error("expected a shrunk counterexample path");
     const previous = {
-      seed: process.env.FC_SEED,
-      path: process.env.FC_PATH,
-      endOnFailure: process.env.FC_END_ON_FAILURE,
+      seed: propertyEnvironment.FC_SEED,
+      path: propertyEnvironment.FC_PATH,
+      endOnFailure: propertyEnvironment.FC_END_ON_FAILURE,
     };
     let replayParameters: ReturnType<typeof propertyParameters>;
     try {
-      process.env.FC_SEED = `${first.seed}`;
-      process.env.FC_PATH = first.counterexamplePath;
-      process.env.FC_END_ON_FAILURE = "1";
+      propertyEnvironment.FC_SEED = `${first.seed}`;
+      propertyEnvironment.FC_PATH = first.counterexamplePath;
+      propertyEnvironment.FC_END_ON_FAILURE = "1";
       replayParameters = propertyParameters(1);
     } finally {
-      if (previous.seed === undefined) delete process.env.FC_SEED;
-      else process.env.FC_SEED = previous.seed;
-      if (previous.path === undefined) delete process.env.FC_PATH;
-      else process.env.FC_PATH = previous.path;
-      if (previous.endOnFailure === undefined) delete process.env.FC_END_ON_FAILURE;
-      else process.env.FC_END_ON_FAILURE = previous.endOnFailure;
+      if (previous.seed === undefined) delete propertyEnvironment.FC_SEED;
+      else propertyEnvironment.FC_SEED = previous.seed;
+      if (previous.path === undefined) delete propertyEnvironment.FC_PATH;
+      else propertyEnvironment.FC_PATH = previous.path;
+      if (previous.endOnFailure === undefined) delete propertyEnvironment.FC_END_ON_FAILURE;
+      else propertyEnvironment.FC_END_ON_FAILURE = previous.endOnFailure;
     }
     const replay = fc.check(property, replayParameters);
     expect(replay.failed).toBe(true);
@@ -1484,19 +1496,23 @@ describe.sequential("lifecycle command model", () => {
     const firstTrace = String(first.counterexample[0]);
     const replayMetadata = firstTrace.match(/replayPath=("[^"]+")/u);
     if (replayMetadata === null) throw new Error(`missing command replay metadata: ${firstTrace}`);
-    const replayPath = JSON.parse(replayMetadata[1]);
+    const encodedReplayPath = replayMetadata[1];
+    if (encodedReplayPath === undefined) {
+      throw new Error(`missing encoded command replay path: ${firstTrace}`);
+    }
+    const replayPath = JSON.parse(encodedReplayPath);
     if (typeof replayPath !== "string" || replayPath === "") {
       throw new Error("expected a non-empty command replay path");
     }
 
-    const previousReplayPath = process.env.FC_COMMAND_REPLAY_PATH;
+    const previousReplayPath = propertyEnvironment.FC_COMMAND_REPLAY_PATH;
     let replayArbitrary: Arbitrary<Iterable<Command<Model, Real>>>;
     try {
-      process.env.FC_COMMAND_REPLAY_PATH = replayPath;
+      propertyEnvironment.FC_COMMAND_REPLAY_PATH = replayPath;
       replayArbitrary = lifecycleCommands(12);
     } finally {
-      if (previousReplayPath === undefined) delete process.env.FC_COMMAND_REPLAY_PATH;
-      else process.env.FC_COMMAND_REPLAY_PATH = previousReplayPath;
+      if (previousReplayPath === undefined) delete propertyEnvironment.FC_COMMAND_REPLAY_PATH;
+      else propertyEnvironment.FC_COMMAND_REPLAY_PATH = previousReplayPath;
     }
     const replay = fc.check(fc.property(replayArbitrary, failsOnExecutedCreate), {
       seed: first.seed,

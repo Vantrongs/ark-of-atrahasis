@@ -375,6 +375,11 @@ deployed-browser testing.
   checked ES2026 APIs used by the toolchain, but `Math.sumPrecise` still needs a
   disabled-by-default V8 flag, so this package does not claim complete engine
   conformance or depend on that API.
+- Node-only release metadata validation uses native `Temporal.PlainDate` so a
+  changelog heading must contain a real canonical ISO calendar date, not merely
+  a date-shaped string. A 2026-07-16 probe of the pinned browser matrix found
+  `Temporal` in Chromium and Firefox but not WebKit 26.5, so the shipped browser
+  runtime does not require `Temporal` and adds no polyfill/runtime dependency.
 - The checked browser matrix is the Chromium, Firefox, and WebKit builds bundled
   by Playwright 1.61.1.
 - In that pinned matrix, Chromium and WebKit make an attribute-free shadow child
@@ -416,9 +421,10 @@ deployed-browser testing.
   `@endo/eventual-send` 1.5.0.
 - Packed declarations are checked with TypeScript 5.0.4 (consumer minimum) and
   7.0.2 (pinned current). Source and property-model commands run under pinned
-  TypeScript 6.0.3 and 7.0.2. The build remains on TypeScript 6.0.3 because
-  tsup 8.5.1 declaration generation is not compatible with the TypeScript 7
-  compiler API. TypeScript is not a consumer peer dependency.
+  TypeScript 6.0.3 and 7.0.2. tsdown 0.22.8 generates the release declarations
+  with the pinned TypeScript 6 compiler while the same source and packed
+  declarations are checked independently with TypeScript 7. TypeScript is not
+  a consumer peer dependency.
 - Node can import the module for packaging/tooling checks, but DOM operations
   require a browser-like host.
 
@@ -432,6 +438,27 @@ frozen `npm-shrinkwrap.json` without dependency lifecycle scripts. Then run
 package's publishable shrinkwrap, which would break the verified install and
 CycloneDX inventory contract.
 
+`tsconfig.json` applies the strict TS 6/7 source contract, including exact
+optional-property semantics, checked index access, index-signature access
+syntax, side-effect-import checks, explicit returns/overrides, erasable-only
+syntax, and full declaration-library checking. `tsconfig.tooling.json` isolates
+the one exception: tsdown's public config declarations expose optional feature
+peers (`publint`, ATTW, CSS, executable, devtools, and unused-code integrations)
+that this project does not install, so only that tooling import uses
+`skipLibCheck`. Source declarations retain full library checking. The
+TypeScript 5.0.4 consumer fixture enables every compatible soundness flag while
+remaining a genuine minimum-version check. The package gate also requires the
+declaration map referenced by `dist/index.d.ts`, verifies that every map source
+is included under `src/`, and reproduces all four build artifacts byte-for-byte.
+
+Fallow 3.6.0 is pinned locally and configured with the repository's real
+script, Playwright, Vitest, Node, and declaration entry points. `npm run
+analyze` verifies the signed platform binary, then reports dead code, circular
+dependencies, private-type leaks, and duplication. Exit 1 is accepted only
+with well-formed compact findings and no stderr; installation, integrity,
+configuration, and runtime failures remain fatal. No finding is auto-deleted or
+hidden behind `|| true`.
+
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with
 the required system libraries. CI and ordinary FHS hosts leave it unset.
@@ -440,13 +467,14 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | --- | --- |
 | `npm run lint` | Lint TypeScript and test/release scripts |
 | `npm run typecheck` | Check source and property/model commands with TypeScript 6.0.3 and 7.0.2 |
+| `npm run analyze` | Report Fallow 3.6.0 dead code, cycles, private-type leaks, and duplication; fail only if the analyzer itself fails |
 | `npm test` | Run unit/property/model tests, built ESM/API smoke, and release-contract tests |
 | `npm run test:property` | Run only the fixed-seed generated security and lifecycle suites (already discovered by `test:unit`) |
 | `npm run test:browser` | Run boundary, SES, and unyielding-Worker termination tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run test:package` | Build and test a tarball from a pristine Git archive, including the exact root runtime-export namespace and literal typecheck/browser execution of every executable packed README fence |
-| `npm run check` | Run the complete CI gate |
+| `npm run check` | Run the complete CI gate, including advisory Fallow analysis |
 | `npm run pack:verified` | Test and write the exact tarball, strictly validated reproducible CycloneDX 1.7 SBOM bound to that tarball's SHA-256, and checksum manifest |
 
 See [RELEASING.md](./RELEASING.md) for immutable artifact handoff, protected

@@ -76,6 +76,18 @@ component digest is the exact-artifact link.
 These local artifacts are for inspection; do not publish from the worktree or a
 developer credential.
 
+The dated changelog heading is parsed by Node 26's native
+`Temporal.PlainDate`, so a canonical `YYYY-MM-DD` spelling must also represent a
+real ISO calendar date. Browser-runtime code deliberately does not depend on
+Temporal while the pinned WebKit matrix lacks it.
+
+The complete gate also runs pinned Fallow 3.6.0 in report mode for dead code,
+cycles, private-type leaks, and duplication. It first requires a successful
+signed-binary verification; exit 1 is advisory only when compact findings are
+present and stderr is empty. Missing/tampered binaries and configuration or
+runtime failures remain fatal. Review the report rather than auto-applying
+removals.
+
 npm 11.18.0 is the newest supported release-tool line for this contract. npm
 12.0.1 requires `package-lock.json` for both `npm ci` and lock-only SBOM
 generation and rejects `npm-shrinkwrap.json`; adopting it would remove the
@@ -214,7 +226,8 @@ The npm tarball includes:
 - the TypeScript preferred form for modification under `src/`;
 - `package.json`, the publishable `npm-shrinkwrap.json`, exact development
   dependency resolutions and integrity digests;
-- the tests, release/build scripts, `tsconfig.json`, and `tsup.config.ts`;
+- the tests, CI/release workflows, release/build scripts, `tsconfig.json`, and
+  `tsdown.config.ts`;
 - this release procedure, README, and GPLv3 license; and
 - generated ESM, declarations, and source maps under `dist/`.
 

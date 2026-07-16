@@ -18,23 +18,47 @@ GitHub release is claimed here.
 - Raised the exact build, test, package, and release runtime from Node.js
   22.22.2 to Node.js 26.5.0 and the published engine floor to `>=26.5.0`.
 - Moved TypeScript libraries, emitted syntax, declaration fixtures, packed
-  README examples, and tsup output from fixed ES2022 to rolling `ESNext`, which
+  README examples, and bundled output from fixed ES2022 to rolling `ESNext`, which
   is the TypeScript 6/7 spelling for the TC39-next surface because neither
   compiler accepts a literal `ES2026` target.
-- Upgraded Biome from 2.5.3 to 2.5.4 and Vitest from 3.2.7 to 4.1.10. The
-  esbuild override moves from 0.27.2 to 0.28.1 because the 0.27 line is affected
-  by GHSA-g7r4-m6w7-qqqr; the complete build and release-package gates cover the
-  stable esbuild API surface used by tsup 8.5.1.
+- Upgraded Biome from 2.5.3 to 2.5.4 and Vitest from 3.2.7 to 4.1.10, and added
+  Fallow 3.6.0 report-mode dead-code/cycle/duplication analysis to the complete
+  gate. The report wrapper verifies the signed platform binary and accepts exit
+  1 only for well-formed findings. Its entry roots name only directly invoked
+  scripts, and no redundant self-ignore can hide future dependency drift.
+  esbuild remains 0.27.2 because later 0.27.x releases are affected by
+  GHSA-g7r4-m6w7-qqqr and Vite 8's range does not accept fixed 0.28.1.
+- Replaced unmaintained tsup 8.5.1 with its recommended successor, tsdown
+  0.22.8 and Rolldown 1.1.5. This removes tsup's TypeScript 6 DTS failure caused
+  by its unconditional deprecated `baseUrl` injection while preserving the
+  exact `dist/index.js`, declaration, and source-map artifact contract. The
+  verified package now also requires and reproducibly rebuilds the declaration
+  map referenced by `dist/index.d.ts`.
+- Included the check and release workflow fixtures in the source package so its
+  packed release tests and Fallow graph retain the same workflow inputs as the
+  repository instead of reporting unresolved repo-only imports.
 - Updated the check workflow to the pinned `actions/checkout` 7.0.0 revision
-  already used by the release workflow, and added an exact `.node-version`
-  source/build contract to the verified package.
+  already used by the release workflow, and made the exact `.node-version` the
+  single Node source for checkout jobs and the no-checkout publish handoff.
+- Strengthened the TypeScript 6/7 source and property configurations with exact
+  optional properties, checked indexed access, index-signature syntax,
+  side-effect-import checks, explicit returns/overrides, erasable syntax, and
+  unreachable/unused-label errors. Production declarations now run with full
+  library checking; only the isolated tsdown config skips its uninstalled
+  optional-feature peer declarations.
+- Began native Temporal adoption in Node-only release tooling: changelog dates
+  are parsed as `Temporal.PlainDate`, rejecting calendar-impossible headings.
+  Browser runtime code stays Temporal-free because Playwright 1.61.1's WebKit
+  26.5 still has no `Temporal` global. The Node Worker termination test now
+  measures its deadline with monotonic `performance.now()` rather than wall
+  time.
 - Retained npm 11.18.0 because npm 12.0.1 no longer accepts the publishable
   `npm-shrinkwrap.json` for `npm ci` or `npm sbom`; the reproducible install,
   exact dependency inventory, and CycloneDX 1.7 gates therefore stay on the
   latest compatible npm line.
 - Retained TypeScript 5.0.4 as the minimum consumer declaration fixture and
-  TypeScript 6.0.3 for tsup declaration generation while continuing to check
-  current TypeScript 7.0.2; TypeScript 7 exposes no compiler API for tsup.
+  TypeScript 6.0.3 for release declaration generation while continuing to
+  check the source and packed declarations with current TypeScript 7.0.2.
 
 ## [0.4.0] - 2026-07-15
 

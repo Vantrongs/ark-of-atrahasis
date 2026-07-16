@@ -57,6 +57,10 @@ const packageGateSource = readFileSync(
   new URL("../scripts/test-package.mjs", import.meta.url),
   "utf8",
 );
+const fallowReportSource = readFileSync(
+  new URL("../scripts/fallow-report.mjs", import.meta.url),
+  "utf8",
+);
 const sourceManifest = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
@@ -70,8 +74,14 @@ const sourceNodeVersion = readFileSync(
 const sourceTsconfig = JSON.parse(
   readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"),
 );
-const sourceTsupConfig = readFileSync(
-  new URL("../tsup.config.ts", import.meta.url),
+const sourceToolingTsconfig = JSON.parse(
+  readFileSync(new URL("../tsconfig.tooling.json", import.meta.url), "utf8"),
+);
+const sourceFallowConfig = JSON.parse(
+  readFileSync(new URL("../.fallowrc.json", import.meta.url), "utf8"),
+);
+const sourceTsdownConfig = readFileSync(
+  new URL("../tsdown.config.ts", import.meta.url),
   "utf8",
 );
 
@@ -545,6 +555,14 @@ function createProvenanceAudit(fixture) {
 
 test("release metadata binds the tag to a dated changelog version", () => {
   assert.doesNotThrow(() => verifyReleaseMetadata({ changelog, manifest, tag: "v0.4.0" }));
+  assert.throws(
+    () => verifyReleaseMetadata({
+      changelog: "## [Unreleased]\n\n## [0.4.0] - 2026-02-29\n",
+      manifest,
+      tag: "v0.4.0",
+    }),
+    /invalid ISO date/u,
+  );
   assert.throws(
     () => verifyReleaseMetadata({ changelog, manifest, tag: "v0.4.1" }),
     /does not match package version/u,
@@ -1132,7 +1150,17 @@ test("release workflow pins the exact no-cache Node and npm toolchain", () => {
     releaseWorkflow,
     /concurrency:\n {2}group: release\n {2}cancel-in-progress: false/u,
   );
-  assert.equal((releaseWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 2);
+  assert.equal((releaseWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
+  assert.equal(
+    (releaseWorkflow.match(/node-version: \$\{\{ needs\.verify\.outputs\.node-version \}\}/gu) ?? [])
+      .length,
+    1,
+  );
+  assert.match(
+    releaseWorkflow,
+    /outputs:\n {6}node-version: \$\{\{ steps\.toolchain\.outputs\.node-version \}\}/u,
+  );
+  assert.doesNotMatch(releaseWorkflow, /node-version: 26\.5\.0/u);
   assert.equal((releaseWorkflow.match(/npm@11\.18\.0/gu) ?? []).length, 2);
   assert.equal((releaseWorkflow.match(/package-manager-cache: false/gu) ?? []).length, 2);
   assert.doesNotMatch(releaseWorkflow, /^\s+cache:/mu);
@@ -1162,13 +1190,52 @@ test("repository toolchain targets Node 26.5 and rolling TC39 ESNext consistentl
   assert.equal(sourceManifest.engines?.node, `>=${sourceNodeVersion}`);
   assert.equal(sourceManifest.packageManager, "npm@11.18.0");
   assert.equal(sourceManifest.devDependencies?.["@biomejs/biome"], "2.5.4");
+  assert.equal(sourceManifest.devDependencies?.fallow, "3.6.0");
+  assert.equal(sourceManifest.devDependencies?.tsdown, "0.22.8");
   assert.equal(sourceManifest.devDependencies?.vitest, "4.1.10");
-  assert.equal(sourceManifest.overrides?.esbuild, "0.28.1");
+  assert.equal(sourceManifest.overrides?.esbuild, "0.27.2");
   assert.deepEqual(sourceTsconfig.compilerOptions?.lib, ["ESNext", "DOM"]);
   assert.equal(sourceTsconfig.compilerOptions?.target, "ESNext");
-  assert.match(sourceTsupConfig, /target: "esnext"/u);
-  assert.equal((checkWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 1);
-  assert.equal((releaseWorkflow.match(/node-version: 26\.5\.0/gu) ?? []).length, 2);
+  assert.equal(sourceTsconfig.compilerOptions?.strict, true);
+  assert.equal(sourceTsconfig.compilerOptions?.exactOptionalPropertyTypes, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noUncheckedIndexedAccess, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noPropertyAccessFromIndexSignature, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noImplicitReturns, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noImplicitOverride, true);
+  assert.equal(sourceTsconfig.compilerOptions?.noUncheckedSideEffectImports, true);
+  assert.equal(sourceTsconfig.compilerOptions?.erasableSyntaxOnly, true);
+  assert.equal(sourceTsconfig.compilerOptions?.skipLibCheck, false);
+  assert.equal(sourceToolingTsconfig.compilerOptions?.skipLibCheck, true);
+  assert.deepEqual(sourceToolingTsconfig.include, ["tsdown.config.ts"]);
+  assert.deepEqual(sourceFallowConfig.entry?.slice(0, 6), [
+    "src/index.ts",
+    "scripts/fallow-report.mjs",
+    "scripts/reject-direct-publish.mjs",
+    "scripts/release-recovery.mjs",
+    "scripts/test-package.mjs",
+    "scripts/verify-release.mjs",
+  ]);
+  assert.ok(!sourceFallowConfig.ignoreDependencies?.includes("fallow"));
+  assert.equal(sourceFallowConfig.rules?.["private-type-leaks"], "warn");
+  assert.match(sourceManifest.scripts?.check ?? "", /npm run analyze/u);
+  assert.match(fallowReportSource, /\["dead-code", "--format", "compact"\]/u);
+  assert.match(fallowReportSource, /\["dupes", "--format", "compact"\]/u);
+  assert.match(fallowReportSource, /runFallow\(\["--version"\]\)/u);
+  assert.match(fallowReportSource, /\^verified: yes/u);
+  assert.match(fallowReportSource, /hasCompactFinding/u);
+  assert.match(fallowReportSource, /result\.status === 1 && result\.stderr === ""/u);
+  assert.doesNotMatch(fallowReportSource, /\|\| true|health/u);
+  assert.match(sourceTsdownConfig, /dts: \{ sourcemap: true \}/u);
+  assert.match(sourceTsdownConfig, /target: "esnext"/u);
+  assert.match(sourceTsdownConfig, /outExtensions: \(\) => \(\{ js: "\.js", dts: "\.d\.ts" \}\)/u);
+  assert.match(packageGateSource, /const allowedGitHubEntries = new Set/u);
+  assert.match(packageGateSource, /entry\.startsWith\("package\/\.git\/"\)/u);
+  assert.match(
+    packageGateSource,
+    /entry\.startsWith\("package\/\.github\/"\) && !allowedGitHubEntries\.has\(entry\)/u,
+  );
+  assert.equal((checkWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
+  assert.equal((releaseWorkflow.match(/node-version-file: \.node-version/gu) ?? []).length, 1);
   assert.match(
     checkWorkflow,
     /actions\/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\.0\.0/u,

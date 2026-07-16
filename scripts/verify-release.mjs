@@ -25,7 +25,7 @@ export function verifyReleaseMetadata({ changelog, manifest, tag }) {
   }
 
   const releaseHeading = new RegExp(
-    `^## \\[${escapeRegExp(manifest.version)}\\] - \\d{4}-\\d{2}-\\d{2}$`,
+    `^## \\[${escapeRegExp(manifest.version)}\\] - (\\d{4}-\\d{2}-\\d{2})$`,
     "gmu",
   );
   const releaseMatches = [...changelog.matchAll(releaseHeading)];
@@ -38,6 +38,16 @@ export function verifyReleaseMetadata({ changelog, manifest, tag }) {
     );
   }
   const releaseMatch = releaseMatches[0];
+  const releaseDate = releaseMatch[1];
+  try {
+    if (releaseDate === undefined || Temporal.PlainDate.from(releaseDate).toString() !== releaseDate) {
+      throw new RangeError("non-canonical release date");
+    }
+  } catch {
+    throw new Error(
+      `CHANGELOG.md release heading for ${manifest.version} has an invalid ISO date`,
+    );
+  }
 
   const unreleasedMatches = [...changelog.matchAll(/^## \[Unreleased\][ \t]*$/gmu)];
   if (unreleasedMatches.length === 0) {

@@ -121,11 +121,11 @@ interface RateWindowState {
 
 interface NormalizedOptions {
   readonly harden: Hardener;
-  readonly quotas?: Partial<SafeDocumentQuotas>;
-  readonly rates?: Partial<SafeDocumentRates>;
-  readonly urlPolicy?: SafeURLPolicy;
-  readonly stylePolicy?: SafeStylePolicy;
-  readonly formControlPolicy?: SafeFormControlPolicy;
+  readonly quotas: Partial<SafeDocumentQuotas> | undefined;
+  readonly rates: Partial<SafeDocumentRates> | undefined;
+  readonly urlPolicy: SafeURLPolicy | undefined;
+  readonly stylePolicy: SafeStylePolicy | undefined;
+  readonly formControlPolicy: SafeFormControlPolicy | undefined;
 }
 
 function readOwnDataProperty<Value>(

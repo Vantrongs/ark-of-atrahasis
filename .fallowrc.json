@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    "src/index.ts",
+    "scripts/fallow-report.mjs",
+    "scripts/reject-direct-publish.mjs",
+    "scripts/release-recovery.mjs",
+    "scripts/test-package.mjs",
+    "scripts/verify-release.mjs",
+    "test/**/*.test.ts",
+    "test/**/*.test.mjs",
+    "test/browser/*.spec.mjs",
+    "test/browser/server.mjs",
+    "test/api.node.mjs",
+    "test/ses.node.mjs",
+    "test/types/*.ts",
+    "playwright.config.mjs",
+    "tsdown.config.ts"
+  ],
+  "ignoreDependencies": [
+    "@cyclonedx/cyclonedx-library",
+    "ajv",
+    "ajv-formats",
+    "smtp-address-parser",
+    "typescript-current",
+    "typescript-min"
+  ],
+  "rules": {
+    "private-type-leaks": "warn"
+  }
+}

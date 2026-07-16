@@ -14,22 +14,9 @@ import type {
 import type { EventTargetResolution } from "./identifier-namespace.ts";
 
 type PlatformFunction = (...arguments_: unknown[]) => unknown;
-type GetterRecord = Readonly<Record<string, PlatformFunction | undefined>>;
-
-interface EventAccessors {
-  readonly event: GetterRecord;
-  readonly eventMethods: GetterRecord;
-  readonly keyboard: GetterRecord;
-  readonly mouse: GetterRecord;
-  readonly pointer: GetterRecord;
-  readonly touchEvent: GetterRecord;
-  readonly focus: GetterRecord;
-  readonly input: GetterRecord;
-  readonly inputElement: GetterRecord;
-  readonly controlValueGetters: readonly (PlatformFunction | undefined)[];
-  readonly touchList: GetterRecord;
-  readonly touch: GetterRecord;
-}
+type GetterRecord<Name extends string> = Readonly<
+  Record<Name, PlatformFunction | undefined>
+>;
 
 export interface SafeEventDispatch<Event extends SafeEvent = SafeEvent> {
   readonly event: Event;
@@ -84,7 +71,11 @@ function ownMethod(prototype: unknown, name: string): PlatformFunction | undefin
   }
 }
 
-function captureGetters(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
+function captureGetters<const Names extends readonly string[]>(
+  realm: unknown,
+  constructorName: string,
+  names: Names,
+): GetterRecord<Names[number]> {
   const prototype = realmPrototype(realm, constructorName);
   const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
     string,
@@ -94,7 +85,11 @@ function captureGetters(realm: unknown, constructorName: string, names: readonly
   return Object.freeze(result);
 }
 
-function captureMethods(realm: unknown, constructorName: string, names: readonly string[]): GetterRecord {
+function captureMethods<const Names extends readonly string[]>(
+  realm: unknown,
+  constructorName: string,
+  names: Names,
+): GetterRecord<Names[number]> {
   const prototype = realmPrototype(realm, constructorName);
   const result: Record<string, PlatformFunction | undefined> = Object.create(null) as Record<
     string,
@@ -104,7 +99,7 @@ function captureMethods(realm: unknown, constructorName: string, names: readonly
   return Object.freeze(result);
 }
 
-function captureEventAccessors(realm: unknown): EventAccessors {
+function captureEventAccessors(realm: unknown) {
   const valueGetters = [
     ownGetter(realmPrototype(realm, "HTMLInputElement"), "value"),
     ownGetter(realmPrototype(realm, "HTMLTextAreaElement"), "value"),
@@ -207,6 +202,8 @@ function captureEventAccessors(realm: unknown): EventAccessors {
   });
 }
 
+type EventAccessors = ReturnType<typeof captureEventAccessors>;
+
 function readUnknown(getter: PlatformFunction | undefined, receiver: unknown): unknown {
   if (getter === undefined) return undefined;
   try {
@@ -274,7 +271,10 @@ function snapshotRelatedTarget(
     : snapshotTarget(target, accessors, resolveTarget);
 }
 
-function modifiers(getters: GetterRecord, nativeEvent: Event): SafeModifierSnapshotRecord {
+function modifiers(
+  getters: GetterRecord<"ctrlKey" | "altKey" | "shiftKey" | "metaKey">,
+  nativeEvent: Event,
+): SafeModifierSnapshotRecord {
   return {
     ctrlKey: readBoolean(getters.ctrlKey, nativeEvent),
     altKey: readBoolean(getters.altKey, nativeEvent),

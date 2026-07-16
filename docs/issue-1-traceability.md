@@ -262,6 +262,14 @@ release is externally complete.
   byte-for-byte `dist` rebuild. `scripts/readme-examples.mjs` recognizes CommonMark backtick/tilde,
   length, and indentation forms and structurally rejects unclosed or unsupported
   executable fences instead of maintaining a copied example.
+- `.node-version` is the single checkout-job runtime source and is handed from
+  the credential-free release job to the no-checkout publish job. The same
+  source, strict TS 6/7 configs, isolated tsdown tooling config, and Fallow
+  3.6.0 report configuration are present in the verified source package. Native
+  `Temporal.PlainDate` rejects calendar-impossible changelog headings without
+  adding a browser dependency; pinned WebKit 26.5 still lacks `Temporal`.
+  The packed source now includes the check/release workflow fixtures consumed
+  by the release tests, preserving the same Fallow graph outside the worktree.
 - `scripts/sbom.mjs` upgrades npm 11.18.0's locked-dependency graph to the
   current CycloneDX 1.7 JSON envelope, removes UUID/time nondeterminism, binds
   the root component to the exact tarball SHA-256, and requires two consecutive
