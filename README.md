@@ -468,12 +468,15 @@ workflow without importing MS-specific Bun, Svelte, CSS, workspace, or baseline
 policy.
 
 The separate `security` workflow reviews every pull request's dependency diff
-at `low` severity across runtime, development, and unknown scopes. On each push
-to `main`, every Monday, and on manual dispatch, it performs a frozen install
-with the exact Node/npm toolchain, rejects any known advisory, and verifies npm
-registry signatures together with available attestations. This complements the
-full `check` gate without adding container-only scanners to a package with no
-runtime dependencies or shipped image.
+at `low` severity across runtime, development, and unknown scopes. Opening,
+updating, reopening, or changing the base branch revalidates the current merge
+and dependency diff; title/body-only edits skip the jobs without allocating a
+runner. The complete `main` check reuses its frozen install to verify npm
+registry signatures and available attestations instead of starting a duplicate
+audit runner. Every Monday and on manual dispatch, `security` performs an
+independent frozen advisory and registry-trust recheck with the exact Node/npm
+toolchain. This keeps temporal coverage without adding container-only scanners
+to a package with no runtime dependencies or shipped image.
 
 On a non-FHS host, `ARK_PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH` may point to a local
 wrapper that launches Playwright 1.61.1's exact bundled WebKit executable with

@@ -2,6 +2,11 @@ name: check
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   push:
     branches:
       - main
@@ -15,6 +20,10 @@ concurrency:
 
 jobs:
   check:
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.action != 'edited'
+      || github.event.changes.base.ref.from != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -23,12 +32,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
+      - name: Set up Node.js without a package-manager cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: npm-shrinkwrap.json
+          package-manager-cache: false
 
       - name: Install the pinned npm CLI without replacing the runner npm
         run: |
@@ -53,3 +61,7 @@ jobs:
         env:
           NODE_OPTIONS: --throw-deprecation
         run: node "$NPM_CLI" run check
+
+      - name: Verify registry signatures and attestations
+        if: github.event_name == 'push'
+        run: node "$NPM_CLI" run audit:signatures

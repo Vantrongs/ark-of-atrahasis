@@ -2,9 +2,11 @@ name: security
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -18,7 +20,10 @@ concurrency:
 
 jobs:
   dependency-review:
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.event.action != 'edited'
+      || github.event.changes.base.ref.from != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -37,7 +42,7 @@ jobs:
           vulnerability-check: true
 
   registry-audit:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -72,4 +77,4 @@ jobs:
         run: node "$NPM_CLI" audit --audit-level=low
 
       - name: Verify registry signatures and attestations
-        run: node "$NPM_CLI" audit signatures --include-attestations
+        run: node "$NPM_CLI" run audit:signatures
