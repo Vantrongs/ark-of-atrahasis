@@ -522,6 +522,64 @@ describe("detach and disposal", () => {
     }
   });
 
+  it("does not retry an unproven canvas rollback after the host moves it external", () => {
+    const prototype = window.HTMLCanvasElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "width");
+    if (
+      descriptor === undefined
+      || typeof descriptor.get !== "function"
+      || typeof descriptor.set !== "function"
+    ) {
+      throw new Error("expected HTMLCanvasElement.width accessors");
+    }
+    const nativeSetter = descriptor.set;
+    let target: HTMLCanvasElement | undefined;
+    let mutationFailure = true;
+    let restorationFailure = true;
+    Object.defineProperty(prototype, "width", {
+      ...descriptor,
+      set(this: HTMLCanvasElement, value: number): void {
+        if (this === target && value === 301 && mutationFailure) {
+          mutationFailure = false;
+          Reflect.apply(nativeSetter, this, [value]);
+          throw document.body;
+        }
+        if (this === target && value === 300 && restorationFailure) {
+          restorationFailure = false;
+          throw document.body;
+        }
+        Reflect.apply(nativeSetter, this, [value]);
+      },
+    });
+
+    try {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { canvasPixels: 45_150 },
+      });
+      const wrapper = safeDocument.createCanvas();
+      safeDocument.appendChild(wrapper);
+      target = requireElement(root.querySelector("canvas")) as HTMLCanvasElement;
+
+      captureSafeError(() => wrapper.setWidth(301), "DOM_OPERATION_FAILED");
+      expect([target.width, target.height]).toEqual([301, 150]);
+      expect(target.getAttribute("width")).toBe("301");
+      expectCode(() => safeDocument.createCanvas(), "QUOTA_EXCEEDED");
+
+      const outside = document.createElement("section");
+      document.body.append(outside);
+      outside.append(target);
+      const before = new TextEncoder().encode(target.outerHTML);
+
+      expect(() => wrapper.dispose()).not.toThrow();
+      expect(new TextEncoder().encode(target.outerHTML)).toEqual(before);
+      expect(outside.firstElementChild).toBe(target);
+      expect(() => safeDocument.createCanvas()).not.toThrow();
+    } finally {
+      Object.defineProperty(prototype, "width", descriptor);
+    }
+  });
+
   it("does not rewrite style when its setter fails before writing", () => {
     const prototype = window.CSSStyleDeclaration.prototype;
     const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setProperty");

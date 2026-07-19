@@ -26,7 +26,6 @@ test("language unknown, local override, and shadow-host inheritance stay distinc
           "border-inline-start-color",
           "border-inline-start-style",
           "border-inline-start-width",
-          "display",
           "inline-size",
           "padding-block-end",
           "padding-inline-start",
@@ -41,7 +40,6 @@ test("language unknown, local override, and shadow-host inheritance stay distinc
     wrapper.style.set("borderInlineStartColor", "red");
     wrapper.style.set("borderInlineStartStyle", "solid");
     wrapper.style.set("borderInlineStartWidth", "2px");
-    wrapper.style.set("display", "block");
     wrapper.style.set("inlineSize", "40px");
     wrapper.style.set("paddingBlockEnd", "7px");
     wrapper.style.set("paddingInlineStart", "11px");

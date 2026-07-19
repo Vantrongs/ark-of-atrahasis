@@ -79,7 +79,31 @@ const TOKEN_BYTES = 24;
 const TOKEN_ATTEMPTS = 8;
 const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
-const ASCII_WHITESPACE_RUN = /[\t\n\f\r ]+/;
+
+function isASCIIWhitespaceCode(code: number): boolean {
+  return code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d || code === 0x20;
+}
+
+function splitReferenceTokens(local: string): readonly string[] {
+  const tokens: string[] = [];
+  let tokenStart = -1;
+  for (let index = 0; index <= local.length; index += 1) {
+    const atEnd = index === local.length;
+    const whitespace = !atEnd && isASCIIWhitespaceCode(local.charCodeAt(index));
+    if (!atEnd && !whitespace) {
+      if (tokenStart !== -1) continue;
+      if (tokens.length === MAX_IDREF_TOKENS_PER_ATTRIBUTE) {
+        throw createSafeDOMError("QUOTA_EXCEEDED", "IdentifierNamespace.referenceTokens");
+      }
+      tokenStart = index;
+      continue;
+    }
+    if (tokenStart === -1) continue;
+    tokens.push(local.slice(tokenStart, index));
+    tokenStart = -1;
+  }
+  return tokens;
+}
 
 function quotaDeltas(
   mappings: number,
@@ -269,10 +293,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
   ): PreparedNamespaceMutation {
     const localTokens = kind === "single"
       ? (local === "" ? [] : [local])
-      : local.split(ASCII_WHITESPACE_RUN).filter((token) => token !== "");
-    if (localTokens.length > MAX_IDREF_TOKENS_PER_ATTRIBUTE) {
-      throw createSafeDOMError("QUOTA_EXCEEDED", "IdentifierNamespace.referenceTokens");
-    }
+      : splitReferenceTokens(local);
 
     const previousSlots = this.#referenceSlotsByEntry.get(entry);
     const previous = previousSlots?.get(attributeName);
