@@ -462,6 +462,166 @@ describe("owner-realm platform boundary", () => {
     }
   });
 
+  it("rolls back canvas pixels and reflected bytes when a captured canvas setter throws", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) {
+      throw new Error("expected an iframe document and window");
+    }
+    const descriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "width");
+    Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
+      ...descriptor,
+      set: () => { throw foreignDocument.body; },
+    });
+
+    try {
+      const root = makeRoot(foreignDocument);
+      const safeDocument = createSafeDocument(root, {
+        quotas: { attributeBytes: 8, canvasPixels: 90_000 },
+      });
+      const canvas = safeDocument.createCanvas();
+      safeDocument.appendChild(canvas);
+      const raw = root.querySelector("canvas");
+
+      expectSafeError(
+        () => canvas.setWidth(301),
+        "DOM_OPERATION_FAILED",
+        "HTMLCanvasElement.width.set",
+      );
+      expect(raw?.width).toBe(300);
+      expect(raw?.getAttribute("width")).toBeNull();
+      expect(() => safeDocument.createCanvas()).not.toThrow();
+      expect(() => safeDocument.createDiv().setClass("")).not.toThrow();
+    } finally {
+      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", descriptor);
+    }
+  });
+
+  it("rejects invalid captured canvas dimensions without leaking owner-realm values", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) {
+      throw new Error("expected an iframe document and window");
+    }
+    const widthDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "width");
+    const heightDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "height");
+
+    try {
+      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
+        ...widthDescriptor,
+        get: () => -1,
+      });
+      const negativeDocument = createSafeDocument(makeRoot(foreignDocument), {
+        quotas: { canvasPixels: 0 },
+      });
+      expectSafeError(
+        () => negativeDocument.createCanvas(),
+        "DOM_OPERATION_FAILED",
+        "SafeDocument.canvasDimensions",
+      );
+      expect(() => negativeDocument.createDiv()).not.toThrow();
+
+      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
+        ...widthDescriptor,
+        get: () => foreignDocument.body,
+      });
+      const hostileDocument = createSafeDocument(makeRoot(foreignDocument));
+      expectSafeError(
+        () => hostileDocument.createCanvas(),
+        "DOM_OPERATION_FAILED",
+        "SafeDocument.canvasDimensions",
+      );
+
+      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
+        ...widthDescriptor,
+        get: () => 4_294_967_295,
+      });
+      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "height", {
+        ...heightDescriptor,
+        get: () => 4_294_967_295,
+      });
+      const overflowDocument = createSafeDocument(makeRoot(foreignDocument), {
+        quotas: { canvasPixels: Number.MAX_SAFE_INTEGER },
+      });
+      expectSafeError(
+        () => overflowDocument.createCanvas(),
+        "DOM_OPERATION_FAILED",
+        "SafeDocument.canvasDimensions",
+      );
+    } finally {
+      Object.defineProperty(
+        foreignWindow.HTMLCanvasElement.prototype,
+        "width",
+        widthDescriptor,
+      );
+      Object.defineProperty(
+        foreignWindow.HTMLCanvasElement.prototype,
+        "height",
+        heightDescriptor,
+      );
+    }
+  });
+
+  it("retains canvas accounting when captured dimension setters silently do nothing", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) {
+      throw new Error("expected an iframe document and window");
+    }
+    const widthDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "width");
+    const heightDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "height");
+    Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
+      ...widthDescriptor,
+      set: () => {},
+    });
+    Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "height", {
+      ...heightDescriptor,
+      set: () => {},
+    });
+
+    try {
+      const root = makeRoot(foreignDocument);
+      const safeDocument = createSafeDocument(root, { quotas: { canvasPixels: 45_000 } });
+      const canvas = safeDocument.createCanvas();
+      safeDocument.appendChild(canvas);
+      const raw = root.querySelector("canvas");
+
+      expectSafeError(
+        () => canvas.setWidth(0),
+        "DOM_OPERATION_FAILED",
+        "SafeDocument.canvasDimension.readback",
+      );
+      expect([raw?.width, raw?.height]).toEqual([300, 150]);
+      expectSafeError(
+        () => canvas.dispose(),
+        "DOM_OPERATION_FAILED",
+        "SafeCanvasElement.clearDimensions",
+      );
+      expect([raw?.width, raw?.height]).toEqual([300, 150]);
+      expect(() => safeDocument.createCanvas()).toThrowError(expect.objectContaining({
+        code: "QUOTA_EXCEEDED",
+        operation: "SafeDocument quota exceeded: canvasPixels",
+      }));
+    } finally {
+      Object.defineProperty(
+        foreignWindow.HTMLCanvasElement.prototype,
+        "width",
+        widthDescriptor,
+      );
+      Object.defineProperty(
+        foreignWindow.HTMLCanvasElement.prototype,
+        "height",
+        heightDescriptor,
+      );
+    }
+  });
+
   it("uses iframe input IDL and RegExp semantics from the owner realm", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);

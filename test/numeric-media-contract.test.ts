@@ -407,6 +407,81 @@ describe("numeric boundary table", () => {
     expect(() => second.setRows(4)).not.toThrow();
   });
 
+  test("canvas creation reserves its default bitmap against an aggregate pixel quota", () => {
+    const safeDocument = createSafeDocument(makeRoot(), {
+      quotas: { canvasPixels: 44_999 },
+    });
+
+    expect(() => safeDocument.createCanvas()).toThrowError(expect.objectContaining({
+      code: "QUOTA_EXCEEDED",
+      operation: "SafeDocument quota exceeded: canvasPixels",
+    }));
+    expect(() => safeDocument.createDiv()).not.toThrow();
+  });
+
+  test("canvas width and height changes share exact aggregate pixel accounting", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, { quotas: { canvasPixels: 90_000 } });
+    const first = safeDocument.createCanvas();
+    const second = safeDocument.createCanvas();
+    safeDocument.appendChild(first);
+    safeDocument.appendChild(second);
+    const physical = [...root.querySelectorAll("canvas")];
+
+    expect(physical.map(({ width, height }) => [width, height])).toEqual([[300, 150], [300, 150]]);
+    expect(() => first.setWidth(301)).toThrowError(expect.objectContaining({
+      code: "QUOTA_EXCEEDED",
+      operation: "SafeDocument quota exceeded: canvasPixels",
+    }));
+    expect(() => first.setHeight(151)).toThrowError(expect.objectContaining({
+      code: "QUOTA_EXCEEDED",
+      operation: "SafeDocument quota exceeded: canvasPixels",
+    }));
+    expect(physical[0]?.getAttribute("width")).toBeNull();
+    expect(physical[0]?.getAttribute("height")).toBeNull();
+
+    second.setWidth(299);
+    first.setWidth(301);
+    expect(physical.map(({ width, height }) => [width, height])).toEqual([[301, 150], [299, 150]]);
+    expect(() => first.setWidth(302)).toThrowError(expect.objectContaining({
+      code: "QUOTA_EXCEEDED",
+      operation: "SafeDocument quota exceeded: canvasPixels",
+    }));
+  });
+
+  test("owned canvas cleanup zeroes its bitmap before the aggregate quota is reusable", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, { quotas: { canvasPixels: 45_000 } });
+    const parent = safeDocument.createDiv();
+    const first = safeDocument.createCanvas();
+    parent.appendChild(first);
+    safeDocument.appendChild(parent);
+    const physical = root.querySelector("canvas");
+    if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
+
+    parent.dispose();
+    expect([physical.width, physical.height]).toEqual([0, 0]);
+    expect(() => safeDocument.createCanvas()).not.toThrow();
+  });
+
+  test("external canvas revocation preserves host state while releasing logical accounting", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root, { quotas: { canvasPixels: 45_000 } });
+    const first = safeDocument.createCanvas();
+    safeDocument.appendChild(first);
+    const physical = root.querySelector("canvas");
+    if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
+    const external = document.createElement("div");
+    document.body.appendChild(external);
+    external.appendChild(physical);
+
+    expect(() => first.setWidth(299)).toThrowError(expect.objectContaining({
+      code: "PLACEMENT_VIOLATION",
+    }));
+    expect([physical.width, physical.height]).toEqual([300, 150]);
+    expect(() => safeDocument.createCanvas()).not.toThrow();
+  });
+
   test("input type uses the same reflected-IDL attribute accounting seam", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 22 } });

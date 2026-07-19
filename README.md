@@ -91,7 +91,7 @@ const safeDocument = createSafeDocument(root, {
     operations: { limit: 10_000, windowMs: 1_000 },
     requestAttempts: { limit: 32, windowMs: 1_000 },
   },
-  stylePolicy: { allowedProperties: ["color", "display"] },
+  stylePolicy: { allowedProperties: ["color", "background-color"] },
   urlPolicy: {
     baseURL: "https://app.example/",
     sinks: {
@@ -120,9 +120,12 @@ Omitting `urlPolicy` denies all seven URL sinks. An omitted sink is denied;
 enabled sinks separately constrain canonical origin (including port), protocol,
 credentials, query, fragment, and maximum length. Omitting `stylePolicy` denies
 all inline-style properties. A style grant selects from the library's fixed
-property ceiling; values containing URL/request grammar, indirection, malformed
-CSS, or non-primitive input are rejected. Raw stylesheets and global selectors
-are not part of the API.
+property ceiling. The ceiling excludes `animation-name`, `animation-duration`,
+`display`, `font-family`, `font-style`, and `font-weight`: URL-free values for
+those properties can activate request-bearing host stylesheet rules without
+passing through URL policy or request accounting. Values containing direct
+URL/request grammar, indirection, malformed CSS, or non-primitive input are
+also rejected. Raw stylesheets and global selectors are not part of the API.
 
 The package has zero runtime dependencies and does not import SES. It
 behaviorally checks that the supplied hardener returns the same value and deeply
@@ -200,15 +203,16 @@ states and does not promise autofill or PII confidentiality.
 - **Detach and disposal:** `detach()` (and deprecated `remove()`) is reversible.
   Wrapper or document `dispose()` is irreversible and idempotent, closes future
   wrapper mutation, aborts wrapper-owned listeners, removes tracked URL/style
-  and identifier effects, detaches owned nodes still in the mount, releases live
-  accounting, and returns stable disposed/revoked errors on later operations.
+  and identifier effects, zeroes owned canvas dimensions, detaches owned nodes
+  still in the mount, releases live accounting, and returns stable
+  disposed/revoked errors on later operations.
   Those physical cleanup writes apply only while the node remains owned. If the
   trusted host has already moved a raw node outside the mount, revocation leaves
   its complete physical DOM state unchanged—including tracked ID/name/IDREF,
-  style, and URL attributes as well as ordinary text/IDL state—while aborting
-  wrapper listeners and releasing logical/accounting state. Guest setters are
-  then revoked; an already-issued raw URL/request remains under host ownership
-  and is not cleared by the wrapper.
+  style, URL attributes, and canvas dimensions as well as ordinary text/IDL
+  state—while aborting wrapper listeners and releasing logical/accounting state.
+  Guest setters are then revoked; an already-issued raw URL/request remains
+  under host ownership and is not cleared by the wrapper.
 - **Layout and host authority:** required paint containment clips guest paint
   and hit testing to the bounded host even when the host grants fixed,
   viewport-sized, high-z-index styles. The event fence is deliberately
@@ -229,13 +233,21 @@ safe integers. The defaults are:
 | `textBytes` | 1,000,000 | live UTF-8 guest text/value bytes |
 | `attributeBytes` | 256,000 | live serialized attribute name/value bytes |
 | `styleBytes` | 256,000 | live approved inline-style bytes |
+| `canvasPixels` | 16,777,216 | aggregate live canvas bitmap pixels |
 | `requests` | 64 | live URL-bearing attribute slots |
 | `requestAttempts` | 256 | every URL setter attempt, including denied input |
 | `identifierMappings` | 4,096 | live logical ID/name records |
 | `identifierReferences` | 8,192 | live logical IDREF occurrences |
 | `identifierBytes` | 256,000 | live UTF-8 logical ID/name bytes |
 
-Resource accounting is released only after terminal cleanup succeeds.
+Each canvas reserves its native default `300 × 150` bitmap when created; width
+and height updates share one aggregate pixel transaction. Captured native
+dimension reads must be unsigned 32-bit integers with a safe-integer product;
+mutation and cleanup writes are read back before accounting is committed or
+released. Owned terminal cleanup sets both dimensions to zero before releasing
+that reservation, while external logical-only revocation preserves the
+host-owned dimensions. Resource accounting is released only after terminal
+cleanup succeeds.
 `operations` and `requestAttempts` are lifetime call ceilings and are not
 released; they are not rates. Strict form-policy denials count against the
 `operations` lifetime quota and fixed window before failing, so a denied
@@ -322,7 +334,8 @@ The fixed style ceiling includes
 margin, padding, border-side, and corner-radius longhands so a host can grant
 direction-neutral layout without granting raw CSS; every property remains
 deny-by-default. It deliberately excludes CSS `direction`, `unicode-bidi`,
-`writing-mode`, logical shorthands, and broader logical modules.
+`writing-mode`, logical shorthands, broader logical modules, and the six
+host-resource activators listed above.
 
 Public `SafeDOMError.code` is the stable locale-independent localization and
 control-flow key. `operation` is diagnostic context, not a translation key.

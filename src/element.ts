@@ -1092,20 +1092,18 @@ export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCa
   return context.complete(Object.assign(base, {
     setWidth(value: number): void {
       const width = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setWidth.value");
-      context.setReflectedIDL(realEl, "width", `${width}`, () => {
-        if (width * context.platform.getCanvasHeight(realEl) > MAX_CANVAS_PIXELS) {
+      context.setCanvasDimension(realEl, "width", width, (nextWidth, nextHeight) => {
+        if (nextWidth * nextHeight > MAX_CANVAS_PIXELS) {
           throw invalidArgument("SafeCanvasElement.setWidth.pixels");
         }
-        context.platform.setCanvasWidth(realEl, width);
       });
     },
     setHeight(value: number): void {
       const height = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setHeight.value");
-      context.setReflectedIDL(realEl, "height", `${height}`, () => {
-        if (context.platform.getCanvasWidth(realEl) * height > MAX_CANVAS_PIXELS) {
+      context.setCanvasDimension(realEl, "height", height, (nextWidth, nextHeight) => {
+        if (nextWidth * nextHeight > MAX_CANVAS_PIXELS) {
           throw invalidArgument("SafeCanvasElement.setHeight.pixels");
         }
-        context.platform.setCanvasHeight(realEl, height);
       });
     },
   }) as SafeCanvasElement, realEl, "canvas");

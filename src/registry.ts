@@ -5,7 +5,7 @@ import { createSafeDOMError } from "./errors.ts";
 export type SafeNode = SafeElement | SafeTextNode;
 export type RealNode = Element | Text;
 export type NodeState = "active" | "disposed" | "revoked";
-export type AccountedResource = "text" | "attribute" | "style" | "request";
+export type AccountedResource = "text" | "attribute" | "style" | "canvas" | "request";
 
 export interface PendingPhysicalEffect {
   cleanup(): void;
@@ -76,6 +76,7 @@ export class NodeRegistry {
         text: new Map(),
         attribute: new Map(),
         style: new Map(),
+        canvas: new Map(),
         request: new Map(),
       },
     };

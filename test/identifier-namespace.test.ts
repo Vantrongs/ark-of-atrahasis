@@ -218,19 +218,60 @@ describe("identifier namespace", () => {
     expect(safeDocument.getElement("stable")).toBe(target);
   });
 
-  it("rejects more than 256 list occurrences before allocating namespace state", () => {
-    const safeDocument = createSafeDocument(makeRoot(), {
-      quotas: { identifierMappings: 1, identifierReferences: 256, identifierBytes: 1 },
-    });
-    const cell = safeDocument.createTd();
-    expect(() => cell.setHeaders(Array.from({ length: 257 }, () => "a").join(" ")))
-      .toThrowError(expect.objectContaining({
+  it("enforces the 256-token parser bound across every public IDREF-list entrypoint", () => {
+    const separators = [" ", "\t", "\n", "\f", "\r"] as const;
+    const repeated = (length: number): string => Array.from(
+      { length },
+      (_, index) => index === 0 ? "a" : `${separators[index % separators.length]}a`,
+    ).join("");
+    const cases = [
+      ...ARIA_IDREF_LIST_NAMES.map((name) => ({
+        label: `aria-${name}`,
+        create: (safeDocument: ReturnType<typeof createSafeDocument>) => {
+          const wrapper = safeDocument.createDiv();
+          return {
+            wrapper,
+            set: (value: string) => wrapper.setAria(name, value),
+            get: () => wrapper.getAria(name),
+            attribute: `aria-${name}`,
+          };
+        },
+      })),
+      ...(["th", "td"] as const).map((tag) => ({
+        label: `${tag}.headers`,
+        create: (safeDocument: ReturnType<typeof createSafeDocument>) => {
+          const wrapper = tag === "th" ? safeDocument.createTh() : safeDocument.createTd();
+          return {
+            wrapper,
+            set: (value: string) => wrapper.setHeaders(value),
+            get: () => wrapper.getHeaders(),
+            attribute: "headers",
+          };
+        },
+      })),
+    ];
+
+    for (const testCase of cases) {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root, {
+        quotas: { identifierMappings: 2, identifierReferences: 256, identifierBytes: 16 },
+      });
+      const { wrapper, set, get, attribute } = testCase.create(safeDocument);
+      set("stable");
+      safeDocument.appendChild(wrapper);
+      const raw = requireElement(root.querySelector("div, th, td"));
+      const previousPhysical = raw.getAttribute(attribute);
+
+      expect(() => set(repeated(257)), testCase.label).toThrowError(expect.objectContaining({
         code: "QUOTA_EXCEEDED",
         operation: "IdentifierNamespace.referenceTokens",
       }));
-    const target = safeDocument.createDiv();
-    target.setId("a");
-    expect(target.getId()).toBe("a");
+      expect(get(), testCase.label).toBe("stable");
+      expect(raw.getAttribute(attribute), testCase.label).toBe(previousPhysical);
+
+      set(repeated(256));
+      expect(get()?.split(" "), testCase.label).toHaveLength(256);
+    }
   });
 
   it("rolls back logical, physical, and quota state when the captured DOM write fails", () => {

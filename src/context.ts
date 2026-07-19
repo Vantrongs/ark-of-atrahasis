@@ -56,6 +56,7 @@ export const DEFAULT_SAFE_DOCUMENT_QUOTAS: Readonly<SafeDocumentQuotas> = Object
   textBytes: 1_000_000,
   attributeBytes: 256_000,
   styleBytes: 256_000,
+  canvasPixels: 16_777_216,
   requests: 64,
   requestAttempts: 256,
   identifierMappings: 4_096,
@@ -92,8 +93,27 @@ const RESOURCE_QUOTA: Record<AccountedResource, ResourceQuota> = {
   text: "textBytes",
   attribute: "attributeBytes",
   style: "styleBytes",
+  canvas: "canvasPixels",
   request: "requests",
 };
+
+function canvasPixelArea(width: number, height: number): number {
+  if (
+    !Number.isInteger(width)
+    || width < 0
+    || width > 4_294_967_295
+    || !Number.isInteger(height)
+    || height < 0
+    || height > 4_294_967_295
+  ) {
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimensions");
+  }
+  const area = width * height;
+  if (!Number.isSafeInteger(area)) {
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimensions");
+  }
+  return area;
+}
 
 const QUOTA_NAMES = [
   "nodes",
@@ -102,6 +122,7 @@ const QUOTA_NAMES = [
   "textBytes",
   "attributeBytes",
   "styleBytes",
+  "canvasPixels",
   "requests",
   "requestAttempts",
   "identifierMappings",
@@ -422,6 +443,12 @@ export interface DocumentContext {
   getLocalIdReference(real: Element, attributeName: string): string | undefined;
   lookupLocalId(local: string, specializedKind?: SpecializedElementKind): SafeElement | null;
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
+  setCanvasDimension(
+    real: HTMLCanvasElement,
+    dimension: "width" | "height",
+    value: number,
+    validate: (width: number, height: number) => void,
+  ): void;
   setIDL<Value extends string | number | boolean>(
     real: Element,
     value: Value,
@@ -514,6 +541,7 @@ class DocumentContextImplementation implements DocumentContext {
     textBytes: 0,
     attributeBytes: 0,
     styleBytes: 0,
+    canvasPixels: 0,
     requests: 0,
     requestAttempts: 0,
     identifierMappings: 0,
@@ -601,21 +629,34 @@ class DocumentContextImplementation implements DocumentContext {
 
   #register(wrapper: SafeNode, real: RealNode, specializedKind?: SpecializedElementKind): void {
     this.#assertDocumentActive();
-    this.#reserve("nodes", 1);
+    const canvasPixels = specializedKind === "canvas"
+      ? canvasPixelArea(
+        this.platform.getCanvasWidth(real as HTMLCanvasElement),
+        this.platform.getCanvasHeight(real as HTMLCanvasElement),
+      )
+      : 0;
+    let nodesReserved = false;
+    let canvasReserved = false;
     let boundaryCleanup: (() => void) | undefined;
     try {
+      this.#reserve("nodes", 1);
+      nodesReserved = true;
+      this.#reserve("canvasPixels", canvasPixels);
+      canvasReserved = true;
       if (this.platform.isElement(real)) {
         boundaryCleanup = this.#installTargetBoundary(real);
       }
       const entry = this.registry.register(wrapper, real, specializedKind);
       if (boundaryCleanup !== undefined) entry.listeners.add(boundaryCleanup);
+      if (canvasPixels > 0) entry.resources.canvas.set("bitmap", canvasPixels);
     } catch (error) {
       try {
         boundaryCleanup?.();
       } catch {
         // Preserve the authoritative registration failure for the discarded node.
       }
-      this.#usage.nodes -= 1;
+      if (canvasReserved) this.#usage.canvasPixels -= canvasPixels;
+      if (nodesReserved) this.#usage.nodes -= 1;
       throw error;
     }
   }
@@ -807,6 +848,150 @@ class DocumentContextImplementation implements DocumentContext {
         value,
         amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }], action);
+    });
+  }
+
+  setCanvasDimension(
+    real: HTMLCanvasElement,
+    dimension: "width" | "height",
+    value: number,
+    validate: (width: number, height: number) => void,
+  ): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      if (entry.specializedKind !== "canvas") {
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimension");
+      }
+
+      const readState = (): {
+        readonly width: number;
+        readonly height: number;
+        readonly attributeValue: string | null;
+      } => ({
+        width: this.platform.getCanvasWidth(real),
+        height: this.platform.getCanvasHeight(real),
+        attributeValue: this.platform.getAttribute(real, dimension),
+      });
+      const writeDimension = (next: number): void => {
+        if (dimension === "width") this.platform.setCanvasWidth(real, next);
+        else this.platform.setCanvasHeight(real, next);
+      };
+
+      const previous = readState();
+      const observedPreviousCanvasAmount = canvasPixelArea(previous.width, previous.height);
+      const nextWidth = dimension === "width" ? value : previous.width;
+      const nextHeight = dimension === "height" ? value : previous.height;
+      validate(nextWidth, nextHeight);
+
+      const serialized = `${value}`;
+      const previousAttributeAmount = entry.resources.attribute.get(dimension) ?? 0;
+      const nextAttributeAmount = utf8ByteLength(dimension) + utf8ByteLength(serialized);
+      const previousCanvasAmount = entry.resources.canvas.get("bitmap")
+        ?? observedPreviousCanvasAmount;
+      const nextCanvasAmount = canvasPixelArea(nextWidth, nextHeight);
+      const attributeDelta = nextAttributeAmount - previousAttributeAmount;
+      const canvasDelta = nextCanvasAmount - previousCanvasAmount;
+
+      if (
+        attributeDelta > 0
+        && this.#usage.attributeBytes + attributeDelta > this.#quotas.attributeBytes
+      ) {
+        throw createSafeDOMError("QUOTA_EXCEEDED", "SafeDocument quota exceeded: attributeBytes");
+      }
+      if (
+        canvasDelta > 0
+        && this.#usage.canvasPixels + canvasDelta > this.#quotas.canvasPixels
+      ) {
+        throw createSafeDOMError("QUOTA_EXCEEDED", "SafeDocument quota exceeded: canvasPixels");
+      }
+
+      const recordAmounts = (attributeAmount: number, canvasAmount: number): void => {
+        if (attributeAmount === 0) entry.resources.attribute.delete(dimension);
+        else entry.resources.attribute.set(dimension, attributeAmount);
+        if (canvasAmount === 0) entry.resources.canvas.delete("bitmap");
+        else entry.resources.canvas.set("bitmap", canvasAmount);
+      };
+      const restorePrevious = (): boolean => {
+        try {
+          const current = readState();
+          if (
+            current.width !== previous.width
+            || current.height !== previous.height
+            || current.attributeValue !== previous.attributeValue
+          ) {
+            writeDimension(dimension === "width" ? previous.width : previous.height);
+            if (previous.attributeValue === null) this.platform.removeAttribute(real, dimension);
+            else this.platform.setAttribute(real, dimension, previous.attributeValue);
+          }
+        } catch {
+          // Readback below decides whether the throwing restoration took effect.
+        }
+        try {
+          const restored = readState();
+          return restored.width === previous.width
+            && restored.height === previous.height
+            && restored.attributeValue === previous.attributeValue;
+        } catch {
+          return false;
+        }
+      };
+
+      this.#usage.attributeBytes += attributeDelta;
+      this.#usage.canvasPixels += canvasDelta;
+      try {
+        writeDimension(value);
+        const committed = readState();
+        canvasPixelArea(committed.width, committed.height);
+        if (
+          committed.width !== nextWidth
+          || committed.height !== nextHeight
+          || committed.attributeValue !== serialized
+        ) {
+          throw createSafeDOMError(
+            "DOM_OPERATION_FAILED",
+            "SafeDocument.canvasDimension.readback",
+          );
+        }
+      } catch (mutationError) {
+        if (restorePrevious()) {
+          this.#usage.attributeBytes -= attributeDelta;
+          this.#usage.canvasPixels -= canvasDelta;
+          if (isSafeDOMError(mutationError)) throw mutationError;
+          throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimension");
+        }
+
+        let retainedAttributeAmount = Math.max(previousAttributeAmount, nextAttributeAmount);
+        let retainedCanvasAmount = Math.max(previousCanvasAmount, nextCanvasAmount);
+        try {
+          const retained = readState();
+          retainedAttributeAmount = retained.attributeValue === null
+            ? 0
+            : utf8ByteLength(dimension) + utf8ByteLength(retained.attributeValue);
+          retainedCanvasAmount = canvasPixelArea(retained.width, retained.height);
+        } catch {
+          // Retain the larger known amounts until terminal cleanup proves restoration.
+        }
+        this.#usage.attributeBytes += retainedAttributeAmount - nextAttributeAmount;
+        this.#usage.canvasPixels += retainedCanvasAmount - nextCanvasAmount;
+        recordAmounts(retainedAttributeAmount, retainedCanvasAmount);
+        const pending: PendingPhysicalEffect = {
+          cleanup: (): void => {
+            if (!restorePrevious()) {
+              throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasRollback");
+            }
+            const currentAttributeAmount = entry.resources.attribute.get(dimension) ?? 0;
+            const currentCanvasAmount = entry.resources.canvas.get("bitmap") ?? 0;
+            this.#usage.attributeBytes += previousAttributeAmount - currentAttributeAmount;
+            this.#usage.canvasPixels += previousCanvasAmount - currentCanvasAmount;
+            recordAmounts(previousAttributeAmount, previousCanvasAmount);
+          },
+        };
+        entry.pendingEffects.add(pending);
+        entry.state = "revoked";
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasRollback");
+      }
+
+      recordAmounts(nextAttributeAmount, nextCanvasAmount);
     });
   }
 
@@ -1382,6 +1567,38 @@ class DocumentContextImplementation implements DocumentContext {
       firstFailure ??= isSafeDOMError(error)
         ? error
         : createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.clear");
+    }
+    if (entry.specializedKind === "canvas") {
+      const canvas = entry.real as HTMLCanvasElement;
+      try {
+        this.platform.setCanvasWidth(canvas, 0);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearWidth");
+      }
+      try {
+        this.platform.setCanvasHeight(canvas, 0);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearHeight");
+      }
+      try {
+        const width = this.platform.getCanvasWidth(canvas);
+        const height = this.platform.getCanvasHeight(canvas);
+        canvasPixelArea(width, height);
+        if (width !== 0 || height !== 0) {
+          throw createSafeDOMError(
+            "DOM_OPERATION_FAILED",
+            "SafeCanvasElement.clearDimensions",
+          );
+        }
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearDimensions");
+      }
     }
     for (const name of entry.resources.request.keys()) {
       try {
