@@ -131,12 +131,10 @@ export function createSafeStyle(
     if (!mutationThrew && next !== undefined && committed(next)) return { status: "committed" };
 
     const rollbackProven = restorePrevious();
-    const observed = readCanonicalState(property);
     if (rollbackProven) return { status: "rejected", rollbackProven: true };
     return {
       status: "rejected",
       rollbackProven: false,
-      ...(observed === undefined ? {} : { observedValue: observed.value }),
       retryRollback: restorePrevious,
     };
   };
@@ -167,7 +165,7 @@ export function createSafeStyle(
       return context.nodeOperation(realEl, () => false);
     }
 
-    return context.setStyle(realEl, canonical, primitiveValue, () => {
+    return context.setStyle(realEl, () => {
       return mutate(canonical, () => {
         apply(setProperty, declaration, [canonical, primitiveValue, ""]);
       }, (state) => state.value.length > 0);
@@ -186,7 +184,7 @@ export function createSafeStyle(
     ) {
       return context.nodeOperation(realEl, () => false);
     }
-    return context.setStyle(realEl, canonical, "", () => {
+    return context.setStyle(realEl, () => {
       return mutate(canonical, () => {
         apply(removeProperty, declaration, [canonical]);
       }, (state) => state.value.length === 0);
