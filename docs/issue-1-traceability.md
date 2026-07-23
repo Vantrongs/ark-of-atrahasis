@@ -1,13 +1,21 @@
-# Issue #1 implementation traceability
+# Historical Issue #1 implementation traceability (0.4/0.5)
 
-This document maps the live umbrella security-hardening
-[issue #1](https://github.com/Vantrongs/ark-of-atrahasis/issues/1) to source,
-tests, CI, and release-owner evidence. The audited integration base for this
-evidence pass is `2360347962a2befca8ab0627ab2ee02dd04a74c2`; that is a historical
-base, not a claim that the commit containing this document has the same SHA. A
-criterion is marked satisfied only where a committed test or artifact check
-directly exercises the claim. Repository-complete release machinery is kept
-separate from external owner configuration and from an actual tag/publication.
+> **Frozen historical record.** This document preserves the 0.4/0.5 umbrella
+> security-hardening evidence for
+> [issue #1](https://github.com/Vantrongs/ark-of-atrahasis/issues/1). It is not
+> the current Ark 1.0 contract: 1.0 removed the resource-control API,
+> accounting, caps, associated error codes, and dedicated-Worker availability
+> acceptance. Historical statements below are intentionally not rewritten as
+> though those earlier contracts never existed. See the
+> [Ark 1.0 migration guide](./migration-0.5-to-1.0.md) and the
+> [live Issue #29 map](./issue-29-ark-1.0-traceability.md).
+
+The audited integration base for this evidence pass is
+`2360347962a2befca8ab0627ab2ee02dd04a74c2`; that is a historical base, not a
+claim that the commit containing this document has the same SHA. A criterion
+was marked satisfied only where a committed test or artifact check directly
+exercised the claim. Repository-complete release machinery was kept separate
+from external owner configuration and from an actual tag/publication.
 
 Exact checks for a later code or documentation commit are per-commit CI
 evidence. The final live SHA, check-run link, counts, and artifact digest belong
