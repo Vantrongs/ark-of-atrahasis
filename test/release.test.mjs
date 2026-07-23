@@ -650,10 +650,17 @@ test("release metadata in the repository is synchronized at 1.0.0", () => {
     readFileSync(new URL("../npm-shrinkwrap.json", import.meta.url), "utf8"),
   );
   const sourceChangelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+  const releaseGuide = readFileSync(new URL("../RELEASING.md", import.meta.url), "utf8");
 
   assert.equal(sourceManifest.version, "1.0.0");
   assert.equal(shrinkwrap.version, sourceManifest.version);
   assert.equal(shrinkwrap.packages[""].version, sourceManifest.version);
+  assert.equal(
+    releaseGuide.includes(
+      `The repository contains the \`${sourceManifest.version}\` ESNext/Node 26 source state.`,
+    ),
+    true,
+  );
   assert.doesNotThrow(() =>
     verifyReleaseMetadata({
       changelog: sourceChangelog,

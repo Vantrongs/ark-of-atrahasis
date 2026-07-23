@@ -134,6 +134,27 @@ describe("owner-realm platform boundary", () => {
     }
   });
 
+  it("does not capture the retired owner-realm rate clock", () => {
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const foreignDocument = iframe.contentDocument;
+    const foreignWindow = iframe.contentWindow;
+    if (foreignDocument === null || foreignWindow === null) throw new Error("expected iframe realm");
+    const root = makeRoot(foreignDocument);
+    const descriptor = Object.getOwnPropertyDescriptor(foreignWindow, "performance");
+    Object.defineProperty(foreignWindow, "performance", {
+      configurable: true,
+      get: () => { throw foreignDocument.body; },
+    });
+
+    try {
+      expect(() => createSafeDocument(root)).not.toThrow();
+    } finally {
+      if (descriptor === undefined) delete (foreignWindow as { performance?: unknown }).performance;
+      else Object.defineProperty(foreignWindow, "performance", descriptor);
+    }
+  });
+
   it("normalizes a hostile owner-realm computed-style failure and leaves the root unclaimed", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);
