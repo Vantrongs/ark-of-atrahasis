@@ -60,6 +60,33 @@ test("does not expose the removed resource-control API", () => {
     operation: "legacy rate operation",
     message: "A safe document rate limit was exceeded",
   })), false);
+  assert.equal(api.isSafeDOMError(Object.freeze({
+    name: "SafeDOMError",
+    code: "INVALID_QUOTA",
+    operation: "legacy quota configuration",
+    message: "The quota configuration is invalid",
+  })), false);
+  assert.equal(api.isSafeDOMError(Object.freeze({
+    name: "SafeDOMError",
+    code: "INVALID_RATE",
+    operation: "legacy rate configuration",
+    message: "The rate configuration is invalid",
+  })), false);
+});
+
+test("rejects legacy resource-control options without claiming the root", () => {
+  for (const [name, value] of [
+    ["quotas", { operations: 1 }],
+    ["rates", { operations: { limit: 1, windowMs: 1_000 } }],
+  ]) {
+    const { root } = createRoot();
+    assert.throws(
+      () => createSafeDocument(root, { ...options, [name]: value }),
+      (error) => error?.code === "ERR_INVALID_POLICY"
+        && error.operation === `createSafeDocument.options.${name}`,
+    );
+    assert.doesNotThrow(() => createSafeDocument(root, options).dispose());
+  }
 });
 
 test("mounts only into the claimed ShadowRoot and treats markup as text", () => {

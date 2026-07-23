@@ -1,6 +1,6 @@
 {
   "name": "ark-of-atrahasis",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Capability-oriented DOM wrapper for Secure ECMAScript integrations",
   "type": "module",
   "sideEffects": false,

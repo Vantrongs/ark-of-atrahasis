@@ -642,7 +642,7 @@ test("release metadata binds the tag to a dated changelog version", () => {
   );
 });
 
-test("release metadata in the repository is synchronized at 0.5.0", () => {
+test("release metadata in the repository is synchronized at 1.0.0", () => {
   const sourceManifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
   );
@@ -651,14 +651,14 @@ test("release metadata in the repository is synchronized at 0.5.0", () => {
   );
   const sourceChangelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 
-  assert.equal(sourceManifest.version, "0.5.0");
+  assert.equal(sourceManifest.version, "1.0.0");
   assert.equal(shrinkwrap.version, sourceManifest.version);
   assert.equal(shrinkwrap.packages[""].version, sourceManifest.version);
   assert.doesNotThrow(() =>
     verifyReleaseMetadata({
       changelog: sourceChangelog,
       manifest: sourceManifest,
-      tag: "v0.5.0",
+      tag: "v1.0.0",
     }),
   );
 });

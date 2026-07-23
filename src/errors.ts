@@ -1,8 +1,6 @@
 export type SafeDOMErrorCode =
   | "INVALID_ROOT"
   | "ROOT_ALREADY_CLAIMED"
-  | "INVALID_QUOTA"
-  | "INVALID_RATE"
   | "CROSS_OWNER"
   | "DUPLICATE_REGISTRATION"
   | "DUPLICATE_IDENTIFIER"
@@ -28,8 +26,6 @@ export interface SafeDOMError {
 const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze({
   INVALID_ROOT: "The root capability is invalid",
   ROOT_ALREADY_CLAIMED: "The root capability is already claimed",
-  INVALID_QUOTA: "The quota configuration is invalid",
-  INVALID_RATE: "The rate configuration is invalid",
   CROSS_OWNER: "The wrapper belongs to a different safe document",
   DUPLICATE_REGISTRATION: "The DOM node already has a different wrapper",
   DUPLICATE_IDENTIFIER: "The local identifier already has an active target",
