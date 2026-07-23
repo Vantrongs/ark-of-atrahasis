@@ -87,8 +87,6 @@ type NumberSetter<ElementType extends Element> = (this: ElementType, value: numb
 type CryptoGetter = (this: Window) => Crypto;
 type GetRandomValues = (this: Crypto, array: Uint8Array) => Uint8Array;
 type ShadowHostGetter = (this: ShadowRoot) => Element;
-type PerformanceGetter = (this: Window) => Performance;
-type PerformanceNow = (this: Performance) => number;
 
 const EFFECTIVE_PAINT_CONTAINMENT_DISPLAYS: ReadonlySet<string> = new Set([
   "block",
@@ -131,7 +129,6 @@ function prototypeOwns(prototype: object, value: object): boolean {
 export interface PlatformOps {
   readonly URL: typeof URL;
   assertPaintContainedRoot(root: ShadowRoot): void;
-  monotonicNow(): number;
   randomHex(byteLength: number): string;
   createElement(tag: string): HTMLElement;
   createTextNode(value: string): Text;
@@ -222,8 +219,6 @@ class OwnerRealmPlatformOps implements PlatformOps {
   readonly #shadowHostGetter: ShadowHostGetter;
   readonly #getComputedStyle: Window["getComputedStyle"];
   readonly #getStylePropertyValue: CSSStyleDeclaration["getPropertyValue"];
-  readonly #performance: Performance;
-  readonly #performanceNow: PerformanceNow;
   readonly #crypto: Crypto;
   readonly #getRandomValues: GetRandomValues;
   readonly #Uint8Array: typeof Uint8Array;
@@ -320,22 +315,6 @@ class OwnerRealmPlatformOps implements PlatformOps {
       "getPropertyValue",
       "CSSStyleDeclaration.getPropertyValue.capture",
     );
-    const performanceGetter = captureAccessor<PerformanceGetter>(
-      view,
-      "performance",
-      "get",
-      "Window.performance.capture",
-    );
-    try {
-      this.#performance = Reflect.apply(performanceGetter, view, []);
-      this.#performanceNow = captureMethod(
-        Object.getPrototypeOf(this.#performance),
-        "now",
-        "Performance.now.capture",
-      );
-    } catch {
-      throw createSafeDOMError("DOM_OPERATION_FAILED", "Performance.now.capture");
-    }
     const cryptoGetter = captureAccessor<CryptoGetter>(
       view,
       "crypto",
@@ -651,14 +630,6 @@ class OwnerRealmPlatformOps implements PlatformOps {
     } catch {
       throw createSafeDOMError("DOM_OPERATION_FAILED", "AbortController.constructor");
     }
-  }
-
-  monotonicNow(): number {
-    const value = this.#invoke("Performance.now", this.#performanceNow, this.#performance, []);
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-      throw createSafeDOMError("DOM_OPERATION_FAILED", "Performance.now");
-    }
-    return value;
   }
 
   getAbortSignal(controller: AbortController): AbortSignal {
