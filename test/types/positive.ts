@@ -4,7 +4,6 @@ import type {
 	ARIA_ROLES,
 	AUTOCOMPLETE_VALUES,
 	BUTTON_TYPES,
-	DEFAULT_SAFE_DOCUMENT_RATES,
 	DIR_VALUES,
 	ENTER_KEY_HINT_VALUES,
 	FORMATTING_TAGS,
@@ -42,8 +41,6 @@ import type {
 	SafeDialogElement,
 	SafeDocument,
 	SafeDocumentOptions,
-	SafeDocumentRateLimit,
-	SafeDocumentRates,
 	SafeElement,
 	SafeElementByKind,
 	SafeEvent,
@@ -171,13 +168,6 @@ type _SpecializedKindVocabulary = Expect<
 type _SpecializedMapIsExhaustive = Expect<
 	Equal<keyof SafeElementByKind, SpecializedElementKind>
 >;
-type _DefaultRateShape = Expect<
-	Equal<typeof DEFAULT_SAFE_DOCUMENT_RATES, Readonly<SafeDocumentRates>>
->;
-type _RateLimitIsReadonly = Expect<
-	Equal<MutableKeys<SafeDocumentRateLimit>, never>
->;
-type _RateMapIsReadonly = Expect<Equal<MutableKeys<SafeDocumentRates>, never>>;
 
 declare const safeDocument: SafeDocument;
 
