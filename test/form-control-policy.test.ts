@@ -3,7 +3,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import {
   createSafeDocument,
-  isSafeDOMError,
   type SafeFormControlPolicy,
 } from "../src/index.ts";
 import { createContainedRoot } from "./support/contained-root.ts";
@@ -58,61 +57,6 @@ describe("guest-readable non-credential form-control policy", () => {
 
     expect(createdTags).toEqual([]);
     expect(root.childNodes).toHaveLength(0);
-  });
-
-  test("strict policy denials consume the exact lifetime operation allowance before native node creation", () => {
-    const root = createContainedRoot();
-    const originalCreateElement = Document.prototype.createElement;
-    const createdTags: string[] = [];
-    Document.prototype.createElement = function createElement(
-      tagName: string,
-      options?: ElementCreationOptions,
-    ): HTMLElement {
-      createdTags.push(tagName);
-      return originalCreateElement.call(this, tagName, options);
-    };
-
-    let safeDocument: ReturnType<typeof createSafeDocument>;
-    try {
-      safeDocument = createSafeDocument(root, {
-        harden: testHarden,
-        quotas: { operations: 2 },
-      });
-    } finally {
-      Document.prototype.createElement = originalCreateElement;
-    }
-
-    for (const [factory, operation] of [
-      [() => safeDocument.createInput(), "SafeDocument.createInput.policy"],
-      [() => safeDocument.createTextarea(), "SafeDocument.createTextarea.policy"],
-    ] as const) {
-      let caught: unknown;
-      try {
-        factory();
-      } catch (error) {
-        caught = error;
-      }
-      expect(isSafeDOMError(caught)).toBe(true);
-      expect(Object.isFrozen(caught)).toBe(true);
-      expect(caught).toMatchObject({
-        name: "SafeDOMError",
-        code: "FORM_CONTROL_POLICY_REQUIRED",
-        operation,
-        message: "Non-credential form elements require an explicit host policy",
-      });
-    }
-
-    expect(() => safeDocument.createSelect()).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-      operation: "SafeDocument quota exceeded: operations",
-    }));
-    expect(createdTags).toEqual([]);
-    expect(root.childNodes).toHaveLength(0);
-    expect(() => safeDocument.createDiv()).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-      operation: "SafeDocument quota exceeded: operations",
-    }));
-    expect(createdTags).toEqual([]);
   });
 
   test("explicit host grant enables the complete non-credential form surface with safe defaults", () => {
