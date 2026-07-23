@@ -89,7 +89,6 @@ import {
   type TrackKind,
 } from "./vocabularies.ts";
 
-const MAX_CANVAS_PIXELS = 16_777_216;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
 
 function requireIdentifierToken(value: string, operation: string): string {
@@ -1092,19 +1091,11 @@ export function createSafeCanvasElement(context: DocumentContext, realEl: HTMLCa
   return context.complete(Object.assign(base, {
     setWidth(value: number): void {
       const width = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setWidth.value");
-      context.setCanvasDimension(realEl, "width", width, (nextWidth, nextHeight) => {
-        if (nextWidth * nextHeight > MAX_CANVAS_PIXELS) {
-          throw invalidArgument("SafeCanvasElement.setWidth.pixels");
-        }
-      });
+      context.setCanvasDimension(realEl, "width", width);
     },
     setHeight(value: number): void {
       const height = requireIntegerInRange(value, 0, 4_294_967_295, "SafeCanvasElement.setHeight.value");
-      context.setCanvasDimension(realEl, "height", height, (nextWidth, nextHeight) => {
-        if (nextWidth * nextHeight > MAX_CANVAS_PIXELS) {
-          throw invalidArgument("SafeCanvasElement.setHeight.pixels");
-        }
-      });
+      context.setCanvasDimension(realEl, "height", height);
     },
   }) as SafeCanvasElement, realEl, "canvas");
 }

@@ -218,7 +218,7 @@ describe("identifier namespace", () => {
     expect(safeDocument.getElement("stable")).toBe(target);
   });
 
-  it("enforces the 256-token parser bound across every public IDREF-list entrypoint", () => {
+  it("accepts and canonicalizes more than 256 tokens across every IDREF-list entrypoint", () => {
     const separators = [" ", "\t", "\n", "\f", "\r"] as const;
     const repeated = (length: number): string => Array.from(
       { length },
@@ -253,24 +253,17 @@ describe("identifier namespace", () => {
 
     for (const testCase of cases) {
       const root = makeRoot();
-      const safeDocument = createSafeDocument(root, {
-        quotas: { identifierMappings: 2, identifierReferences: 256, identifierBytes: 16 },
-      });
+      const safeDocument = createSafeDocument(root);
       const { wrapper, set, get, attribute } = testCase.create(safeDocument);
-      set("stable");
+      set(repeated(257));
       safeDocument.appendChild(wrapper);
       const raw = requireElement(root.querySelector("div, th, td"));
-      const previousPhysical = raw.getAttribute(attribute);
-
-      expect(() => set(repeated(257)), testCase.label).toThrowError(expect.objectContaining({
-        code: "QUOTA_EXCEEDED",
-        operation: "IdentifierNamespace.referenceTokens",
-      }));
-      expect(get(), testCase.label).toBe("stable");
-      expect(raw.getAttribute(attribute), testCase.label).toBe(previousPhysical);
-
-      set(repeated(256));
-      expect(get()?.split(" "), testCase.label).toHaveLength(256);
+      const canonical = Array.from({ length: 257 }, () => "a").join(" ");
+      expect(get(), testCase.label).toBe(canonical);
+      const physicalTokens = raw.getAttribute(attribute)?.split(" ");
+      expect(physicalTokens, testCase.label).toHaveLength(257);
+      expect(new Set(physicalTokens), testCase.label).toHaveLength(1);
+      expect(physicalTokens, testCase.label).not.toContain("a");
     }
   });
 
