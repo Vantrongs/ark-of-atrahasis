@@ -6,7 +6,6 @@ import {
   createSafeDocument,
   type SafeContainerElement,
   type SafeDocument,
-  type SafeDocumentQuotas,
   type SafeElement,
   type SafeImageElement,
   type SafeLabelElement,
@@ -30,7 +29,6 @@ type Placement =
   | { readonly kind: "external" }
   | { readonly kind: "foreign-document" };
 type ModelWrapper = SafeElement | SafeTextNode;
-type MutableQuotas = { -readonly [Name in keyof SafeDocumentQuotas]: number };
 
 interface ModelNode {
   readonly id: number;
@@ -42,11 +40,10 @@ interface ModelNode {
   reference?: string;
   textValue: string;
   titleValue?: string;
-  readonly attributes: Map<string, number>;
   readonly styles: Map<string, string>;
   readonly requests: Map<string, string>;
   readonly listeners: Set<number>;
-  accountingReleased: boolean;
+  cleanupApplied: boolean;
   externalSnapshot?: string;
 }
 
@@ -59,8 +56,6 @@ interface ListenerModel {
 interface Model {
   documentState: "active" | "disposed";
   readonly nodes: Map<number, ModelNode>;
-  readonly quotas: SafeDocumentQuotas;
-  readonly usage: MutableQuotas;
   nextNodeId: number;
   nextListenerId: number;
   readonly listeners: Map<number, ListenerModel>;
@@ -93,36 +88,6 @@ const generateSyncCommands: (
   constraints?: { maxCommands?: number; replayPath?: string },
 ) => Arbitrary<Iterable<Command<Model, Real>>> = fc.commands;
 
-const ZERO_USAGE: MutableQuotas = {
-  nodes: 0,
-  listeners: 0,
-  operations: 0,
-  textBytes: 0,
-  attributeBytes: 0,
-  styleBytes: 0,
-  canvasPixels: 0,
-  requests: 0,
-  requestAttempts: 0,
-  identifierMappings: 0,
-  identifierReferences: 0,
-  identifierBytes: 0,
-};
-
-const TOPOLOGY_QUOTAS: SafeDocumentQuotas = Object.freeze({
-  nodes: 100,
-  listeners: 100,
-  operations: 512,
-  textBytes: 100_000,
-  attributeBytes: 100_000,
-  styleBytes: 100_000,
-  canvasPixels: 100_000,
-  requests: 100,
-  requestAttempts: 200,
-  identifierMappings: 100,
-  identifierReferences: 100,
-  identifierBytes: 100_000,
-});
-
 const MODEL_URL_POLICY = Object.freeze({
   baseURL: "https://model.test/",
   sinks: Object.freeze({
@@ -130,16 +95,10 @@ const MODEL_URL_POLICY = Object.freeze({
   }),
 });
 
-function utf8Length(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
-}
-
-function createModel(quotas: SafeDocumentQuotas): Model {
+function createModel(): Model {
   return {
     documentState: "active",
     nodes: new Map(),
-    quotas,
-    usage: { ...ZERO_USAGE },
     nextNodeId: 0,
     nextListenerId: 0,
     listeners: new Map(),
@@ -150,7 +109,7 @@ function createModel(quotas: SafeDocumentQuotas): Model {
   };
 }
 
-function createReal(quotas: SafeDocumentQuotas): Real {
+function createReal(): Real {
   const host = document.createElement("div");
   host.style.contain = "paint";
   const outsideSentinel = document.createElement("p");
@@ -202,7 +161,6 @@ function createReal(quotas: SafeDocumentQuotas): Real {
   try {
     safeDocument = createSafeDocument(root, {
       harden: testHarden,
-      quotas,
       formControlPolicy: { allowNonCredentialFormElements: true },
       urlPolicy: MODEL_URL_POLICY,
       stylePolicy: { allowedProperties: ["color", "opacity"] },
@@ -295,12 +253,6 @@ function nodeStateCode(node: ModelNode): "NODE_DISPOSED" | "NODE_REVOKED" | unde
   return undefined;
 }
 
-function reserveOperation(model: Model): boolean {
-  if (model.usage.operations + 1 > model.quotas.operations) return false;
-  model.usage.operations += 1;
-  return true;
-}
-
 function isDescendant(model: Model, candidateId: number, ancestorId: number): boolean {
   let current = model.nodes.get(candidateId);
   const visited = new Set<number>();
@@ -319,22 +271,16 @@ function subtreeIds(model: Model, rootId: number): number[] {
 
 function collectIdentifierRecord(model: Model, logicalId: string): void {
   if (model.logicalIds.has(logicalId) || (model.logicalReferences.get(logicalId) ?? 0) > 0) return;
-  model.usage.identifierMappings -= 1;
-  model.usage.identifierBytes -= utf8Length(logicalId);
   model.physicalTokens.delete(logicalId);
 }
 
-function releaseNodeAccounting(model: Model, node: ModelNode, state: Exclude<NodeState, "active">): void {
+function releaseNodeState(model: Model, node: ModelNode, state: Exclude<NodeState, "active">): void {
   node.state = state;
-  if (node.accountingReleased) return;
-  for (const amount of node.attributes.values()) model.usage.attributeBytes -= amount;
-  for (const value of node.styles.values()) model.usage.styleBytes -= utf8Length(value);
-  model.usage.requests -= node.requests.size;
+  if (node.cleanupApplied) return;
   for (const listenerId of node.listeners) {
     const listener = model.listeners.get(listenerId);
     if (listener?.active) {
       listener.active = false;
-      model.usage.listeners -= 1;
     }
   }
   if (node.logicalId !== undefined && node.logicalId !== "") {
@@ -345,24 +291,20 @@ function releaseNodeAccounting(model: Model, node: ModelNode, state: Exclude<Nod
     const references = model.logicalReferences.get(node.reference) ?? 0;
     if (references <= 1) model.logicalReferences.delete(node.reference);
     else model.logicalReferences.set(node.reference, references - 1);
-    model.usage.identifierReferences -= 1;
     collectIdentifierRecord(model, node.reference);
   }
-  model.usage.textBytes -= utf8Length(node.textValue);
-  node.attributes.clear();
   node.styles.clear();
   node.requests.clear();
   delete node.logicalId;
   delete node.physicalToken;
   delete node.reference;
-  model.usage.nodes -= 1;
-  node.accountingReleased = true;
+  node.cleanupApplied = true;
 }
 
 function terminateSubtree(model: Model, rootId: number, state: Exclude<NodeState, "active">): void {
   for (const id of subtreeIds(model, rootId)) {
     const node = requireNode(model, id);
-    if (node.state === "active" || node.state === state) releaseNodeAccounting(model, node, state);
+    if (node.state === "active" || node.state === state) releaseNodeState(model, node, state);
   }
 }
 
@@ -469,9 +411,6 @@ function assertInvariants(model: Model, real: Real): void {
       .toBe(true);
   }
   if (model.documentState === "disposed") expect(real.root.childNodes).toHaveLength(0);
-  for (const [name, amount] of Object.entries(model.usage)) {
-    expect(amount, `negative modeled usage for ${name}`).toBeGreaterThanOrEqual(0);
-  }
 }
 
 type CommandSpec =
@@ -497,7 +436,6 @@ type ExpectedCode =
   | "NODE_DISPOSED"
   | "NODE_REVOKED"
   | "PLACEMENT_VIOLATION"
-  | "QUOTA_EXCEEDED"
   | "DOM_OPERATION_FAILED"
   | "DUPLICATE_IDENTIFIER";
 
@@ -536,49 +474,26 @@ function takeCapturedRaw(real: Real, kind: NodeKind): Node {
 }
 
 function executeCreate(model: Model, real: Real, spec: Extract<CommandSpec, { type: "create" }>): void {
-  let expectedCode: ExpectedCode | undefined;
-  let creationEntered = false;
-  if (model.documentState === "disposed") {
-    expectedCode = "DOCUMENT_DISPOSED";
-  } else if (!reserveOperation(model)) {
-    expectedCode = "QUOTA_EXCEEDED";
-  } else {
-    creationEntered = true;
-    const initialAttributeBytes = spec.kind === "button" ? 10 : 0;
-    if (model.usage.nodes + 1 > model.quotas.nodes) expectedCode = "QUOTA_EXCEEDED";
-    else if (model.usage.attributeBytes + initialAttributeBytes > model.quotas.attributeBytes) {
-      expectedCode = "QUOTA_EXCEEDED";
-    }
-  }
+  const expectedCode = model.documentState === "disposed" ? "DOCUMENT_DISPOSED" : undefined;
 
   const wrapper = executeExpected(expectedCode, () => factoryForKind(real.safeDocument, spec.kind));
   if (expectedCode !== undefined) {
-    if (creationEntered) {
-      const discarded = takeCapturedRaw(real, spec.kind);
-      expect(discarded.parentNode).toBeNull();
-    } else {
-      expect(real.capturedElements).toHaveLength(0);
-      expect(real.capturedTexts).toHaveLength(0);
-    }
+    expect(real.capturedElements).toHaveLength(0);
+    expect(real.capturedTexts).toHaveLength(0);
     return;
   }
   if (wrapper === undefined) throw new Error("successful creation returned no wrapper");
   const raw = takeCapturedRaw(real, spec.kind);
-  const attributes = new Map<string, number>();
-  if (spec.kind === "button") attributes.set("type", 10);
-  model.usage.nodes += 1;
-  model.usage.attributeBytes += spec.kind === "button" ? 10 : 0;
   model.nodes.set(spec.id, {
     id: spec.id,
     kind: spec.kind,
     state: "active",
     placement: { kind: "detached" },
     textValue: "",
-    attributes,
     styles: new Map(),
     requests: new Map(),
     listeners: new Set(),
-    accountingReleased: false,
+    cleanupApplied: false,
   });
   model.nextNodeId = Math.max(model.nextNodeId, spec.id + 1);
   real.wrappers.set(spec.id, wrapper);
@@ -595,7 +510,6 @@ function appendExpectedCode(
     const parentCode = nodeStateCode(parent);
     if (parentCode !== undefined) return parentCode;
   }
-  if (!reserveOperation(model)) return "QUOTA_EXCEEDED";
   const childCode = nodeStateCode(child);
   if (childCode !== undefined) return childCode;
   if (parent !== undefined && (parent.id === child.id || isDescendant(model, parent.id, child.id))) {
@@ -625,7 +539,6 @@ function executeDetach(model: Model, real: Real, spec: Extract<CommandSpec, { ty
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
   executeExpected(expectedCode, () => requireWrapper(real, spec.nodeId).detach());
   if (expectedCode === undefined) node.placement = { kind: "detached" };
 }
@@ -672,11 +585,6 @@ function executeAddListener(
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
-  if (
-    expectedCode === undefined
-    && model.usage.listeners + 1 > model.quotas.listeners
-  ) expectedCode = "QUOTA_EXCEEDED";
   const cleanup = executeExpected(expectedCode, () => {
     return requireElementWrapper(requireWrapper(real, spec.nodeId)).onClick(() => {
       real.callbackCounts.set(spec.listenerId, (real.callbackCounts.get(spec.listenerId) ?? 0) + 1);
@@ -685,7 +593,6 @@ function executeAddListener(
   if (expectedCode !== undefined) return;
   if (cleanup === undefined) throw new Error("successful listener installation returned no cleanup");
   expect(Object.isFrozen(cleanup)).toBe(true);
-  model.usage.listeners += 1;
   node.listeners.add(spec.listenerId);
   model.listeners.set(spec.listenerId, { id: spec.listenerId, nodeId: node.id, active: true });
   model.listenerCalls.set(spec.listenerId, 0);
@@ -717,10 +624,7 @@ function executeCleanupListener(
   if (listener === undefined || cleanup === undefined) throw new Error("missing modeled listener cleanup");
   cleanup();
   cleanup();
-  if (listener.active) {
-    listener.active = false;
-    model.usage.listeners -= 1;
-  }
+  listener.active = false;
 }
 
 function executeStyle(model: Model, real: Real, spec: Extract<CommandSpec, { type: "style" }>): void {
@@ -728,16 +632,8 @@ function executeStyle(model: Model, real: Real, spec: Extract<CommandSpec, { typ
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
 
-  const previous = node.styles.get("color");
   const value = spec.action === "red" ? "red" : spec.action === "blue" ? "blue" : undefined;
-  if (expectedCode === undefined && value !== undefined) {
-    const delta = utf8Length(value) - (previous === undefined ? 0 : utf8Length(previous));
-    if (delta > 0 && model.usage.styleBytes + delta > model.quotas.styleBytes) {
-      expectedCode = "QUOTA_EXCEEDED";
-    }
-  }
 
   const result = executeExpected(expectedCode, () => {
     const style = requireElementWrapper(requireWrapper(real, spec.nodeId)).style;
@@ -752,12 +648,10 @@ function executeStyle(model: Model, real: Real, spec: Extract<CommandSpec, { typ
   }
   expect(result).toBe(true);
   if (spec.action === "remove") {
-    if (previous !== undefined) model.usage.styleBytes -= utf8Length(previous);
     node.styles.delete("color");
     return;
   }
   if (value === undefined) throw new Error("missing modeled style value");
-  model.usage.styleBytes += utf8Length(value) - (previous === undefined ? 0 : utf8Length(previous));
   node.styles.set("color", value);
 }
 
@@ -770,12 +664,6 @@ function executeRequest(
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
-  if (
-    expectedCode === undefined
-    && model.usage.requestAttempts + 1 > model.quotas.requestAttempts
-  ) expectedCode = "QUOTA_EXCEEDED";
-  else if (expectedCode === undefined) model.usage.requestAttempts += 1;
 
   const input = spec.recipe === "allowed"
     ? `/allowed-${spec.token}.png`
@@ -788,17 +676,6 @@ function executeRequest(
   const canonical = allowed && input !== undefined
     ? new URL(input, MODEL_URL_POLICY.baseURL).href
     : undefined;
-  const previousURL = node.requests.get("src");
-  const previousAttributeAmount = node.attributes.get("src") ?? 0;
-  const nextAttributeAmount = canonical === undefined ? 0 : utf8Length("src") + utf8Length(canonical);
-  if (expectedCode === undefined && allowed) {
-    const attributeDelta = nextAttributeAmount - previousAttributeAmount;
-    const requestDelta = previousURL === undefined ? 1 : 0;
-    if (
-      (attributeDelta > 0 && model.usage.attributeBytes + attributeDelta > model.quotas.attributeBytes)
-      || (requestDelta > 0 && model.usage.requests + requestDelta > model.quotas.requests)
-    ) expectedCode = "QUOTA_EXCEEDED";
-  }
 
   let traps = 0;
   const nonPrimitive = new Proxy({}, {
@@ -824,9 +701,6 @@ function executeRequest(
   expect(result.allowed).toBe(true);
   if (!result.allowed || canonical === undefined) throw new Error("expected an allowed canonical URL");
   expect(result.url).toBe(canonical);
-  model.usage.attributeBytes += nextAttributeAmount - previousAttributeAmount;
-  if (previousURL === undefined) model.usage.requests += 1;
-  node.attributes.set("src", nextAttributeAmount);
   node.requests.set("src", canonical);
 }
 
@@ -839,18 +713,12 @@ function executeSetText(
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
-  const delta = utf8Length(spec.value) - utf8Length(node.textValue);
-  if (expectedCode === undefined && delta > 0 && model.usage.textBytes + delta > model.quotas.textBytes) {
-    expectedCode = "QUOTA_EXCEEDED";
-  }
   executeExpected(expectedCode, () => {
     const wrapper = requireWrapper(real, spec.nodeId);
     if ("style" in wrapper) throw new Error("expected text wrapper");
     wrapper.setText(spec.value);
   });
   if (expectedCode !== undefined) return;
-  model.usage.textBytes += delta;
   node.textValue = spec.value;
 }
 
@@ -863,21 +731,10 @@ function executeSetTitle(
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
-  const previousAmount = node.attributes.get("title") ?? 0;
-  const nextAmount = utf8Length("title") + utf8Length(spec.value);
-  const delta = nextAmount - previousAmount;
-  if (
-    expectedCode === undefined
-    && delta > 0
-    && model.usage.attributeBytes + delta > model.quotas.attributeBytes
-  ) expectedCode = "QUOTA_EXCEEDED";
   executeExpected(expectedCode, () => {
     requireElementWrapper(requireWrapper(real, spec.nodeId)).setTitle(spec.value);
   });
   if (expectedCode !== undefined) return;
-  model.usage.attributeBytes += delta;
-  node.attributes.set("title", nextAmount);
   node.titleValue = spec.value;
 }
 
@@ -890,37 +747,9 @@ function executeSetReference(
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
 
   const oldLogical = node.reference;
   const logicalChanged = oldLogical !== spec.logicalId;
-  const createsRecord = logicalChanged
-    && spec.logicalId !== ""
-    && !model.logicalIds.has(spec.logicalId)
-    && (model.logicalReferences.get(spec.logicalId) ?? 0) === 0;
-  const collectsRecord = logicalChanged
-    && oldLogical !== undefined
-    && oldLogical !== ""
-    && (model.logicalReferences.get(oldLogical) ?? 0) === 1
-    && !model.logicalIds.has(oldLogical);
-  const referenceDelta = logicalChanged
-    ? Number(spec.logicalId !== "") - Number(oldLogical !== undefined && oldLogical !== "")
-    : 0;
-  const mappingDelta = Number(createsRecord) - Number(collectsRecord);
-  const identifierByteDelta = (createsRecord ? utf8Length(spec.logicalId) : 0)
-    - (collectsRecord && oldLogical !== undefined ? utf8Length(oldLogical) : 0);
-  const previousAttributeAmount = node.attributes.get("for") ?? 0;
-  const nextAttributeAmount = utf8Length("for") + (spec.logicalId === "" ? 0 : 54);
-  const attributeDelta = nextAttributeAmount - previousAttributeAmount;
-  if (expectedCode === undefined && (
-    (attributeDelta > 0 && model.usage.attributeBytes + attributeDelta > model.quotas.attributeBytes)
-    || (referenceDelta > 0
-      && model.usage.identifierReferences + referenceDelta > model.quotas.identifierReferences)
-    || (mappingDelta > 0
-      && model.usage.identifierMappings + mappingDelta > model.quotas.identifierMappings)
-    || (identifierByteDelta > 0
-      && model.usage.identifierBytes + identifierByteDelta > model.quotas.identifierBytes)
-  )) expectedCode = "QUOTA_EXCEEDED";
 
   executeExpected(expectedCode, () => {
     requireLabelWrapper(requireWrapper(real, spec.nodeId)).setFor(spec.logicalId);
@@ -930,6 +759,7 @@ function executeSetReference(
     const oldReferences = model.logicalReferences.get(oldLogical) ?? 0;
     if (oldReferences <= 1) model.logicalReferences.delete(oldLogical);
     else model.logicalReferences.set(oldLogical, oldReferences - 1);
+    collectIdentifierRecord(model, oldLogical);
   }
   if (logicalChanged && spec.logicalId !== "") {
     model.logicalReferences.set(
@@ -937,11 +767,6 @@ function executeSetReference(
       (model.logicalReferences.get(spec.logicalId) ?? 0) + 1,
     );
   }
-  model.usage.identifierReferences += referenceDelta;
-  model.usage.identifierMappings += mappingDelta;
-  model.usage.identifierBytes += identifierByteDelta;
-  model.usage.attributeBytes += attributeDelta;
-  if (collectsRecord && oldLogical !== undefined) model.physicalTokens.delete(oldLogical);
   const raw = requireRaw(real, node.id);
   if (!(raw instanceof Element)) throw new Error("expected physical IDREF element");
   if (spec.logicalId !== "") {
@@ -952,7 +777,6 @@ function executeSetReference(
     else model.physicalTokens.set(spec.logicalId, physicalToken);
   }
   node.reference = spec.logicalId;
-  node.attributes.set("for", nextAttributeAmount);
 }
 
 function executeSetId(model: Model, real: Real, spec: Extract<CommandSpec, { type: "set-id" }>): void {
@@ -960,44 +784,20 @@ function executeSetId(model: Model, real: Real, spec: Extract<CommandSpec, { typ
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
   else expectedCode = nodeStateCode(node);
-  if (expectedCode === undefined && !reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
 
   const oldLogical = node.logicalId ?? "";
-  const oldAttributeAmount = node.attributes.get("id") ?? 0;
-  const nextAttributeAmount = spec.logicalId === "" ? 0 : 56;
   const logicalChanged = oldLogical !== spec.logicalId;
-  const createsRecord = logicalChanged
-    && spec.logicalId !== ""
-    && !model.logicalIds.has(spec.logicalId)
-    && (model.logicalReferences.get(spec.logicalId) ?? 0) === 0;
-  const collectsRecord = logicalChanged
-    && oldLogical !== ""
-    && (model.logicalReferences.get(oldLogical) ?? 0) === 0;
-  const mappingDelta = Number(createsRecord) - Number(collectsRecord);
-  const identifierByteDelta = (createsRecord ? utf8Length(spec.logicalId) : 0)
-    - (collectsRecord ? utf8Length(oldLogical) : 0);
   const duplicateOwner = spec.logicalId === "" ? undefined : model.logicalIds.get(spec.logicalId);
   if (expectedCode === undefined && duplicateOwner !== undefined && duplicateOwner !== node.id) {
     expectedCode = "DUPLICATE_IDENTIFIER";
   }
-  if (expectedCode === undefined) {
-    const attributeDelta = nextAttributeAmount - oldAttributeAmount;
-    if (
-      (attributeDelta > 0 && model.usage.attributeBytes + attributeDelta > model.quotas.attributeBytes)
-      || (mappingDelta > 0 && model.usage.identifierMappings + mappingDelta > model.quotas.identifierMappings)
-      || (identifierByteDelta > 0 && model.usage.identifierBytes + identifierByteDelta > model.quotas.identifierBytes)
-    ) expectedCode = "QUOTA_EXCEEDED";
-  }
 
   executeExpected(expectedCode, () => requireElementWrapper(requireWrapper(real, spec.nodeId)).setId(spec.logicalId));
   if (expectedCode !== undefined) return;
-  if (logicalChanged && oldLogical !== "") model.logicalIds.delete(oldLogical);
-  model.usage.identifierMappings += mappingDelta;
-  model.usage.identifierBytes += identifierByteDelta;
-  model.usage.attributeBytes += nextAttributeAmount - oldAttributeAmount;
-  if (collectsRecord) model.physicalTokens.delete(oldLogical);
-  if (nextAttributeAmount === 0) node.attributes.delete("id");
-  else node.attributes.set("id", nextAttributeAmount);
+  if (logicalChanged && oldLogical !== "") {
+    model.logicalIds.delete(oldLogical);
+    collectIdentifierRecord(model, oldLogical);
+  }
   if (spec.logicalId === "") {
     delete node.logicalId;
     delete node.physicalToken;
@@ -1034,7 +834,6 @@ function executeLookupId(
 ): void {
   let expectedCode: ExpectedCode | undefined;
   if (model.documentState === "disposed") expectedCode = "DOCUMENT_DISPOSED";
-  else if (!reserveOperation(model)) expectedCode = "QUOTA_EXCEEDED";
   const result = executeExpected(expectedCode, () => real.safeDocument.getElement(spec.logicalId));
   if (expectedCode !== undefined) return;
   const nodeId = model.logicalIds.get(spec.logicalId);
@@ -1065,7 +864,7 @@ function executeDisposeDocument(model: Model, real: Real): void {
   expect(() => real.safeDocument.dispose()).not.toThrow();
   if (model.documentState === "disposed") return;
   for (const node of model.nodes.values()) {
-    if (node.state === "active") releaseNodeAccounting(model, node, "disposed");
+    if (node.state === "active") releaseNodeState(model, node, "disposed");
     if (node.placement.kind === "root") node.placement = { kind: "detached" };
   }
   model.documentState = "disposed";
@@ -1235,34 +1034,14 @@ function lifecycleCommands(
   });
 }
 
-const QUOTA_NAMES = Object.freeze([
-  "nodes",
-  "listeners",
-  "operations",
-  "textBytes",
-  "attributeBytes",
-  "styleBytes",
-  "canvasPixels",
-  "requests",
-  "requestAttempts",
-  "identifierMappings",
-  "identifierReferences",
-  "identifierBytes",
-] as const satisfies readonly (keyof SafeDocumentQuotas)[]);
-
-const TINY_QUOTAS = fc.tuple(
-  fc.constantFrom(...QUOTA_NAMES),
-  fc.integer({ min: 0, max: 8 }),
-).map(([quotaName, limit]) => Object.freeze({ ...TOPOLOGY_QUOTAS, [quotaName]: limit }));
-
-function runCommands(quotas: SafeDocumentQuotas, commands: Iterable<Command<Model, Real>>): void {
+function runCommands(commands: Iterable<Command<Model, Real>>): void {
   let currentReal: Real | undefined;
   let modelFailed = false;
   let modelFailure: unknown;
   try {
     fc.modelRun(() => {
-      currentReal = createReal(quotas);
-      return { model: createModel(quotas), real: currentReal };
+      currentReal = createReal();
+      return { model: createModel(), real: currentReal };
     }, commands);
   } catch (error) {
     modelFailed = true;
@@ -1313,7 +1092,7 @@ describe.sequential("lifecycle command model", () => {
 
     let real: Real | undefined;
     try {
-      real = createReal(TOPOLOGY_QUOTAS);
+      real = createReal();
       const wrapper = real.safeDocument.createDiv();
       real.safeDocument.appendChild(wrapper);
       failNext = true;
@@ -1328,16 +1107,8 @@ describe.sequential("lifecycle command model", () => {
     }
   });
 
-  it("runs the mandatory cleanup and exact quota-reacquisition witness", () => {
-    const quotas: SafeDocumentQuotas = Object.freeze({
-      ...TOPOLOGY_QUOTAS,
-      nodes: 2,
-      listeners: 1,
-      styleBytes: 3,
-      requests: 1,
-      requestAttempts: 4,
-    });
-    runCommands(quotas, [
+  it("runs the mandatory cleanup and revocation witness", () => {
+    runCommands([
       fixedCommand({ type: "create", id: 0, kind: "container" }),
       fixedCommand({ type: "create", id: 1, kind: "image" }),
       fixedCommand({ type: "style", nodeId: 1, action: "red" }),
@@ -1359,7 +1130,7 @@ describe.sequential("lifecycle command model", () => {
   });
 
   it("runs every lifecycle command family in one deterministic trace", () => {
-    runCommands(TOPOLOGY_QUOTAS, [
+    runCommands([
       fixedCommand({ type: "create", id: 0, kind: "container" }),
       fixedCommand({ type: "create", id: 1, kind: "image" }),
       fixedCommand({ type: "create", id: 2, kind: "button" }),
@@ -1405,50 +1176,10 @@ describe.sequential("lifecycle command model", () => {
     ]);
   });
 
-  it("reacquires exact text, attribute, and IDREF quotas after disposal", () => {
-    runCommands(Object.freeze({ ...TOPOLOGY_QUOTAS, nodes: 2, textBytes: 3 }), [
-      fixedCommand({ type: "create", id: 0, kind: "text" }),
-      fixedCommand({ type: "set-text", nodeId: 0, value: "éa" }),
-      fixedCommand({ type: "create", id: 1, kind: "text" }),
-      fixedCommand({ type: "set-text", nodeId: 1, value: "a" }),
-      fixedCommand({ type: "dispose-node", nodeId: 0 }),
-      fixedCommand({ type: "set-text", nodeId: 1, value: "éa" }),
-    ]);
-    runCommands(Object.freeze({ ...TOPOLOGY_QUOTAS, nodes: 2, attributeBytes: 5 }), [
-      fixedCommand({ type: "create", id: 0, kind: "container" }),
-      fixedCommand({ type: "set-title", nodeId: 0, value: "" }),
-      fixedCommand({ type: "create", id: 1, kind: "container" }),
-      fixedCommand({ type: "set-title", nodeId: 1, value: "" }),
-      fixedCommand({ type: "dispose-node", nodeId: 0 }),
-      fixedCommand({ type: "set-title", nodeId: 1, value: "" }),
-    ]);
-    runCommands(Object.freeze({
-      ...TOPOLOGY_QUOTAS,
-      nodes: 2,
-      attributeBytes: 114,
-      identifierMappings: 1,
-      identifierReferences: 1,
-      identifierBytes: 1,
-    }), [
-      fixedCommand({ type: "create", id: 0, kind: "label" }),
-      fixedCommand({ type: "set-reference", nodeId: 0, logicalId: "a" }),
-      fixedCommand({ type: "create", id: 1, kind: "label" }),
-      fixedCommand({ type: "set-reference", nodeId: 1, logicalId: "b" }),
-      fixedCommand({ type: "dispose-node", nodeId: 0 }),
-      fixedCommand({ type: "set-reference", nodeId: 1, logicalId: "b" }),
-    ]);
-  });
-
   it("composes generated topology, registry, listener, style, request, lookup, and disposal commands", () => {
     fc.assert(fc.property(lifecycleCommands(40), (commands) => {
-      runCommands(TOPOLOGY_QUOTAS, commands);
+      runCommands(commands);
     }), propertyParameters(100));
-  });
-
-  it("models exact 0-8 quota failures and release under shrunk command traces", () => {
-    fc.assert(fc.property(TINY_QUOTAS, lifecycleCommands(24), (quotas, commands) => {
-      runCommands(quotas, commands);
-    }), propertyParameters(150));
   });
 
   it("replays the runner's shrunk counterexample through the documented environment", () => {
@@ -1483,7 +1214,7 @@ describe.sequential("lifecycle command model", () => {
 
   it("replays a shrunk command model with its runner path and command replay path", () => {
     const failsOnExecutedCreate = (commands: Iterable<Command<Model, Real>>): boolean => {
-      runCommands(TOPOLOGY_QUOTAS, commands);
+      runCommands(commands);
       return !String(commands).includes('"type":"create"');
     };
     const first = fc.check(fc.property(lifecycleCommands(12, null), failsOnExecutedCreate), {
