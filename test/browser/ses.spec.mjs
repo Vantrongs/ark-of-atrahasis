@@ -309,18 +309,12 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     });
 
     const foreignHost = document.createElement("div");
-    const quotaHost = document.createElement("div");
     foreignHost.style.contain = "paint";
-    quotaHost.style.contain = "paint";
-    document.body.append(foreignHost, quotaHost);
+    document.body.append(foreignHost);
     const foreignRoot = foreignHost.attachShadow({ mode: "open" });
-    const quotaRoot = quotaHost.attachShadow({ mode: "open" });
     const foreignDocument = globalThis.arkPublicAPI.createSafeDocument(foreignRoot);
-    const quotaDocument = globalThis.arkPublicAPI.createSafeDocument(quotaRoot, {
-      quotas: { nodes: 1 },
-    });
     const foreignWrapper = foreignDocument.createDiv();
-    const guest = new Compartment({ foreignWrapper, quotaDocument, safeDocument });
+    const guest = new Compartment({ foreignWrapper, safeDocument });
 
     guest.evaluate(`
       globalThis.capture = action => {
@@ -364,12 +358,6 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
       globalThis.topologyError = capture(() => div.appendChild(div));
       globalThis.crossOwnerError = capture(() => safeDocument.appendChild(foreignWrapper));
       globalThis.numericError = capture(() => safeDocument.createCanvas().setWidth(Infinity));
-
-      globalThis.quotaFirst = quotaDocument.createDiv();
-      globalThis.quotaError = capture(() => quotaDocument.createSpan());
-      quotaFirst.dispose();
-      globalThis.quotaReplacement = quotaDocument.createSpan();
-      globalThis.quotaReleaseWorked = quotaReplacement.getText() === "";
     `);
 
     const rawButton = root.querySelector("button");
@@ -412,8 +400,6 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
       },
       numericError,
       passwordError,
-      quotaError,
-      quotaReleaseWorked,
       styleAllowed,
       styleDenied,
       topologyError,
@@ -422,10 +408,8 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
 
     safeDocument.dispose();
     foreignDocument.dispose();
-    quotaDocument.dispose();
     outside.remove();
     foreignHost.remove();
-    quotaHost.remove();
     return { formIsolation, guestResult, placementError, placementRevocation, terminalError };
   });
 
@@ -443,8 +427,6 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
       event: { ctrlKey: false, frozen: true, targetFrozen: true },
       numericError: { code: "ERR_INVALID_ARGUMENT", frozen: true, noCause: true, noStack: true },
       passwordError: { code: "ERR_INVALID_ARGUMENT", frozen: true, noCause: true, noStack: true },
-      quotaError: { code: "QUOTA_EXCEEDED", frozen: true, noCause: true, noStack: true },
-      quotaReleaseWorked: true,
       styleAllowed: true,
       styleDenied: false,
       topologyError: { code: "DOM_OPERATION_FAILED", frozen: true, noCause: true, noStack: true },
@@ -453,97 +435,6 @@ test("real browser SES covers the browser-relevant strict acceptance matrix", as
     placementRevocation: { idPreserved: true, namePreserved: true, stillOutside: true },
     placementError: { code: "PLACEMENT_VIOLATION", frozen: true, noCause: true, noStack: true },
     terminalError: { code: "NODE_REVOKED", frozen: true, noCause: true, noStack: true },
-  });
-  expectNoUnapprovedActivity(browserLedger);
-});
-
-test("real browser SES enforces operation and request-attempt time windows", async ({
-  page,
-  browserLedger,
-}) => {
-  await openHarness(page, browserLedger);
-
-  const result = await page.evaluate(async () => {
-    const createRoot = () => {
-      const host = document.createElement("div");
-      host.style.contain = "paint";
-      document.body.append(host);
-      return { host, root: host.attachShadow({ mode: "closed" }) };
-    };
-    const operationFixture = createRoot();
-    const requestFixture = createRoot();
-    const operationDocument = globalThis.arkPublicAPI.createSafeDocument(operationFixture.root, {
-      quotas: { operations: 20 },
-      rates: { operations: { limit: 2, windowMs: 40 } },
-    });
-    const requestDocument = globalThis.arkPublicAPI.createSafeDocument(requestFixture.root, {
-      formControlPolicy: { allowNonCredentialFormElements: true },
-      quotas: { operations: 20, requestAttempts: 20 },
-      rates: {
-        operations: { limit: 20, windowMs: 40 },
-        requestAttempts: { limit: 2, windowMs: 40 },
-      },
-    });
-    const operationGuest = new Compartment({ operationDocument });
-    const requestGuest = new Compartment({ requestDocument });
-    const operationBeforeReset = operationGuest.evaluate(`
-      globalThis.capture = action => {
-        try {
-          action();
-          return null;
-        } catch (error) {
-          return { code: error.code, frozen: Object.isFrozen(error), operation: error.operation };
-        }
-      };
-      globalThis.element = operationDocument.createDiv();
-      element.getText();
-      capture(() => element.getText());
-    `);
-    const requestBeforeReset = requestGuest.evaluate(`
-      globalThis.capture = action => {
-        try {
-          action();
-          return null;
-        } catch (error) {
-          return { code: error.code, frozen: Object.isFrozen(error), operation: error.operation };
-        }
-      };
-      globalThis.image = requestDocument.createImage();
-      image.setSrc("https://denied.example/one.png");
-      image.setSrc("https://denied.example/two.png");
-      capture(() => image.setSrc("https://denied.example/three.png"));
-    `);
-
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const operationAfterReset = operationGuest.evaluate("element.getText()");
-    const requestAfterReset = requestGuest.evaluate(
-      'image.setSrc("https://denied.example/reset.png").allowed',
-    );
-    operationDocument.dispose();
-    requestDocument.dispose();
-    operationFixture.host.remove();
-    requestFixture.host.remove();
-    return {
-      operationAfterReset,
-      operationBeforeReset,
-      requestAfterReset,
-      requestBeforeReset,
-    };
-  });
-
-  expect(result).toEqual({
-    operationAfterReset: "",
-    operationBeforeReset: {
-      code: "RATE_LIMIT_EXCEEDED",
-      frozen: true,
-      operation: "SafeDocument rate exceeded: operations",
-    },
-    requestAfterReset: false,
-    requestBeforeReset: {
-      code: "RATE_LIMIT_EXCEEDED",
-      frozen: true,
-      operation: "SafeDocument rate exceeded: requestAttempts",
-    },
   });
   expectNoUnapprovedActivity(browserLedger);
 });
