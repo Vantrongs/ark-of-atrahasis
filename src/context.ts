@@ -110,6 +110,16 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
   const harden = readOwnDataProperty<Hardener>(options, "harden", invalidHardener);
   if (typeof harden !== "function") throw invalidHardener();
 
+  for (const removedOption of ["quotas", "rates"] as const) {
+    const operation = `createSafeDocument.options.${removedOption}`;
+    const legacy = readOwnDataPropertyEntry<unknown>(
+      options,
+      removedOption,
+      () => createSafeDOMError("ERR_INVALID_POLICY", operation),
+    );
+    if (legacy.present) throw createSafeDOMError("ERR_INVALID_POLICY", operation);
+  }
+
   const formControlPolicy = readOwnDataPropertyEntry<SafeFormControlPolicy | undefined>(
     options,
     "formControlPolicy",

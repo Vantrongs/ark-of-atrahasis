@@ -1,12 +1,12 @@
 {
   "name": "ark-of-atrahasis",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "ark-of-atrahasis",
-      "version": "0.5.0",
+      "version": "1.0.0",
       "license": "GPL-3.0-only",
       "devDependencies": {
         "@biomejs/biome": "2.5.4",

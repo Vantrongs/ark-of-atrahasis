@@ -299,8 +299,14 @@ void removedRates;
 const removedQuotaErrorCode: SafeDOMErrorCode = "QUOTA_EXCEEDED";
 // @ts-expect-error rate limiting is not an Ark 1.0 public error code
 const removedRateErrorCode: SafeDOMErrorCode = "RATE_LIMIT_EXCEEDED";
+// @ts-expect-error quota configuration is not an Ark 1.0 public error code
+const removedInvalidQuotaErrorCode: SafeDOMErrorCode = "INVALID_QUOTA";
+// @ts-expect-error rate configuration is not an Ark 1.0 public error code
+const removedInvalidRateErrorCode: SafeDOMErrorCode = "INVALID_RATE";
 void removedQuotaErrorCode;
 void removedRateErrorCode;
+void removedInvalidQuotaErrorCode;
+void removedInvalidRateErrorCode;
 
 // @ts-expect-error the explicit form-control grant accepts only literal true
 const _disabledFormControlGrant: SafeFormControlPolicy = { allowNonCredentialFormElements: false };
