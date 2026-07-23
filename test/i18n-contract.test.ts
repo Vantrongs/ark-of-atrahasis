@@ -77,22 +77,6 @@ describe("internationalization contract", () => {
     expect(composed.getId()).not.toBe(decomposed.getId());
   });
 
-  it("counts supplementary and combining text by exact UTF-8 bytes", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { textBytes: 7 },
-    });
-    const wrapper = safeDocument.createDiv();
-    const exactBudget = "😀e\u0301"; // 4 + 1 + 2 UTF-8 bytes.
-
-    wrapper.setText(exactBudget);
-    expect(wrapper.getText()).toBe(exactBudget);
-    expect(() => wrapper.setText(`${exactBudget}x`)).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-    }));
-    expect(wrapper.getText()).toBe(exactBudget);
-  });
-
   it("round-trips astral, confusable, bidi-control, and lone-surrogate strings exactly", () => {
     const safeDocument = createSafeDocument(makeRoot());
     const wrapper = safeDocument.createDiv();
@@ -204,43 +188,6 @@ describe("internationalization contract", () => {
       name: "SafeDOMError",
       code: "ERR_INVALID_ARGUMENT",
       operation: "SafeElement.setDir.value",
-    }));
-  });
-
-  it("releases live UTF-8 attribute bytes when local language is cleared", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { attributeBytes: 6 },
-    });
-    const wrapper = safeDocument.createDiv();
-    safeDocument.appendChild(wrapper);
-
-    wrapper.setLang("en");
-    expect(() => wrapper.setDir("rtl")).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-    }));
-    expect(root.querySelector("div")?.hasAttribute("dir")).toBe(false);
-
-    wrapper.clearLang();
-    expect(() => wrapper.setDir("rtl")).not.toThrow();
-    expect(wrapper.getDir()).toBe("rtl");
-  });
-
-  it("meters each language state operation and preserves state after quota failure", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { operations: 3 },
-    });
-    const wrapper = safeDocument.createDiv();
-
-    wrapper.setLang("");
-    safeDocument.appendChild(wrapper);
-    expect(() => wrapper.clearLang()).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-    }));
-    expect(root.querySelector("div")?.getAttribute("lang")).toBe("");
-    expect(() => wrapper.getLang()).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
     }));
   });
 

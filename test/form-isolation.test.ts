@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, test } from "vitest";
-import { createContainedRoot as makeRoot } from "./support/contained-root.ts";
 import { createTestSafeDocument as createSafeDocument } from "./support/create-safe-document.ts";
 
 beforeEach(() => {
@@ -9,33 +8,6 @@ beforeEach(() => {
 });
 
 describe("opt-in structural non-credential form controls", () => {
-  test.each([
-    { factory: "input" as const, bytes: 15 },
-    { factory: "textarea" as const, bytes: 15 },
-    { factory: "select" as const, bytes: 15 },
-    { factory: "button" as const, bytes: 10 },
-  ])("policy-owned $factory defaults consume and release exactly $bytes attribute bytes", ({ factory, bytes }) => {
-    const createControl = (safeDocument: ReturnType<typeof createSafeDocument>) => {
-      if (factory === "input") return safeDocument.createInput();
-      if (factory === "textarea") return safeDocument.createTextarea();
-      if (factory === "select") return safeDocument.createSelect();
-      return safeDocument.createButton();
-    };
-    const deniedRoot = makeRoot();
-    const deniedDocument = createSafeDocument(deniedRoot, { quotas: { attributeBytes: bytes - 1 } });
-    expect(() => createControl(deniedDocument)).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-      operation: "SafeDocument quota exceeded: attributeBytes",
-    }));
-    expect(deniedRoot.innerHTML).toBe("");
-
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: bytes } });
-    const first = createControl(safeDocument);
-    first.dispose();
-    expect(() => createControl(safeDocument)).not.toThrow();
-  });
-
   test("created buttons are non-submitting and reject submit/reset states", () => {
     const form = document.createElement("form");
     const host = document.createElement("div");

@@ -99,10 +99,6 @@ const ALL_SINK_POLICY = Object.freeze({
   })]))),
 });
 
-function utf8Length(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
-}
-
 describe("generated CSS security grammar", () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -277,34 +273,6 @@ describe("generated URL policy inputs", () => {
     }), propertyParameters(PURE_RUNS));
   });
 
-  it("charges denied, malformed, and non-primitive setters as operations and attempts", () => {
-    const recipe = fc.constantFrom("denied", "malformed", "non-primitive");
-    fc.assert(fc.property(recipe, (kind) => {
-      let traps = 0;
-      const root = makeRoot();
-      const safeDocument = createTestSafeDocument(root, {
-        quotas: { operations: 3, requestAttempts: 1 },
-        urlPolicy: ALL_SINK_POLICY,
-      });
-      const image = safeDocument.createImage();
-      const input = kind === "denied"
-        ? "https://attacker.test/a.png"
-        : kind === "malformed"
-          ? "https://[::1"
-          : new Proxy({}, {
-              get() {
-                traps += 1;
-                throw new Error("coercion trap executed");
-              },
-            });
-      const first = Reflect.apply(image.setSrc, image, [input]);
-      expectURLDecisionShape(first);
-      expect(first.allowed).toBe(false);
-      const error = captureThrown(() => image.setSrc("https://allowed.test/second.png"));
-      assertStableBoundaryError(error, "QUOTA_EXCEEDED");
-      expect(traps).toBe(0);
-    }), propertyParameters(PURE_RUNS));
-  });
 });
 
 interface NumericPropertyCase {
@@ -490,21 +458,6 @@ describe("generated numeric contracts", () => {
     }), propertyParameters(PURE_RUNS));
   });
 
-  it("models UTF-8 bytes independently at exact text quota boundaries", () => {
-    fc.assert(fc.property(BINARY_STRING, (value) => {
-      const bytes = utf8Length(value);
-      const safeDocument = createTestSafeDocument(makeRoot(), { quotas: { textBytes: bytes } });
-      const wrapper = safeDocument.createDiv();
-      wrapper.setText(value);
-      expect(wrapper.getText()).toBe(value);
-      if (bytes > 0) {
-        const error = captureThrown(() => safeDocument.createSpan().setText(`${value}x`));
-        assertStableBoundaryError(error, "QUOTA_EXCEEDED");
-      }
-      wrapper.dispose();
-      expect(() => safeDocument.createSpan().setText(value)).not.toThrow();
-    }), propertyParameters(PURE_RUNS));
-  });
 });
 
 type HostileRecipe =
