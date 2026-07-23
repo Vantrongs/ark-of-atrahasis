@@ -77,7 +77,6 @@ interface ReferenceSlot {
 
 const TOKEN_BYTES = 24;
 const TOKEN_ATTEMPTS = 8;
-const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
 
 function isASCIIWhitespaceCode(code: number): boolean {
@@ -92,9 +91,6 @@ function splitReferenceTokens(local: string): readonly string[] {
     const whitespace = !atEnd && isASCIIWhitespaceCode(local.charCodeAt(index));
     if (!atEnd && !whitespace) {
       if (tokenStart !== -1) continue;
-      if (tokens.length === MAX_IDREF_TOKENS_PER_ATTRIBUTE) {
-        throw createSafeDOMError("QUOTA_EXCEEDED", "IdentifierNamespace.referenceTokens");
-      }
       tokenStart = index;
       continue;
     }

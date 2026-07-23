@@ -262,7 +262,7 @@ describe("numeric boundary table", () => {
     }
   });
 
-  test("canvas enforces the 16,777,216 pixel cap before resetting allocation state", () => {
+  test("canvas accepts pixel areas beyond the former cap while retaining uint32 bounds", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
     const canvas = safeDocument.createCanvas();
@@ -270,12 +270,14 @@ describe("numeric boundary table", () => {
     const physical = root.querySelector("canvas");
     if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
 
-    canvas.setWidth(4_096);
     canvas.setHeight(4_096);
-    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_096, height: 4_096 });
-    expectInvalid(() => canvas.setWidth(4_097), "SafeCanvasElement.setWidth.pixels");
-    expectInvalid(() => canvas.setHeight(4_097), "SafeCanvasElement.setHeight.pixels");
-    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_096, height: 4_096 });
+    canvas.setWidth(4_097);
+    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_097, height: 4_096 });
+    expect(physical.width * physical.height).toBeGreaterThan(16_777_216);
+
+    expectInvalid(() => canvas.setWidth(4_294_967_296), "SafeCanvasElement.setWidth.value");
+    expectInvalid(() => canvas.setHeight(4_294_967_296), "SafeCanvasElement.setHeight.value");
+    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_097, height: 4_096 });
   });
 
   test("table spans, scope, details and dialog preserve exact reflected values", () => {
