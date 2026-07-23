@@ -66,15 +66,9 @@ describe("placement enforcement", () => {
     expect(outside.firstElementChild).toBe(raw);
   });
 
-  it("releases logical namespace accounting without changing external namespace bytes", () => {
+  it("releases logical namespace ownership without changing external namespace state", () => {
     const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: {
-        identifierMappings: 2,
-        identifierReferences: 3,
-        identifierBytes: 2,
-      },
-    });
+    const safeDocument = createSafeDocument(root);
     const parent = safeDocument.createDiv();
     const input = safeDocument.createInput();
     const label = safeDocument.createLabel();
@@ -116,7 +110,7 @@ describe("placement enforcement", () => {
     replacementCell.setHeaders("x");
   });
 
-  it("does not attempt external namespace cleanup and releases its accounting", () => {
+  it("does not attempt external namespace cleanup and releases logical ownership", () => {
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
     if (descriptor === undefined || typeof descriptor.value !== "function") {
@@ -137,9 +131,7 @@ describe("placement enforcement", () => {
 
     try {
       const root = makeRoot();
-      const safeDocument = createSafeDocument(root, {
-        quotas: { identifierMappings: 2, identifierBytes: 2 },
-      });
+      const safeDocument = createSafeDocument(root);
       const input = safeDocument.createInput();
       input.setId("x");
       input.setName("y");
@@ -166,10 +158,9 @@ describe("placement enforcement", () => {
     }
   });
 
-  it("revokes nested capabilities and accounting without changing external raw-node bytes", () => {
+  it("revokes nested capabilities without changing external raw-node state", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
-      quotas: { nodes: 2, listeners: 1, styleBytes: 3, requests: 1 },
       urlPolicy: REQUEST_POLICY,
       stylePolicy: STYLE_POLICY,
     });
@@ -214,20 +205,12 @@ describe("placement enforcement", () => {
 
     expect(() => parent.dispose()).not.toThrow();
     expect(() => image.dispose()).not.toThrow();
-    const replacement = safeDocument.createImage();
-    const secondReplacement = safeDocument.createDiv();
-    expect(replacement.style.set("color", "red")).toBe(true);
-    expect(replacement.setSrc("https://example.test/replacement.png").allowed).toBe(true);
-    const cleanup = replacement.onClick(() => undefined);
-    cleanup();
-    secondReplacement.dispose();
-
     expect(() => safeDocument.dispose()).not.toThrow();
     expect(outside.firstElementChild).toBe(rawParent);
     expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
   });
 
-  it("does not attempt external request cleanup and releases descendant accounting", () => {
+  it("does not attempt external request cleanup for a revoked descendant", () => {
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
     if (descriptor === undefined || typeof descriptor.value !== "function") {
@@ -249,7 +232,6 @@ describe("placement enforcement", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { nodes: 2, requests: 1 },
         urlPolicy: REQUEST_POLICY,
       });
       const parent = safeDocument.createDiv();
@@ -270,13 +252,6 @@ describe("placement enforcement", () => {
       expect(rawImage.hasAttribute("src")).toBe(true);
       expect(() => parent.dispose()).not.toThrow();
       expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(beforeMarkup);
-      failNextSourceCleanup = false;
-
-      const replacementImage = safeDocument.createImage();
-      const replacementParent = safeDocument.createDiv();
-      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
-      replacementImage.dispose();
-      replacementParent.dispose();
     } finally {
       Object.defineProperty(prototype, "removeAttribute", descriptor);
     }
@@ -285,7 +260,6 @@ describe("placement enforcement", () => {
   it("revokes an externally moved track without removing its physical VTT source", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
-      quotas: { requests: 1 },
       urlPolicy: REQUEST_POLICY,
     });
     const video = safeDocument.createVideo();
@@ -304,14 +278,11 @@ describe("placement enforcement", () => {
     expect(rawTrack.getAttribute("src")).toBe("https://example.test/captions.vtt");
     expectCode(() => track.setSrc("https://example.test/revoked.vtt"), "NODE_REVOKED");
 
-    const replacement = safeDocument.createTrack();
-    expect(replacement.setSrc("https://example.test/replacement.vtt").allowed).toBe(true);
   });
 
-  it("removes an owned track source on disposal and releases its request slot", () => {
+  it("removes an owned track source on disposal", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root, {
-      quotas: { requests: 1 },
       urlPolicy: REQUEST_POLICY,
     });
     const track = safeDocument.createTrack();
@@ -322,9 +293,6 @@ describe("placement enforcement", () => {
     track.dispose();
     expect(rawTrack.hasAttribute("src")).toBe(false);
     expect(rawTrack.isConnected).toBe(false);
-
-    const replacement = safeDocument.createTrack();
-    expect(replacement.setSrc("https://example.test/replacement.vtt").allowed).toBe(true);
   });
 
   it("treats a detached external parent as outside the owned tree", () => {
@@ -522,7 +490,7 @@ describe("detach and disposal", () => {
     }
   });
 
-  it("does not retry an unproven canvas rollback after the host moves it external", () => {
+  it("preserves an unproven canvas write after the host moves it external", () => {
     const prototype = window.HTMLCanvasElement.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "width");
     if (
@@ -554,9 +522,7 @@ describe("detach and disposal", () => {
 
     try {
       const root = makeRoot();
-      const safeDocument = createSafeDocument(root, {
-        quotas: { canvasPixels: 45_150 },
-      });
+      const safeDocument = createSafeDocument(root);
       const wrapper = safeDocument.createCanvas();
       safeDocument.appendChild(wrapper);
       target = requireElement(root.querySelector("canvas")) as HTMLCanvasElement;
@@ -564,7 +530,6 @@ describe("detach and disposal", () => {
       captureSafeError(() => wrapper.setWidth(301), "DOM_OPERATION_FAILED");
       expect([target.width, target.height]).toEqual([301, 150]);
       expect(target.getAttribute("width")).toBe("301");
-      expectCode(() => safeDocument.createCanvas(), "QUOTA_EXCEEDED");
 
       const outside = document.createElement("section");
       document.body.append(outside);
@@ -574,7 +539,6 @@ describe("detach and disposal", () => {
       expect(() => wrapper.dispose()).not.toThrow();
       expect(new TextEncoder().encode(target.outerHTML)).toEqual(before);
       expect(outside.firstElementChild).toBe(target);
-      expect(() => safeDocument.createCanvas()).not.toThrow();
     } finally {
       Object.defineProperty(prototype, "width", descriptor);
     }
@@ -683,7 +647,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { requests: 1 },
         urlPolicy: REQUEST_POLICY,
       });
       const image = safeDocument.createImage();
@@ -697,12 +660,6 @@ describe("detach and disposal", () => {
         "DOM_OPERATION_FAILED",
       );
       expect(target.getAttribute("src")).toBe(guestSource);
-
-      const replacement = safeDocument.createImage();
-      captureSafeError(
-        () => replacement.setSrc("https://example.test/replacement.png"),
-        "QUOTA_EXCEEDED",
-      );
 
       captureSafeError(() => safeDocument.dispose(), "DOM_OPERATION_FAILED");
       expect(target.getAttribute("src")).toBe(guestSource);
@@ -748,7 +705,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { requests: 1 },
         urlPolicy: REQUEST_POLICY,
       });
       const image = safeDocument.createImage();
@@ -767,8 +723,6 @@ describe("detach and disposal", () => {
       expect(() => image.dispose()).not.toThrow();
       expect(new TextEncoder().encode(target.outerHTML)).toEqual(before);
       expect(outside.firstElementChild).toBe(target);
-      const replacement = safeDocument.createImage();
-      expect(replacement.setSrc("https://example.test/replacement.png").allowed).toBe(true);
     } finally {
       Object.defineProperty(prototype, "setAttribute", setDescriptor);
     }
@@ -814,9 +768,7 @@ describe("detach and disposal", () => {
 
     try {
       const root = makeRoot();
-      const safeDocument = createSafeDocument(root, {
-        quotas: { identifierMappings: 1, identifierBytes: 7 },
-      });
+      const safeDocument = createSafeDocument(root);
       const wrapper = safeDocument.createDiv();
       safeDocument.appendChild(wrapper);
       target = requireElement(root.querySelector("div"));
@@ -840,7 +792,7 @@ describe("detach and disposal", () => {
     }
   });
 
-  it("revokes and retains an unproven style rollback until disposal succeeds", () => {
+  it("retains an unproven style effect until retryable disposal succeeds", () => {
     const stylePrototype = window.CSSStyleDeclaration.prototype;
     const setDescriptor = Object.getOwnPropertyDescriptor(stylePrototype, "setProperty");
     const removePropertyDescriptor = Object.getOwnPropertyDescriptor(
@@ -904,7 +856,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { styleBytes: 3 },
         stylePolicy: STYLE_POLICY,
       });
       const wrapper = safeDocument.createDiv();
@@ -914,9 +865,6 @@ describe("detach and disposal", () => {
 
       expect(wrapper.style.set("color", "red")).toBe(false);
       expect(targetDeclaration.getPropertyValue("color")).toBe("red");
-
-      const replacement = safeDocument.createDiv();
-      captureSafeError(() => replacement.style.set("color", "red"), "QUOTA_EXCEEDED");
 
       captureSafeError(() => safeDocument.dispose(), "DOM_OPERATION_FAILED");
       expect(targetElement.hasAttribute("style")).toBe(true);
@@ -972,7 +920,6 @@ describe("detach and disposal", () => {
       try {
         const root = makeRoot();
         const safeDocument = createSafeDocument(root, {
-          quotas: { styleBytes: 3 },
           stylePolicy: STYLE_POLICY,
         });
         const wrapper = safeDocument.createDiv();
@@ -990,11 +937,6 @@ describe("detach and disposal", () => {
         expect(() => disposal === "node" ? wrapper.dispose() : safeDocument.dispose()).not.toThrow();
         expect(new TextEncoder().encode(raw.outerHTML)).toEqual(before);
         expect(outside.firstElementChild).toBe(raw);
-
-        if (disposal === "node") {
-          const replacement = safeDocument.createDiv();
-          expect(replacement.style.set("color", "red")).toBe(true);
-        }
       } finally {
         Object.defineProperty(prototype, "setProperty", setDescriptor);
         Object.defineProperty(prototype, "removeProperty", removeDescriptor);
@@ -1003,7 +945,7 @@ describe("detach and disposal", () => {
   );
 
   it.each(["parent-first", "child-first"] as const)(
-    "releases a pre-revoked descendant when its active parent is disposed externally (%s)",
+    "preserves an external subtree and revokes its descendant during parent disposal (%s)",
     (creationOrder) => {
     const prototype = window.CSSStyleDeclaration.prototype;
     const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setProperty");
@@ -1045,7 +987,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { nodes: 2, styleBytes: 3 },
         stylePolicy: STYLE_POLICY,
       });
       const first = safeDocument.createDiv();
@@ -1068,11 +1009,6 @@ describe("detach and disposal", () => {
       expect(() => parent.dispose()).not.toThrow();
       expect(new TextEncoder().encode(rawParent.outerHTML)).toEqual(before);
       expectCode(() => child.getText(), "NODE_REVOKED");
-
-      const replacementParent = safeDocument.createDiv();
-      const replacementChild = safeDocument.createDiv();
-      expect(replacementChild.style.set("color", "red")).toBe(true);
-      replacementParent.appendChild(replacementChild);
     } finally {
       Object.defineProperty(prototype, "setProperty", setDescriptor);
       Object.defineProperty(prototype, "removeProperty", removeDescriptor);
@@ -1144,7 +1080,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { nodes: 2, requests: 1, styleBytes: 3 },
         stylePolicy: STYLE_POLICY,
         urlPolicy: REQUEST_POLICY,
       });
@@ -1166,11 +1101,6 @@ describe("detach and disposal", () => {
       expect(() => parent.dispose()).not.toThrow();
       expect(rawImage.hasAttribute("src")).toBe(false);
       expect(root.childNodes).toHaveLength(0);
-
-      const replacementParent = safeDocument.createDiv();
-      const replacementImage = safeDocument.createImage();
-      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
-      replacementParent.appendChild(replacementImage);
     } finally {
       Object.defineProperty(elementPrototype, "removeAttribute", removeAttributeDescriptor);
       Object.defineProperty(stylePrototype, "setProperty", setPropertyDescriptor);
@@ -1201,7 +1131,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { styleBytes: 3 },
         stylePolicy: STYLE_POLICY,
       });
       const wrapper = safeDocument.createDiv();
@@ -1213,9 +1142,6 @@ describe("detach and disposal", () => {
       expect(wrapper.style.set("color", "red")).toBe(false);
       expect(raw.style.getPropertyValue("color")).toBe("blue");
       expect(() => wrapper.setTitle("still-active")).not.toThrow();
-
-      const replacement = safeDocument.createDiv();
-      expect(replacement.style.set("color", "red")).toBe(true);
       expect(() => safeDocument.dispose()).not.toThrow();
       expect(raw.style.getPropertyValue("color")).toBe("blue");
     } finally {
@@ -1308,7 +1234,7 @@ describe("detach and disposal", () => {
     }
   });
 
-  it("retries failed descendant cleanup before releasing recursive disposal accounting", () => {
+  it("retries failed descendant cleanup during recursive disposal", () => {
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "removeAttribute");
     if (descriptor === undefined || typeof descriptor.value !== "function") {
@@ -1330,7 +1256,6 @@ describe("detach and disposal", () => {
     try {
       const root = makeRoot();
       const safeDocument = createSafeDocument(root, {
-        quotas: { nodes: 2, requests: 1 },
         urlPolicy: REQUEST_POLICY,
       });
       const parent = safeDocument.createDiv();
@@ -1345,12 +1270,6 @@ describe("detach and disposal", () => {
       expect(rawImage.hasAttribute("src")).toBe(true);
       expect(() => parent.dispose()).not.toThrow();
       expect(rawImage.hasAttribute("src")).toBe(false);
-
-      const replacementImage = safeDocument.createImage();
-      const replacementParent = safeDocument.createDiv();
-      expect(replacementImage.setSrc("https://example.test/replacement.png").allowed).toBe(true);
-      replacementImage.dispose();
-      replacementParent.dispose();
     } finally {
       Object.defineProperty(prototype, "removeAttribute", descriptor);
     }
@@ -1387,22 +1306,9 @@ describe("detach and disposal", () => {
     expect(rawImage.hasAttribute("src")).toBe(false);
   });
 
-  it("allows cleanup and disposal after the operation budget is exhausted", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, { quotas: { operations: 2 } });
-    const wrapper = safeDocument.createDiv();
-    wrapper.setText("last metered operation");
-
-    expectCode(() => wrapper.getText(), "QUOTA_EXCEEDED");
-    expect(() => wrapper.dispose()).not.toThrow();
-    expect(() => safeDocument.dispose()).not.toThrow();
-  });
-
   it("uses captured attribute and listener methods despite hostile own shadowing", () => {
     const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { attributeBytes: 56, listeners: 1 },
-    });
+    const safeDocument = createSafeDocument(root);
     const wrapper = safeDocument.createDiv();
     safeDocument.appendChild(wrapper);
     const raw = requireElement(root.firstElementChild);
@@ -1419,163 +1325,5 @@ describe("detach and disposal", () => {
     raw.dispatchEvent(new Event("click"));
     expect(handler).toHaveBeenCalledTimes(1);
     cleanup();
-  });
-});
-
-describe("exact quota accounting", () => {
-  beforeEach(() => {
-    document.body.replaceChildren();
-  });
-
-  it("enforces and releases the node quota", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { nodes: 1 } });
-    const first = safeDocument.createDiv();
-
-    expectCode(() => safeDocument.createSpan(), "QUOTA_EXCEEDED");
-    first.dispose();
-    expect(() => safeDocument.createSpan()).not.toThrow();
-  });
-
-  it("enforces and releases the listener quota with idempotent cleanup", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { listeners: 1 } });
-    const wrapper = safeDocument.createDiv();
-    const cleanup = wrapper.onClick(() => undefined);
-
-    expectCode(() => wrapper.onClick(() => undefined), "QUOTA_EXCEEDED");
-    cleanup();
-    cleanup();
-    const replacement = wrapper.onClick(() => undefined);
-    wrapper.dispose();
-    expect(() => replacement()).not.toThrow();
-  });
-
-  it("counts UTF-8 aggregate text bytes at the exact threshold and releases them", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { textBytes: 4 } });
-    const first = safeDocument.createDiv();
-    const second = safeDocument.createDiv();
-
-    first.setText("éa"); // 3 UTF-8 bytes
-    second.setText("b");
-    expectCode(() => second.setText("bb"), "QUOTA_EXCEEDED");
-    expect(second.getText()).toBe("b");
-
-    first.dispose();
-    second.setText("bbbb");
-    expect(second.getText()).toBe("bbbb");
-  });
-
-  it("counts aggregate serialized attribute name and value bytes", () => {
-    const denied = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 55 } });
-    expectCode(() => denied.createDiv().setId("abc"), "QUOTA_EXCEEDED");
-
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { attributeBytes: 56 } });
-    const first = safeDocument.createDiv();
-
-    first.setId("abc"); // `id` + a 54-byte opaque physical token = 56 bytes.
-    expectCode(() => first.setTitle(""), "QUOTA_EXCEEDED");
-    first.setId("abcd"); // Same-size physical replacement is allowed at the full budget.
-    expect(first.getId()).toBe("abcd");
-
-    first.dispose();
-    const replacement = safeDocument.createDiv();
-    replacement.setId("abc");
-    expect(replacement.getId()).toBe("abc");
-  });
-
-  it("accounts inline style bytes across wrappers and releases exact usage", () => {
-    const safeDocument = createSafeDocument(makeRoot(), {
-      quotas: { styleBytes: 3 },
-      stylePolicy: STYLE_POLICY,
-    });
-    const first = safeDocument.createDiv();
-    const second = safeDocument.createDiv();
-
-    expect(first.style.set("color", "red")).toBe(true);
-    expectCode(() => second.style.set("opacity", "1"), "QUOTA_EXCEEDED");
-    expect(second.style.get("opacity")).toBe("");
-
-    expect(first.style.remove("color")).toBe(true);
-    expect(second.style.set("opacity", "1")).toBe(true);
-    expect(second.style.get("opacity")).toBe("1");
-  });
-
-  it("counts active request sinks and releases them on node disposal", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { requests: 1 },
-      urlPolicy: REQUEST_POLICY,
-    });
-    const image = safeDocument.createImage();
-    const anchor = safeDocument.createAnchor();
-    safeDocument.appendChild(image);
-    safeDocument.appendChild(anchor);
-    const rawAnchor = requireElement(root.querySelector("a"));
-
-    image.setSrc("https://example.test/image.png");
-    expectCode(() => anchor.setHref("https://example.test/next"), "QUOTA_EXCEEDED");
-    expect(rawAnchor.hasAttribute("href")).toBe(false);
-
-    image.dispose();
-    anchor.setHref("https://example.test/next");
-    expect(rawAnchor.getAttribute("href")).toBe("https://example.test/next");
-  });
-
-  it("limits cumulative approved request attempts even when one sink is reused", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: { requests: 1, requestAttempts: 2 },
-      urlPolicy: REQUEST_POLICY,
-    });
-    const image = safeDocument.createImage();
-    safeDocument.appendChild(image);
-    const rawImage = requireElement(root.querySelector("img"));
-
-    image.setSrc("https://example.test/one.png");
-    image.setSrc("https://example.test/two.png");
-    expectCode(
-      () => image.setSrc("https://example.test/three.png"),
-      "QUOTA_EXCEEDED",
-    );
-    expect(rawImage.getAttribute("src")).toBe("https://example.test/two.png");
-
-    image.dispose(); // releases the active sink, not the lifetime attempt budget
-    const anchor = safeDocument.createAnchor();
-    expectCode(() => anchor.setHref("https://example.test/next"), "QUOTA_EXCEEDED");
-  });
-
-  it("meters denied URL setters as public operations", () => {
-    const safeDocument = createSafeDocument(makeRoot(), {
-      quotas: { operations: 1 },
-    });
-    const image = safeDocument.createImage();
-
-    expectCode(
-      () => image.setSrc("https://denied.example/image.png"),
-      "QUOTA_EXCEEDED",
-    );
-  });
-
-  it("counts malformed and denied URL calls as cumulative request attempts", () => {
-    const safeDocument = createSafeDocument(makeRoot(), {
-      quotas: { requestAttempts: 2 },
-      urlPolicy: REQUEST_POLICY,
-    });
-    const image = safeDocument.createImage();
-
-    expect(image.setSrc("https://%").allowed).toBe(false);
-    expect(image.setSrc("https://denied.example/image.png").allowed).toBe(false);
-    expectCode(
-      () => image.setSrc("https://example.test/approved.png"),
-      "QUOTA_EXCEEDED",
-    );
-  });
-
-  it("rejects invalid quota configuration without claiming the root", () => {
-    const root = makeRoot();
-    expectCode(
-      () => createSafeDocument(root, { quotas: { nodes: -1 } }),
-      "INVALID_QUOTA",
-    );
-    expect(() => createSafeDocument(root)).not.toThrow();
   });
 });

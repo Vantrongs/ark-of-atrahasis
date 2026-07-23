@@ -217,7 +217,7 @@ describe("owner-realm platform boundary", () => {
     expect(() => parent.detach()).not.toThrow();
   });
 
-  it("normalizes hostile root/options/quota access without leaking thrown DOM or functions", () => {
+  it("normalizes hostile root and policy-option access without leaking platform values", () => {
     const hostileRoot = makeRoot();
     Object.defineProperty(hostileRoot, "ownerDocument", {
       configurable: true,
@@ -225,22 +225,6 @@ describe("owner-realm platform boundary", () => {
     });
 
     expectSafeError(() => createSafeDocument(hostileRoot), "INVALID_ROOT");
-
-    const hostileOptions = Object.defineProperty({}, "quotas", {
-      get: () => { throw window; },
-    });
-    expectSafeError(
-      () => createSafeDocument(makeRoot(), hostileOptions),
-      "INVALID_QUOTA",
-    );
-
-    const hostileQuotas = Object.defineProperty({}, "operations", {
-      get: () => { throw () => document.body; },
-    });
-    expectSafeError(
-      () => createSafeDocument(makeRoot(), { quotas: hostileQuotas }),
-      "INVALID_QUOTA",
-    );
 
     const hostilePolicyOptions = Object.defineProperty({}, "urlPolicy", {
       get: () => { throw document; },
@@ -433,7 +417,7 @@ describe("owner-realm platform boundary", () => {
     }
   });
 
-  it("rolls back reflected attributeBytes when a captured owner-realm setter throws", () => {
+  it("rolls back a reflected attribute when a captured owner-realm setter throws", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);
     const foreignDocument = iframe.contentDocument;
@@ -449,20 +433,18 @@ describe("owner-realm platform boundary", () => {
 
     try {
       const root = makeRoot(foreignDocument);
-      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 20 } });
+      const safeDocument = createSafeDocument(root);
       const textarea = safeDocument.createTextarea();
       safeDocument.appendChild(textarea);
 
       expectSafeError(() => textarea.setRows(3), "DOM_OPERATION_FAILED", "HTMLTextAreaElement.rows.set");
-      expect(() => textarea.setClass("")).not.toThrow();
       expect(root.querySelector("textarea")?.hasAttribute("rows")).toBe(false);
-      expect(root.querySelector("textarea")?.getAttribute("class")).toBe("");
     } finally {
       Object.defineProperty(foreignWindow.HTMLTextAreaElement.prototype, "rows", descriptor);
     }
   });
 
-  it("rolls back canvas pixels and reflected bytes when a captured canvas setter throws", () => {
+  it("rolls back a canvas dimension when a captured owner-realm setter throws", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);
     const foreignDocument = iframe.contentDocument;
@@ -478,9 +460,7 @@ describe("owner-realm platform boundary", () => {
 
     try {
       const root = makeRoot(foreignDocument);
-      const safeDocument = createSafeDocument(root, {
-        quotas: { attributeBytes: 8, canvasPixels: 90_000 },
-      });
+      const safeDocument = createSafeDocument(root);
       const canvas = safeDocument.createCanvas();
       safeDocument.appendChild(canvas);
       const raw = root.querySelector("canvas");
@@ -492,8 +472,6 @@ describe("owner-realm platform boundary", () => {
       );
       expect(raw?.width).toBe(300);
       expect(raw?.getAttribute("width")).toBeNull();
-      expect(() => safeDocument.createCanvas()).not.toThrow();
-      expect(() => safeDocument.createDiv().setClass("")).not.toThrow();
     } finally {
       Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", descriptor);
     }
@@ -508,18 +486,16 @@ describe("owner-realm platform boundary", () => {
       throw new Error("expected an iframe document and window");
     }
     const widthDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "width");
-    const heightDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "height");
 
     try {
       Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
         ...widthDescriptor,
         get: () => -1,
       });
-      const negativeDocument = createSafeDocument(makeRoot(foreignDocument), {
-        quotas: { canvasPixels: 0 },
-      });
+      const negativeDocument = createSafeDocument(makeRoot(foreignDocument));
+      const negativeCanvas = negativeDocument.createCanvas();
       expectSafeError(
-        () => negativeDocument.createCanvas(),
+        () => negativeCanvas.setWidth(301),
         "DOM_OPERATION_FAILED",
         "SafeDocument.canvasDimensions",
       );
@@ -530,25 +506,9 @@ describe("owner-realm platform boundary", () => {
         get: () => foreignDocument.body,
       });
       const hostileDocument = createSafeDocument(makeRoot(foreignDocument));
+      const hostileCanvas = hostileDocument.createCanvas();
       expectSafeError(
-        () => hostileDocument.createCanvas(),
-        "DOM_OPERATION_FAILED",
-        "SafeDocument.canvasDimensions",
-      );
-
-      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
-        ...widthDescriptor,
-        get: () => 4_294_967_295,
-      });
-      Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "height", {
-        ...heightDescriptor,
-        get: () => 4_294_967_295,
-      });
-      const overflowDocument = createSafeDocument(makeRoot(foreignDocument), {
-        quotas: { canvasPixels: Number.MAX_SAFE_INTEGER },
-      });
-      expectSafeError(
-        () => overflowDocument.createCanvas(),
+        () => hostileCanvas.setWidth(301),
         "DOM_OPERATION_FAILED",
         "SafeDocument.canvasDimensions",
       );
@@ -558,15 +518,10 @@ describe("owner-realm platform boundary", () => {
         "width",
         widthDescriptor,
       );
-      Object.defineProperty(
-        foreignWindow.HTMLCanvasElement.prototype,
-        "height",
-        heightDescriptor,
-      );
     }
   });
 
-  it("retains canvas accounting when captured dimension setters silently do nothing", () => {
+  it("requires canvas cleanup readback and retries after captured setters recover", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);
     const foreignDocument = iframe.contentDocument;
@@ -576,18 +531,23 @@ describe("owner-realm platform boundary", () => {
     }
     const widthDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "width");
     const heightDescriptor = requireAccessor(foreignWindow.HTMLCanvasElement.prototype, "height");
+    let settersWork = false;
     Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "width", {
       ...widthDescriptor,
-      set: () => {},
+      set(this: HTMLCanvasElement, value: number): void {
+        if (settersWork) Reflect.apply(widthDescriptor.set, this, [value]);
+      },
     });
     Object.defineProperty(foreignWindow.HTMLCanvasElement.prototype, "height", {
       ...heightDescriptor,
-      set: () => {},
+      set(this: HTMLCanvasElement, value: number): void {
+        if (settersWork) Reflect.apply(heightDescriptor.set, this, [value]);
+      },
     });
 
     try {
       const root = makeRoot(foreignDocument);
-      const safeDocument = createSafeDocument(root, { quotas: { canvasPixels: 45_000 } });
+      const safeDocument = createSafeDocument(root);
       const canvas = safeDocument.createCanvas();
       safeDocument.appendChild(canvas);
       const raw = root.querySelector("canvas");
@@ -604,10 +564,10 @@ describe("owner-realm platform boundary", () => {
         "SafeCanvasElement.clearDimensions",
       );
       expect([raw?.width, raw?.height]).toEqual([300, 150]);
-      expect(() => safeDocument.createCanvas()).toThrowError(expect.objectContaining({
-        code: "QUOTA_EXCEEDED",
-        operation: "SafeDocument quota exceeded: canvasPixels",
-      }));
+      settersWork = true;
+      expect(() => canvas.dispose()).not.toThrow();
+      expect([raw?.width, raw?.height]).toEqual([0, 0]);
+      expect(root.childNodes).toHaveLength(0);
     } finally {
       Object.defineProperty(
         foreignWindow.HTMLCanvasElement.prototype,
@@ -698,7 +658,7 @@ describe("owner-realm platform boundary", () => {
     }
   });
 
-  it("normalizes an input IDL setter throw and rolls back reflected attributeBytes", () => {
+  it("normalizes an input IDL setter throw and rolls back its reflected attribute", () => {
     const iframe = document.createElement("iframe");
     document.body.appendChild(iframe);
     const foreignDocument = iframe.contentDocument;
@@ -712,14 +672,11 @@ describe("owner-realm platform boundary", () => {
 
     try {
       const root = makeRoot(foreignDocument);
-      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 71 } });
+      const safeDocument = createSafeDocument(root);
       const input = safeDocument.createInput();
       safeDocument.appendChild(input);
       expectSafeError(() => input.setMinLength(2), "DOM_OPERATION_FAILED", "HTMLInputElement.minLength.set");
-      expect(() => input.setId("x")).not.toThrow();
       expect(root.querySelector("input")?.hasAttribute("minlength")).toBe(false);
-      expect(root.querySelector("input")?.id).toMatch(/^aoa-i-[0-9a-f]{48}$/);
-      expect(input.getId()).toBe("x");
     } finally {
       Object.defineProperty(foreignWindow.HTMLInputElement.prototype, "minLength", descriptor);
     }
