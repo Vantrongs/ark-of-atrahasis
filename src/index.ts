@@ -17,7 +17,6 @@ import type {
 } from "./types.ts";
 import type { DocumentContext } from "./context.ts";
 import { createDocumentContext } from "./context.ts";
-export { DEFAULT_SAFE_DOCUMENT_QUOTAS, DEFAULT_SAFE_DOCUMENT_RATES } from "./context.ts";
 import {
   createSafeAnchorElement,
   createSafeAudioElement,
@@ -98,9 +97,6 @@ export type {
   EventHandler,
   EventCleanup,
   SafeDocumentOptions,
-  SafeDocumentQuotas,
-  SafeDocumentRateLimit,
-  SafeDocumentRates,
   SafeFormControlPolicy,
   Hardener,
 } from "./types.ts";

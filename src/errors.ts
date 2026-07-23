@@ -16,8 +16,6 @@ export type SafeDOMErrorCode =
   | "NODE_DISPOSED"
   | "NODE_REVOKED"
   | "PLACEMENT_VIOLATION"
-  | "QUOTA_EXCEEDED"
-  | "RATE_LIMIT_EXCEEDED"
   | "DOM_OPERATION_FAILED";
 
 export interface SafeDOMError {
@@ -46,8 +44,6 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   NODE_DISPOSED: "The node wrapper has been disposed",
   NODE_REVOKED: "The node wrapper has been revoked",
   PLACEMENT_VIOLATION: "The node left its assigned mount and was revoked",
-  QUOTA_EXCEEDED: "A safe document quota was exceeded",
-  RATE_LIMIT_EXCEEDED: "A safe document rate limit was exceeded",
   DOM_OPERATION_FAILED: "The platform DOM operation failed",
 });
 
