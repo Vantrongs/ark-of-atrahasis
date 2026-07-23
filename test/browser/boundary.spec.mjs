@@ -238,7 +238,7 @@ test("denied image, link, media, and form actions leave the host and browser led
   expectNoUnapprovedActivity(browserLedger);
 });
 
-test("canvas validation failure preserves the trusted bitmap", async ({ page, browserLedger }) => {
+test("canvas dimensions may cross the former aggregate area cap", async ({ page, browserLedger }) => {
   await openHarness(page, browserLedger);
 
   const result = await page.evaluate(() => {
@@ -257,23 +257,16 @@ test("canvas validation failure preserves the trusted bitmap", async ({ page, br
     context.fillStyle = "rgb(255, 0, 0)";
     context.fillRect(0, 0, 1, 1);
 
-    let code;
-    try {
-      wrapper.setWidth(4_097);
-    } catch (error) {
-      code = error?.code;
-    }
+    wrapper.setWidth(4_097);
     return {
-      code,
       dimensions: [canvas.width, canvas.height],
       pixel: [...context.getImageData(0, 0, 1, 1).data],
     };
   });
 
   expect(result).toEqual({
-    code: "ERR_INVALID_ARGUMENT",
-    dimensions: [4_096, 4_096],
-    pixel: [255, 0, 0, 255],
+    dimensions: [4_097, 4_096],
+    pixel: [0, 0, 0, 0],
   });
   expectNoUnapprovedActivity(browserLedger);
 });
