@@ -7,11 +7,75 @@ the tag, npm package, or GitHub release exists.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-23
+
+This source release defines the Ark 1.0 contract. This heading does not claim a
+`v1.0.0` tag, npm publication, provenance attestation, or GitHub release; those
+are exclusively upstream-maintainer actions through the protected release
+workflow.
+
+### Breaking
+
+- Removed document resource controls from the public and runtime contracts:
+  `DEFAULT_SAFE_DOCUMENT_QUOTAS`, `DEFAULT_SAFE_DOCUMENT_RATES`,
+  `SafeDocumentQuotas`, `SafeDocumentRateLimit`, `SafeDocumentRates`, the
+  `quotas` and `rates` options, and the `INVALID_QUOTA`, `INVALID_RATE`,
+  `QUOTA_EXCEEDED`, and `RATE_LIMIT_EXCEEDED` error codes.
+- Own legacy `quotas` or `rates` properties now fail explicitly with
+  `ERR_INVALID_POLICY` before the root is claimed, so corrected initialization
+  can retry without silently treating obsolete configuration as protection.
+- Removed node, listener, operation, byte, request, identifier, and canvas
+  accounting and its fixed ceilings. Calls and live DOM effects are no longer
+  rejected because they cross the former Ark-managed limits.
+- Removed the 256-occurrence IDREF-list ceiling and the package's canvas-area
+  ceiling. IDREF lists are scanned and canonicalized across the complete input,
+  and canvas dimensions retain unsigned-32-bit DOM validation without an
+  Ark-managed area limit.
+- Removed dedicated-Worker termination from Ark acceptance. Availability,
+  scheduling, preemption, and host resource enforcement are explicit non-goals;
+  integrations that need them must isolate and test their own Worker, process,
+  or RPC boundary.
+
+### Security
+
+- Preserved owner branding, cross-owner rejection, placement revocation,
+  default-deny URL/style/form policies, captured owner-realm operations,
+  transactional rollback, retryable cleanup, listener abort, idempotent
+  disposal, owned canvas zeroing, and non-mutating external revocation.
+- Retained the exclusion of `animation-name`, `animation-duration`, `display`,
+  `font-family`, `font-style`, and `font-weight` from the grantable style
+  ceiling because these values can activate request-bearing host stylesheet
+  rules outside URL policy.
+- Refreshed the locked transitive `fast-uri` resolution from 3.1.3 to patched
+  3.1.4 for GHSA-v2hh-gcrm-f6hx; the low-severity audit gate reports no known
+  vulnerabilities in the resulting locked graph.
+- Reworked resource-accounting-dependent lifecycle coverage to assert physical
+  state, logical namespace ownership, rollback, revocation, and cleanup
+  directly. Positive IDREF and canvas cases now cross the former caps without
+  weakening their platform and lifecycle checks.
+
 ## [0.5.0] - 2026-07-16
 
 This is the ESNext/Node 26 modernization release candidate. As of 2026-07-16,
 npm `latest` remains `0.3.1`; no `v0.5.0` tag, npm publication, or immutable
 GitHub release is claimed here.
+
+### Security
+
+- Added an aggregate `canvasPixels` lifetime quota with a 16,777,216-pixel
+  default. Native `300 × 150` creation, width/height replacement, reflected
+  attributes, rollback, owned cleanup, external revocation, and quota
+  reacquisition now share one transaction; owned disposal zeroes canvas
+  dimensions before releasing accounting. Invalid native observations and
+  unproven setter/cleanup writes fail closed without under-counting.
+- Removed `animation-name`, `animation-duration`, `display`, `font-family`,
+  `font-style`, and `font-weight` from the grantable style ceiling because their
+  otherwise URL-free values can activate request-bearing host stylesheet rules
+  outside URL policy and request quotas.
+- Replaced unbounded IDREF-list split/filter allocation with an ASCII-whitespace
+  scanner that stops before token 257. This is defense-in-depth for the
+  documented same-agent availability non-goal and preserves the existing
+  256-token error and canonicalization contract.
 
 ### Changed
 
@@ -225,7 +289,8 @@ This is the repository release candidate. As of 2026-07-15, npm `latest` remains
 - Restored `createListItem()`, `createTerm()`, and `createDescription()` on
   `SafeDocument`.
 
-[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/notwindstone/ark-of-atrahasis/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/notwindstone/ark-of-atrahasis/compare/v0.3.1...v0.4.0
 [0.3.1]: https://www.npmjs.com/package/ark-of-atrahasis/v/0.3.1

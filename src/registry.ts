@@ -5,7 +5,6 @@ import { createSafeDOMError } from "./errors.ts";
 export type SafeNode = SafeElement | SafeTextNode;
 export type RealNode = Element | Text;
 export type NodeState = "active" | "disposed" | "revoked";
-export type AccountedResource = "text" | "attribute" | "style" | "request";
 
 export interface PendingPhysicalEffect {
   cleanup(): void;
@@ -17,11 +16,11 @@ export interface RegistryEntry {
   readonly real: RealNode;
   readonly specializedKind?: SpecializedElementKind;
   state: NodeState;
-  accountingReleased: boolean;
+  terminalFinalized: boolean;
   styleCleanupRequired: boolean;
   readonly listeners: Set<() => void>;
   readonly pendingEffects: Set<PendingPhysicalEffect>;
-  readonly resources: Record<AccountedResource, Map<string, number>>;
+  readonly requestAttributes: Set<string>;
 }
 
 /** A registry belongs to exactly one SafeDocument capability. */
@@ -68,16 +67,11 @@ export class NodeRegistry {
       wrapper,
       real,
       state: "active",
-      accountingReleased: false,
+      terminalFinalized: false,
       styleCleanupRequired: false,
       listeners: new Set(),
       pendingEffects: new Set(),
-      resources: {
-        text: new Map(),
-        attribute: new Map(),
-        style: new Map(),
-        request: new Map(),
-      },
+      requestAttributes: new Set(),
     };
     Object.defineProperty(entry, "specializedKind", {
       configurable: false,

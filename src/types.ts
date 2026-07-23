@@ -188,44 +188,6 @@ export type EventCleanup = () => void;
 /** Host-supplied SES-compatible recursive object graph finalizer. */
 export type Hardener = <Value>(value: Value) => Value;
 
-/** Per-document lifetime hard limits. Values are aggregate live usage, except calls. */
-export interface SafeDocumentQuotas {
-  readonly nodes: number;
-  readonly listeners: number;
-  /** Calls entering the context; ordinary precondition failures are excluded. */
-  readonly operations: number;
-  /** Aggregate live UTF-8 bytes in guest-written text/value slots. */
-  readonly textBytes: number;
-  /** Aggregate live UTF-8 bytes in serialized attribute names and values. */
-  readonly attributeBytes: number;
-  /** Aggregate live UTF-8 bytes in inline style declarations. */
-  readonly styleBytes: number;
-  /** Aggregate live URL-bearing request/navigation attribute slots. */
-  readonly requests: number;
-  /** Every URL setter attempt, including non-primitive, malformed and denied input. */
-  readonly requestAttempts: number;
-  /** Live distinct logical ID and name records. */
-  readonly identifierMappings: number;
-  /** Live IDREF token occurrences across all mapped attributes. */
-  readonly identifierReferences: number;
-  /** Aggregate UTF-8 bytes of logical ID and name records. */
-  readonly identifierBytes: number;
-}
-
-/** One fixed monotonic time window. The first counted call anchors the window. */
-export interface SafeDocumentRateLimit {
-  /** Maximum counted calls allowed during one window. */
-  readonly limit: number;
-  /** Positive window duration in owner-realm monotonic milliseconds. */
-  readonly windowMs: number;
-}
-
-/** Per-document call rates that supplement, rather than replace, lifetime quotas. */
-export interface SafeDocumentRates {
-  readonly operations: SafeDocumentRateLimit;
-  readonly requestAttempts: SafeDocumentRateLimit;
-}
-
 /** Explicit host acknowledgement for the complete non-credential form surface. */
 export interface SafeFormControlPolicy {
   readonly allowNonCredentialFormElements: true;
@@ -237,9 +199,6 @@ export interface SafeDocumentOptions {
    * resulting global harden function here as an own data property.
    */
   readonly harden: Hardener;
-  readonly quotas?: Partial<SafeDocumentQuotas>;
-  /** Missing entries use DEFAULT_SAFE_DOCUMENT_RATES. */
-  readonly rates?: Partial<SafeDocumentRates>;
   /** Missing policy means every URL-bearing sink is denied. */
   readonly urlPolicy?: SafeURLPolicy;
   /** Missing policy means every inline style property is denied. */

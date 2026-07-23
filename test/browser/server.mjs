@@ -88,18 +88,6 @@ const server = createServer(async (request, response) => {
       response.end("WEBVTT\n\n00:00.000 --> 00:10.000\nمرحبا بالعالم\n");
       return;
     }
-    if (url.pathname === "/hostile-worker.js") {
-      response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
-      response.end(`onmessage = ({ data }) => {
-  const progress = new Uint32Array(data);
-  Atomics.store(progress, 1, 1);
-  postMessage("entered-unyielding-loop");
-  for (;;) progress[0] = (progress[0] + 1) >>> 0;
-};
-`);
-      return;
-    }
-
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     response.end("not found");
   } catch (error) {

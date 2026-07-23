@@ -262,7 +262,7 @@ describe("numeric boundary table", () => {
     }
   });
 
-  test("canvas enforces the 16,777,216 pixel cap before resetting allocation state", () => {
+  test("canvas accepts pixel areas beyond the former cap while retaining uint32 bounds", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
     const canvas = safeDocument.createCanvas();
@@ -270,12 +270,14 @@ describe("numeric boundary table", () => {
     const physical = root.querySelector("canvas");
     if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
 
-    canvas.setWidth(4_096);
     canvas.setHeight(4_096);
-    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_096, height: 4_096 });
-    expectInvalid(() => canvas.setWidth(4_097), "SafeCanvasElement.setWidth.pixels");
-    expectInvalid(() => canvas.setHeight(4_097), "SafeCanvasElement.setHeight.pixels");
-    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_096, height: 4_096 });
+    canvas.setWidth(4_097);
+    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_097, height: 4_096 });
+    expect(physical.width * physical.height).toBeGreaterThan(16_777_216);
+
+    expectInvalid(() => canvas.setWidth(4_294_967_296), "SafeCanvasElement.setWidth.value");
+    expectInvalid(() => canvas.setHeight(4_294_967_296), "SafeCanvasElement.setHeight.value");
+    expect({ width: physical.width, height: physical.height }).toEqual({ width: 4_097, height: 4_096 });
   });
 
   test("table spans, scope, details and dialog preserve exact reflected values", () => {
@@ -387,33 +389,36 @@ describe("numeric boundary table", () => {
     }
   });
 
-  test("reflected IDL writes honor attributeBytes thresholds and release on disposal", () => {
-    const deniedRoot = makeRoot();
-    const deniedDocument = createSafeDocument(deniedRoot, { quotas: { attributeBytes: 19 } });
-    const deniedTextarea = deniedDocument.createTextarea();
-    deniedDocument.appendChild(deniedTextarea);
-    expect(() => deniedTextarea.setRows(3)).toThrowError(expect.objectContaining({ code: "QUOTA_EXCEEDED" }));
-    expect((deniedRoot.querySelector("textarea") as HTMLTextAreaElement).rows).toBe(2);
-
+  test("owned canvas cleanup zeroes its bitmap before removing the owned subtree", () => {
     const root = makeRoot();
-    const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 20 } });
-    const first = safeDocument.createTextarea();
-    safeDocument.appendChild(first);
-    first.setRows(3);
-    expect((root.querySelector("textarea") as HTMLTextAreaElement).rows).toBe(3);
-    first.dispose();
-    const second = safeDocument.createTextarea();
-    safeDocument.appendChild(second);
-    expect(() => second.setRows(4)).not.toThrow();
+    const safeDocument = createSafeDocument(root);
+    const parent = safeDocument.createDiv();
+    const first = safeDocument.createCanvas();
+    parent.appendChild(first);
+    safeDocument.appendChild(parent);
+    const physical = root.querySelector("canvas");
+    if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
+
+    parent.dispose();
+    expect([physical.width, physical.height]).toEqual([0, 0]);
+    expect(root.firstElementChild).toBeNull();
   });
 
-  test("input type uses the same reflected-IDL attribute accounting seam", () => {
+  test("external canvas revocation preserves exact host dimensions", () => {
     const root = makeRoot();
-    const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 22 } });
-    const input = safeDocument.createInput();
-    safeDocument.appendChild(input);
+    const safeDocument = createSafeDocument(root);
+    const first = safeDocument.createCanvas();
+    safeDocument.appendChild(first);
+    const physical = root.querySelector("canvas");
+    if (!(physical instanceof HTMLCanvasElement)) throw new Error("expected physical canvas");
+    const external = document.createElement("div");
+    document.body.appendChild(external);
+    external.appendChild(physical);
 
-    expect(() => input.setType("text")).toThrowError(expect.objectContaining({ code: "QUOTA_EXCEEDED" }));
-    expect(root.querySelector("input")?.hasAttribute("type")).toBe(false);
+    expect(() => first.setWidth(299)).toThrowError(expect.objectContaining({
+      code: "PLACEMENT_VIOLATION",
+    }));
+    expect([physical.width, physical.height]).toEqual([300, 150]);
+    expect(physical.parentElement).toBe(external);
   });
 });

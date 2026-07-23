@@ -2,17 +2,17 @@
 
 `ark-of-atrahasis` is an ESM-only, capability-oriented DOM wrapper for
 host-controlled Secure ECMAScript (SES) integrations. The repository is at the
-`0.5.0` release-candidate source state: it requires a host-created `ShadowRoot`
+`1.0.0` source state: it requires a host-created `ShadowRoot`
 whose host has effective CSS paint containment, plus a host-supplied SES
 `harden`. It exposes fixed wrapper operations rather than raw DOM nodes, denies
 URL and inline-style authority unless the host grants it, and deterministically
-revokes owned wrappers and tracked effects. Repository documentation does not
-assert the candidate's current publication status.
+revokes owned wrappers and tracked effects.
 
-A live observation on 2026-07-15 found npm `latest` at `0.3.1`. That version has
-the retired string-ID/light-DOM API and does **not** implement the strict
-boundary documented here. Recheck npm and the protected release evidence before
-treating `npm install ark-of-atrahasis` as this release candidate.
+This source state does **not** claim that `1.0.0` has been tagged, published to
+npm, or released on GitHub. Publication is exclusively an upstream-maintainer
+action through the protected release workflow. Verify the registry version and
+its provenance before treating `npm install ark-of-atrahasis` as the contract
+documented here.
 
 ## Public capability boundary
 
@@ -20,7 +20,6 @@ The package has one ESM root export and no package subpaths. Its runtime exports
 are exactly the sorted allowlist in `scripts/runtime-export-contract.mjs`:
 
 - the authority-bearing `createSafeDocument` factory;
-- `DEFAULT_SAFE_DOCUMENT_QUOTAS` and `DEFAULT_SAFE_DOCUMENT_RATES`;
 - the pure policy helpers `createURLPolicy`, `createStylePolicy`,
   `canonicalizeStyleProperty`, and their frozen ceilings `URL_SINKS` and
   `SAFE_STYLE_PROPERTIES`;
@@ -56,7 +55,7 @@ All public `create*` factories return detached wrappers, including
 children; wrappers for those detached descendants remain active and may be
 explicitly reattached until they are disposed or revoked.
 
-The `0.5.0` declarations retain additive transition aliases: `createText()` is
+The `1.0.0` declarations retain additive transition aliases: `createText()` is
 the exact same function as `createParagraph()`, `createRawText()` is the exact
 same function as `createTextNode()`, and the former casing of `setReadonly()`,
 `setAutofocus()`, `setColspan()`, and `setRowspan()` delegates to the preferred
@@ -87,11 +86,7 @@ hostElement.style.contain = "paint";
 const root = hostElement.attachShadow({ mode: "closed" });
 const safeDocument = createSafeDocument(root, {
   harden,
-  rates: {
-    operations: { limit: 10_000, windowMs: 1_000 },
-    requestAttempts: { limit: 32, windowMs: 1_000 },
-  },
-  stylePolicy: { allowedProperties: ["color", "display"] },
+  stylePolicy: { allowedProperties: ["color", "background-color"] },
   urlPolicy: {
     baseURL: "https://app.example/",
     sinks: {
@@ -120,9 +115,12 @@ Omitting `urlPolicy` denies all seven URL sinks. An omitted sink is denied;
 enabled sinks separately constrain canonical origin (including port), protocol,
 credentials, query, fragment, and maximum length. Omitting `stylePolicy` denies
 all inline-style properties. A style grant selects from the library's fixed
-property ceiling; values containing URL/request grammar, indirection, malformed
-CSS, or non-primitive input are rejected. Raw stylesheets and global selectors
-are not part of the API.
+property ceiling. The ceiling excludes `animation-name`, `animation-duration`,
+`display`, `font-family`, `font-style`, and `font-weight`: URL-free values for
+those properties can activate request-bearing host stylesheet rules without
+passing through URL policy. Values containing direct
+URL/request grammar, indirection, malformed CSS, or non-primitive input are
+also rejected. Raw stylesheets and global selectors are not part of the API.
 
 The package has zero runtime dependencies and does not import SES. It
 behaviorally checks that the supplied hardener returns the same value and deeply
@@ -137,8 +135,8 @@ form surface: `button`, `fieldset`, `img`, `input`, `label`, `legend`,
 HTML Standard's form-associated elements represented by the API, including the
 historically form-associated `img`, plus their public label/grouping helpers
 ([WHATWG form categories](https://html.spec.whatwg.org/multipage/forms.html#categories)).
-Each factory consumes an operation call and then fails before native node
-creation with `FORM_CONTROL_POLICY_REQUIRED`. A host that needs same-origin,
+Each factory fails before native node creation with
+`FORM_CONTROL_POLICY_REQUIRED`. A host that needs same-origin,
 non-credential form structure must explicitly acknowledge the weaker surface
 with the exact own-data option
 `formControlPolicy: { allowNonCredentialFormElements: true }`.
@@ -156,8 +154,8 @@ states and does not promise autofill or PII confidentiality.
   wrappers fail. Each operation audits actual owner-document placement; raw-host
   reparent, adoption, or detach-then-external insertion revokes the affected
   wrappers before a later guest mutation can touch external DOM. Revocation
-  aborts wrapper-owned listeners and releases logical registry, namespace, and
-  live-resource accounting, but does not write the external node's attributes,
+  aborts wrapper-owned listeners and releases logical registry and namespace
+  ownership, but does not write the external node's attributes,
   style, text, IDL state, or tree placement.
 - **Identifiers and forms:** logical IDs, names, IDREFs, and IDREF lists map to
   per-document opaque physical tokens. The strict default denies all eleven
@@ -200,15 +198,16 @@ states and does not promise autofill or PII confidentiality.
 - **Detach and disposal:** `detach()` (and deprecated `remove()`) is reversible.
   Wrapper or document `dispose()` is irreversible and idempotent, closes future
   wrapper mutation, aborts wrapper-owned listeners, removes tracked URL/style
-  and identifier effects, detaches owned nodes still in the mount, releases live
-  accounting, and returns stable disposed/revoked errors on later operations.
+  and identifier effects, zeroes owned canvas dimensions, detaches owned nodes
+  still in the mount, and returns stable
+  disposed/revoked errors on later operations.
   Those physical cleanup writes apply only while the node remains owned. If the
   trusted host has already moved a raw node outside the mount, revocation leaves
   its complete physical DOM state unchanged—including tracked ID/name/IDREF,
-  style, and URL attributes as well as ordinary text/IDL state—while aborting
-  wrapper listeners and releasing logical/accounting state. Guest setters are
-  then revoked; an already-issued raw URL/request remains under host ownership
-  and is not cleared by the wrapper.
+  style, URL attributes, and canvas dimensions as well as ordinary text/IDL
+  state—while aborting wrapper listeners and releasing logical state.
+  Guest setters are then revoked; an already-issued raw URL/request remains
+  under host ownership and is not cleared by the wrapper.
 - **Layout and host authority:** required paint containment clips guest paint
   and hit testing to the bounded host even when the host grants fixed,
   viewport-sized, high-z-index styles. The event fence is deliberately
@@ -216,68 +215,15 @@ states and does not promise autofill or PII confidentiality.
   host must still control host geometry, raw nodes, endowments, navigation,
   CSP, capture handlers, and integration lifetime.
 
-### Lifetime quotas and window rates
+## Availability non-goal
 
-Lifetime quotas are per `SafeDocument`. Supplied limits must be non-negative
-safe integers. The defaults are:
-
-| Quota | Default | Accounting |
-| --- | ---: | --- |
-| `nodes` | 1,000 | live wrappers |
-| `listeners` | 1,000 | live wrapper-owned listeners |
-| `operations` | 100,000 | calls entering the active context |
-| `textBytes` | 1,000,000 | live UTF-8 guest text/value bytes |
-| `attributeBytes` | 256,000 | live serialized attribute name/value bytes |
-| `styleBytes` | 256,000 | live approved inline-style bytes |
-| `requests` | 64 | live URL-bearing attribute slots |
-| `requestAttempts` | 256 | every URL setter attempt, including denied input |
-| `identifierMappings` | 4,096 | live logical ID/name records |
-| `identifierReferences` | 8,192 | live logical IDREF occurrences |
-| `identifierBytes` | 256,000 | live UTF-8 logical ID/name bytes |
-
-Resource accounting is released only after terminal cleanup succeeds.
-`operations` and `requestAttempts` are lifetime call ceilings and are not
-released; they are not rates. Strict form-policy denials count against the
-`operations` lifetime quota and fixed window before failing, so a denied
-factory cannot bypass either call budget; no native element is created.
-
-`SafeDocumentOptions.rates` independently applies fixed windows to the same two
-call categories. A supplied entry must be an own data record with a
-non-negative safe-integer `limit` and positive safe-integer `windowMs`; missing
-entries use the deeply frozen `DEFAULT_SAFE_DOCUMENT_RATES`:
-
-| Rate | Default | Counted calls |
-| --- | ---: | --- |
-| `operations` | 10,000 per 1,000 ms | calls entering the active context |
-| `requestAttempts` | 32 per 1,000 ms | every URL setter attempt, including malformed and denied input |
-
-The first counted call anchors each independent window. Exactly `limit` calls
-are allowed; the next fails with a frozen `RATE_LIMIT_EXCEEDED` record until
-`windowMs` has elapsed, and a call exactly at the boundary starts a new window.
-Time comes from a captured `Performance.now()` capability in the supplied
-`ShadowRoot` owner realm, never ambient `Date`, an ambient/guest clock, or an
-option callback. Accessor/non-record/non-primitive/invalid configuration fails
-with `INVALID_RATE` before the root is claimed. A throwing, non-finite,
-negative, or backwards owner clock fails closed with the same stable rate error
-and cannot reopen that document's rate window.
-
-## Availability boundary
-
-Same-agent SES code can block its JavaScript agent indefinitely. The browser
-acceptance test proves that the host terminates an unyielding dedicated Worker
-that continuously mutates shared memory without yielding while the page remains
-responsive in Chromium, Firefox, and WebKit. It returns control to the browser
-harness after `terminate()`, waits outside the inspected page evaluation, and
-then proves through fresh observations that shared effects stopped. The Node
-`worker_threads` test separately proves termination of an unyielding
-CPU/`Atomics.add` loop after observable shared-memory progress.
-
-The browser test must not hold one long inspector evaluation open while waiting
-for termination: in Chromium that harness shape delays the parent-thread forced
-termination task and can falsely look like a Worker guarantee failure. This
-dedicated-Worker result still does not claim arbitrary same-agent page-main-
-thread preemption. Choose and test a Worker/process/RPC boundary whose
-termination semantics match the hostile workload.
+Ark confines DOM authority; it does not meter resource use, rate-limit calls,
+schedule guest code, preempt a JavaScript agent, or provide a Worker lifecycle
+contract. Same-agent SES code can therefore block its agent indefinitely. Hosts
+that require availability must isolate untrusted work behind a Worker,
+process, or RPC boundary and test that boundary's limits and termination
+semantics against their deployed runtime. Those host controls are not part of
+Ark's API or acceptance claim.
 
 ## Internationalization contract
 
@@ -288,9 +234,7 @@ titles, ARIA values, form values, and other natural-language content come from
 the caller and are preserved as primitive JavaScript/DOM strings. The wrapper
 does not apply Unicode normalization: canonically equivalent strings such as
 NFC `é` and NFD `e` plus a combining acute accent remain distinct logical IDs.
-This preserves exact caller data and avoids hidden identifier remapping. Live
-text, attribute, style, and identifier quotas count their deterministic UTF-8
-size, including four-byte supplementary characters.
+This preserves exact caller data and avoids hidden identifier remapping.
 
 `setLang()` writes the HTML `lang` attribute unchanged. The empty string remains
 present and means that the language is explicitly unknown; `clearLang()` removes
@@ -322,7 +266,8 @@ The fixed style ceiling includes
 margin, padding, border-side, and corner-radius longhands so a host can grant
 direction-neutral layout without granting raw CSS; every property remains
 deny-by-default. It deliberately excludes CSS `direction`, `unicode-bidi`,
-`writing-mode`, logical shorthands, and broader logical modules.
+`writing-mode`, logical shorthands, broader logical modules, and the six
+host-resource activators listed above.
 
 Public `SafeDOMError.code` is the stable locale-independent localization and
 control-flow key. `operation` is diagnostic context, not a translation key.
@@ -343,9 +288,9 @@ IDREF token.
 the [HTML optgroup contract](https://html.spec.whatwg.org/multipage/form-elements.html#the-optgroup-element).
 `createTrack()` exposes fixed `kind`, non-empty `srclang` and
 localized label, `default`, and a separate `track.src` URL sink. That sink is
-denied unless the host grants it explicitly and uses the same request-attempt,
-request-resource, quota, rollback, and disposal accounting as every other URL
-sink. The wrapper intentionally does not enforce aggregate sibling/media
+denied unless the host grants it explicitly and uses the same canonicalization,
+transactional rollback, placement-revocation, and disposal behavior as every
+other URL sink. The wrapper intentionally does not enforce aggregate sibling/media
 invariants such as a required `src`, `srclang` for `kind="subtitles"`, or unique
 `default` tracks; it also exposes no WebVTT parser, cue, `TextTrack`, or
 `TextTrackList` authority. Those limits follow the authority needed to expose
@@ -489,7 +434,7 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run analyze` | Report Fallow 3.6.0 dead code, cycles, private-type leaks, and duplication; fail only if the analyzer itself fails |
 | `npm test` | Run unit/property/model tests, built ESM/API smoke, and release-contract tests |
 | `npm run test:property` | Run only the fixed-seed generated security and lifecycle suites (already discovered by `test:unit`) |
-| `npm run test:browser` | Run boundary, SES, and unyielding-Worker termination tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
+| `npm run test:browser` | Run boundary and SES tests in Chromium, Firefox, and WebKit plus the dedicated Chromium address-Autofill limitation witness |
 | `npm run test:ses` | Run SES 2.2.0 with two mutually distrusting compartments and pass-style checks |
 | `npm run audit` | Fail on any known locked-dependency advisory |
 | `npm run audit:signatures` | Verify npm registry signatures and available attestations for the installed dependency graph |
@@ -498,9 +443,13 @@ the required system libraries. CI and ordinary FHS hosts leave it unset.
 | `npm run pack:verified` | Test and write the exact tarball, strictly validated reproducible CycloneDX 1.7 SBOM bound to that tarball's SHA-256, and checksum manifest |
 
 See [RELEASING.md](./RELEASING.md) for immutable artifact handoff, protected
-publishing, and source-correspondence engineering notes. The complete mapping of
-issue #1's acceptance criteria is in
-[docs/issue-1-traceability.md](./docs/issue-1-traceability.md).
+publishing, and source-correspondence engineering notes. The historical 0.4/0.5
+mapping of issue #1 is frozen in
+[docs/issue-1-traceability.md](./docs/issue-1-traceability.md). The live Ark 1.0
+disposition of issue #29 is in
+[docs/issue-29-ark-1.0-traceability.md](./docs/issue-29-ark-1.0-traceability.md),
+and breaking upgrade steps are in
+[docs/migration-0.5-to-1.0.md](./docs/migration-0.5-to-1.0.md).
 
 ## License and security reports
 

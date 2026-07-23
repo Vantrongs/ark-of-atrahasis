@@ -310,8 +310,8 @@ describe("keyword and operation contracts", () => {
     }));
   });
 
-  test("ordinary invalid preconditions precede lifecycle and do not consume operation quota", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { operations: 2 } });
+  test("invalid preconditions precede terminal state without running coercion", () => {
+    const safeDocument = createSafeDocument(makeRoot());
     const element = safeDocument.createDiv();
     const hostile = hostileValue();
 
@@ -323,26 +323,15 @@ describe("keyword and operation contracts", () => {
     }
     expect(hostile.traps()).toBe(0);
     expect(() => element.setClass("valid")).not.toThrow();
-    expect(() => element.setClass("over-quota")).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-    }));
 
     element.dispose();
     expect(() => element.setClass(asString(hostile.value))).toThrowError(expect.objectContaining({
       code: "ERR_INVALID_ARGUMENT",
       operation: "SafeElement.setClass.value",
     }));
-  });
-
-  test("URL setters intentionally meter non-primitive attempts before policy parsing", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { requestAttempts: 1 } });
-    const image = safeDocument.createImage();
-    const hostile = hostileValue();
-
-    expect(image.setSrc(asString(hostile.value))).toMatchObject({ allowed: false });
     expect(hostile.traps()).toBe(0);
-    expect(() => image.setSrc("https://example.test/image.png")).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
+    expect(() => element.setClass("after-dispose")).toThrowError(expect.objectContaining({
+      code: "NODE_DISPOSED",
     }));
   });
 });

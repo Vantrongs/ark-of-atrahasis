@@ -3,13 +3,13 @@
 This document records reproducible packaging and source-correspondence measures.
 It is an engineering checklist, not legal advice or a legal conclusion.
 
-The repository contains the `0.5.0` ESNext/Node 26 release candidate. A live
+The repository contains the `1.0.0` ESNext/Node 26 source state. It does not
+claim a corresponding tag, npm publication, or GitHub release. A live
 observation on 2026-07-16 found npm `latest` at `0.3.1`, both `0.4.0` and `0.5.0`
 absent, and no corresponding version tag or GitHub release. That observation is
-historical and must be repeated before an
-owner release. The repository evidence below is code-complete release
-engineering, not evidence that external owner controls are configured or that a
-release has occurred.
+historical and must be repeated before an owner release. The repository
+evidence below is code-complete release engineering, not evidence that external
+owner controls are configured or that a release has occurred.
 
 ## Prerequisites
 

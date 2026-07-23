@@ -8,12 +8,10 @@ import {
   createIdentifierNamespace,
   type IdentifierNamespace,
   type IdentifierReferenceKind,
-  type NamespaceQuotaDelta,
   type PreparedNamespaceMutation,
 } from "./identifier-namespace.ts";
 import {
   NodeRegistry,
-  type AccountedResource,
   type PendingPhysicalEffect,
   type RealNode,
   type RegistryEntry,
@@ -22,9 +20,6 @@ import {
 import type {
   Hardener,
   SafeDocumentOptions,
-  SafeDocumentQuotas,
-  SafeDocumentRateLimit,
-  SafeDocumentRates,
   SafeElement,
   SafeFormControlPolicy,
 } from "./types.ts";
@@ -41,38 +36,12 @@ import {
 } from "./url-policy.ts";
 import { createPlatformOps, type PlatformOps } from "./platform.ts";
 import type { SpecializedElementKind } from "./vocabularies.ts";
-import { utf8ByteLength } from "./utf8.ts";
 
 const claimedRoots = new WeakSet<object>();
 const objectIsPrototypeOf = Function.call.bind(Object.prototype.isPrototypeOf) as (
   prototype: object,
   value: unknown,
 ) => boolean;
-
-export const DEFAULT_SAFE_DOCUMENT_QUOTAS: Readonly<SafeDocumentQuotas> = Object.freeze({
-  nodes: 1_000,
-  listeners: 1_000,
-  operations: 100_000,
-  textBytes: 1_000_000,
-  attributeBytes: 256_000,
-  styleBytes: 256_000,
-  requests: 64,
-  requestAttempts: 256,
-  identifierMappings: 4_096,
-  identifierReferences: 8_192,
-  identifierBytes: 256_000,
-});
-
-export const DEFAULT_SAFE_DOCUMENT_RATES: Readonly<SafeDocumentRates> = Object.freeze({
-  operations: Object.freeze({ limit: 10_000, windowMs: 1_000 }),
-  requestAttempts: Object.freeze({ limit: 32, windowMs: 1_000 }),
-});
-
-type QuotaUsage = { -readonly [Name in keyof SafeDocumentQuotas]: number };
-type ResourceQuota = Exclude<
-  keyof SafeDocumentQuotas,
-  "nodes" | "listeners" | "operations" | "requestAttempts"
->;
 
 type FormElementTag =
   | "button"
@@ -88,41 +57,14 @@ type FormElementTag =
   | "textarea";
 type TerminalCleanup = "owned-physical" | "logical-only";
 
-const RESOURCE_QUOTA: Record<AccountedResource, ResourceQuota> = {
-  text: "textBytes",
-  attribute: "attributeBytes",
-  style: "styleBytes",
-  request: "requests",
-};
-
-const QUOTA_NAMES = [
-  "nodes",
-  "listeners",
-  "operations",
-  "textBytes",
-  "attributeBytes",
-  "styleBytes",
-  "requests",
-  "requestAttempts",
-  "identifierMappings",
-  "identifierReferences",
-  "identifierBytes",
-] as const;
-
-const RATE_NAMES = ["operations", "requestAttempts"] as const;
-type RateName = (typeof RATE_NAMES)[number];
-
-interface RateWindowState {
-  count: number;
-  failed: boolean;
-  lastObservedAt?: number;
-  startedAt?: number;
+function assertCanvasDimension(value: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > 4_294_967_295) {
+    throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimensions");
+  }
 }
 
 interface NormalizedOptions {
   readonly harden: Hardener;
-  readonly quotas: Partial<SafeDocumentQuotas> | undefined;
-  readonly rates: Partial<SafeDocumentRates> | undefined;
   readonly urlPolicy: SafeURLPolicy | undefined;
   readonly stylePolicy: SafeStylePolicy | undefined;
   readonly formControlPolicy: SafeFormControlPolicy | undefined;
@@ -168,14 +110,16 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
   const harden = readOwnDataProperty<Hardener>(options, "harden", invalidHardener);
   if (typeof harden !== "function") throw invalidHardener();
 
-  const rates = readOwnDataPropertyEntry<Partial<SafeDocumentRates> | undefined>(
-    options,
-    "rates",
-    () => createSafeDOMError("INVALID_RATE", "createSafeDocument.options.rates"),
-  );
-  if (rates.present && rates.value === undefined) {
-    throw createSafeDOMError("INVALID_RATE", "createSafeDocument.options.rates");
+  for (const removedOption of ["quotas", "rates"] as const) {
+    const operation = `createSafeDocument.options.${removedOption}`;
+    const legacy = readOwnDataPropertyEntry<unknown>(
+      options,
+      removedOption,
+      () => createSafeDOMError("ERR_INVALID_POLICY", operation),
+    );
+    if (legacy.present) throw createSafeDOMError("ERR_INVALID_POLICY", operation);
   }
+
   const formControlPolicy = readOwnDataPropertyEntry<SafeFormControlPolicy | undefined>(
     options,
     "formControlPolicy",
@@ -195,12 +139,6 @@ function normalizeOptions(options: SafeDocumentOptions | undefined): NormalizedO
 
   return {
     harden,
-    quotas: readOwnDataProperty(
-      options,
-      "quotas",
-      () => createSafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas"),
-    ),
-    rates: rates.present ? rates.value : undefined,
     urlPolicy: readOwnDataProperty(
       options,
       "urlPolicy",
@@ -286,74 +224,6 @@ function completeWithHardener<Value>(harden: Hardener, value: Value): Value {
   }
 }
 
-function resolveQuotas(supplied: Partial<SafeDocumentQuotas> | undefined): SafeDocumentQuotas {
-  if (supplied !== undefined && (supplied === null || typeof supplied !== "object")) {
-    throw createSafeDOMError("INVALID_QUOTA", "createSafeDocument.options.quotas");
-  }
-
-  const resolved: QuotaUsage = { ...DEFAULT_SAFE_DOCUMENT_QUOTAS };
-  if (supplied !== undefined) {
-    for (const name of QUOTA_NAMES) {
-      const value = readOwnDataProperty<number>(
-        supplied,
-        name,
-        () => createSafeDOMError("INVALID_QUOTA", `createSafeDocument.options.quotas.${name}`),
-      );
-      if (value !== undefined) resolved[name] = value;
-    }
-  }
-  for (const name of QUOTA_NAMES) {
-    const value = resolved[name];
-    if (!Number.isSafeInteger(value) || value < 0) {
-      throw createSafeDOMError(
-        "INVALID_QUOTA",
-        `Quota ${name} must be a non-negative safe integer`,
-      );
-    }
-  }
-  return resolved;
-}
-
-function invalidRate(operation: string): SafeDOMError {
-  return createSafeDOMError("INVALID_RATE", operation);
-}
-
-function resolveRateLimit(value: unknown, name: RateName): SafeDocumentRateLimit {
-  const operation = `createSafeDocument.options.rates.${name}`;
-  if (value === null || typeof value !== "object") throw invalidRate(operation);
-  const limit = readOwnDataProperty<number>(value, "limit", () => invalidRate(`${operation}.limit`));
-  const windowMs = readOwnDataProperty<number>(
-    value,
-    "windowMs",
-    () => invalidRate(`${operation}.windowMs`),
-  );
-  if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 0) {
-    throw invalidRate(`${operation}.limit`);
-  }
-  if (typeof windowMs !== "number" || !Number.isSafeInteger(windowMs) || windowMs <= 0) {
-    throw invalidRate(`${operation}.windowMs`);
-  }
-  return Object.freeze({ limit, windowMs });
-}
-
-function resolveRates(supplied: Partial<SafeDocumentRates> | undefined): SafeDocumentRates {
-  if (supplied !== undefined && (supplied === null || typeof supplied !== "object")) {
-    throw invalidRate("createSafeDocument.options.rates");
-  }
-  const resolved = { ...DEFAULT_SAFE_DOCUMENT_RATES };
-  if (supplied !== undefined) {
-    for (const name of RATE_NAMES) {
-      const entry = readOwnDataPropertyEntry<unknown>(
-        supplied,
-        name,
-        () => invalidRate(`createSafeDocument.options.rates.${name}`),
-      );
-      if (entry.present) resolved[name] = resolveRateLimit(entry.value, name);
-    }
-  }
-  return Object.freeze(resolved);
-}
-
 export type StyleMutationResult =
   | { readonly status: "committed" }
   | {
@@ -363,7 +233,6 @@ export type StyleMutationResult =
   | {
       readonly status: "rejected";
       readonly rollbackProven: false;
-      readonly observedValue?: string;
       readonly retryRollback: () => boolean;
     };
 
@@ -422,6 +291,11 @@ export interface DocumentContext {
   getLocalIdReference(real: Element, attributeName: string): string | undefined;
   lookupLocalId(local: string, specializedKind?: SpecializedElementKind): SafeElement | null;
   setReflectedIDL(real: Element, name: string, value: string | null, action: () => void): void;
+  setCanvasDimension(
+    real: HTMLCanvasElement,
+    dimension: "width" | "height",
+    value: number,
+  ): void;
   setIDL<Value extends string | number | boolean>(
     real: Element,
     value: Value,
@@ -436,8 +310,6 @@ export interface DocumentContext {
   ): SafeURLDecision;
   setStyle(
     real: Element,
-    property: string,
-    value: string,
     action: () => StyleMutationResult,
   ): boolean;
   addEventListener(
@@ -498,28 +370,9 @@ class DocumentContextImplementation implements DocumentContext {
   readonly eventSnapshotter: EventSnapshotter;
   readonly #identifierNamespace: IdentifierNamespace;
   readonly #harden: Hardener;
-  readonly #quotas: SafeDocumentQuotas;
-  readonly #rates: SafeDocumentRates;
   readonly #allowNonCredentialFormElements: boolean;
-  readonly #rateWindows: Record<RateName, RateWindowState> = {
-    operations: { count: 0, failed: false },
-    requestAttempts: { count: 0, failed: false },
-  };
   readonly #rootBoundaryController: AbortController;
   #rootBoundaryDisposed = false;
-  readonly #usage: QuotaUsage = {
-    nodes: 0,
-    listeners: 0,
-    operations: 0,
-    textBytes: 0,
-    attributeBytes: 0,
-    styleBytes: 0,
-    requests: 0,
-    requestAttempts: 0,
-    identifierMappings: 0,
-    identifierReferences: 0,
-    identifierBytes: 0,
-  };
   #disposed = false;
   #disposalComplete = false;
 
@@ -534,8 +387,6 @@ class DocumentContextImplementation implements DocumentContext {
     this.root = root;
     this.ownerDocument = ownerDocument;
     this.ownerRealm = view;
-    this.#quotas = resolveQuotas(normalizedOptions.quotas);
-    this.#rates = resolveRates(normalizedOptions.rates);
     this.#allowNonCredentialFormElements = resolveFormControlPolicy(
       normalizedOptions.formControlPolicy,
     );
@@ -601,7 +452,6 @@ class DocumentContextImplementation implements DocumentContext {
 
   #register(wrapper: SafeNode, real: RealNode, specializedKind?: SpecializedElementKind): void {
     this.#assertDocumentActive();
-    this.#reserve("nodes", 1);
     let boundaryCleanup: (() => void) | undefined;
     try {
       if (this.platform.isElement(real)) {
@@ -615,7 +465,6 @@ class DocumentContextImplementation implements DocumentContext {
       } catch {
         // Preserve the authoritative registration failure for the discarded node.
       }
-      this.#usage.nodes -= 1;
       throw error;
     }
   }
@@ -628,35 +477,19 @@ class DocumentContextImplementation implements DocumentContext {
     initialize: () => void,
   ): void {
     this.#assertDocumentActive();
-    const resources = new Map<string, number>();
-    for (const { name, value } of attributes) {
-      resources.set(name, utf8ByteLength(name) + utf8ByteLength(value));
-    }
-    let attributeBytes = 0;
-    for (const amount of resources.values()) attributeBytes += amount;
-
-    let nodesReserved = false;
-    let attributesReserved = false;
     let boundaryCleanup: (() => void) | undefined;
     try {
-      this.#reserve("nodes", 1);
-      nodesReserved = true;
-      this.#reserve("attributeBytes", attributeBytes);
-      attributesReserved = true;
       initialize();
       boundaryCleanup = this.#installTargetBoundary(real);
       const entry = this.registry.register(wrapper, real, specializedKind);
       entry.listeners.add(boundaryCleanup);
-      for (const [name, amount] of resources) entry.resources.attribute.set(name, amount);
     } catch (error) {
       try {
         boundaryCleanup?.();
       } catch {
         // Preserve the authoritative initialization failure for the discarded node.
       }
-      if (attributesReserved) this.#usage.attributeBytes -= attributeBytes;
-      if (nodesReserved) this.#usage.nodes -= 1;
-      for (const name of resources.keys()) {
+      for (const { name } of attributes) {
         try {
           this.platform.removeAttribute(real, name);
         } catch {
@@ -670,14 +503,12 @@ class DocumentContextImplementation implements DocumentContext {
 
   documentOperation<T>(action: () => T): T {
     this.#assertDocumentActive();
-    this.#reserveCall("operations");
     this.#auditPlacements();
     return action();
   }
 
   nodeOperation<T>(real: RealNode, action: () => T): T {
     this.#assertDocumentActive();
-    this.#reserveCall("operations");
     const entry = this.#requireEntryByReal(real);
     const compromised = this.#auditPlacements();
     if (compromised.has(entry)) {
@@ -703,7 +534,6 @@ class DocumentContextImplementation implements DocumentContext {
         resource: "text",
         slot,
         value,
-        amount: utf8ByteLength(value),
       }], action);
     });
   }
@@ -715,15 +545,7 @@ class DocumentContextImplementation implements DocumentContext {
     this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
       const { changes, action } = prepare();
-      this.#updateResources(entry, changes.map((change): ResourceChange => ({
-        resource: change.resource,
-        slot: change.slot,
-        value: change.value,
-        amount: change.value === null
-          ? 0
-          : utf8ByteLength(change.value)
-            + (change.resource === "attribute" ? utf8ByteLength(change.slot) : 0),
-      })), action);
+      this.#updateResources(entry, changes, action);
     });
   }
 
@@ -740,7 +562,6 @@ class DocumentContextImplementation implements DocumentContext {
         resource: "attribute",
         slot: name,
         value: value ?? null,
-        amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }];
       this.#updateResources(entry, changes, () => {
         validate?.();
@@ -805,8 +626,102 @@ class DocumentContextImplementation implements DocumentContext {
         resource: "attribute",
         slot: name,
         value,
-        amount: value === null ? 0 : utf8ByteLength(name) + utf8ByteLength(value),
       }], action);
+    });
+  }
+
+  setCanvasDimension(
+    real: HTMLCanvasElement,
+    dimension: "width" | "height",
+    value: number,
+  ): void {
+    this.nodeOperation(real, () => {
+      const entry = this.#requireEntryByReal(real);
+      if (entry.specializedKind !== "canvas") {
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimension");
+      }
+
+      const readState = (): {
+        readonly width: number;
+        readonly height: number;
+        readonly attributeValue: string | null;
+      } => {
+        const width = this.platform.getCanvasWidth(real);
+        const height = this.platform.getCanvasHeight(real);
+        assertCanvasDimension(width);
+        assertCanvasDimension(height);
+        return {
+          width,
+          height,
+          attributeValue: this.platform.getAttribute(real, dimension),
+        };
+      };
+      const writeDimension = (next: number): void => {
+        if (dimension === "width") this.platform.setCanvasWidth(real, next);
+        else this.platform.setCanvasHeight(real, next);
+      };
+
+      const previous = readState();
+      const nextWidth = dimension === "width" ? value : previous.width;
+      const nextHeight = dimension === "height" ? value : previous.height;
+      assertCanvasDimension(value);
+
+      const serialized = `${value}`;
+      const restorePrevious = (): boolean => {
+        try {
+          const current = readState();
+          if (
+            current.width !== previous.width
+            || current.height !== previous.height
+            || current.attributeValue !== previous.attributeValue
+          ) {
+            writeDimension(dimension === "width" ? previous.width : previous.height);
+            if (previous.attributeValue === null) this.platform.removeAttribute(real, dimension);
+            else this.platform.setAttribute(real, dimension, previous.attributeValue);
+          }
+        } catch {
+          // Readback below decides whether the throwing restoration took effect.
+        }
+        try {
+          const restored = readState();
+          return restored.width === previous.width
+            && restored.height === previous.height
+            && restored.attributeValue === previous.attributeValue;
+        } catch {
+          return false;
+        }
+      };
+
+      try {
+        writeDimension(value);
+        const committed = readState();
+        if (
+          committed.width !== nextWidth
+          || committed.height !== nextHeight
+          || committed.attributeValue !== serialized
+        ) {
+          throw createSafeDOMError(
+            "DOM_OPERATION_FAILED",
+            "SafeDocument.canvasDimension.readback",
+          );
+        }
+      } catch (mutationError) {
+        if (restorePrevious()) {
+          if (isSafeDOMError(mutationError)) throw mutationError;
+          throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasDimension");
+        }
+
+        const pending: PendingPhysicalEffect = {
+          cleanup: (): void => {
+            if (!restorePrevious()) {
+              throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasRollback");
+            }
+          },
+        };
+        entry.pendingEffects.add(pending);
+        entry.state = "revoked";
+        throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.canvasRollback");
+      }
     });
   }
 
@@ -865,7 +780,6 @@ class DocumentContextImplementation implements DocumentContext {
     decide: () => SafeURLDecision,
   ): SafeURLDecision {
     return this.nodeOperation(real, () => {
-      this.#reserveCall("requestAttempts");
       const decision = this.complete(decide());
       if (!decision.allowed) return decision;
 
@@ -876,63 +790,39 @@ class DocumentContextImplementation implements DocumentContext {
           resource: "attribute",
           slot: name,
           value,
-          amount: utf8ByteLength(name) + utf8ByteLength(value),
         },
-        { resource: "request", slot: name, value, amount: 1 },
       ], () => this.platform.setAttribute(real, name, value));
+      entry.requestAttributes.add(name);
       return decision;
     });
   }
 
   setStyle(
     real: Element,
-    property: string,
-    value: string,
     action: () => StyleMutationResult,
   ): boolean {
     return this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
-      const amount = utf8ByteLength(value);
-      const previous = entry.resources.style.get(property) ?? 0;
-      const delta = amount - previous;
-      if (delta > 0 && this.#usage.styleBytes + delta > this.#quotas.styleBytes) {
-        throw createSafeDOMError("QUOTA_EXCEEDED", "SafeDocument quota exceeded: styleBytes");
-      }
-      this.#usage.styleBytes += delta;
 
       let result: StyleMutationResult;
       try {
         result = action();
       } catch {
-        this.#usage.styleBytes -= delta;
         throw createSafeDOMError(
           "DOM_OPERATION_FAILED",
           "The style transaction could not be completed",
         );
       }
       if (result.status === "rejected" && result.rollbackProven) {
-        this.#usage.styleBytes -= delta;
         return false;
       }
 
       if (result.status === "rejected") {
-        this.#usage.styleBytes -= delta;
-        const observedAmount = result.observedValue === undefined
-          ? 0
-          : utf8ByteLength(result.observedValue);
-        const retainedAmount = Math.max(previous, amount, observedAmount);
-        this.#usage.styleBytes += retainedAmount - previous;
-        if (retainedAmount === 0) entry.resources.style.delete(property);
-        else entry.resources.style.set(property, retainedAmount);
         const pending: PendingPhysicalEffect = {
           cleanup: (): void => {
             if (!result.retryRollback()) {
               throw createSafeDOMError("DOM_OPERATION_FAILED", "SafeDocument.styleRollback");
             }
-            const retainedAmount = entry.resources.style.get(property) ?? 0;
-            this.#usage.styleBytes += previous - retainedAmount;
-            if (previous === 0) entry.resources.style.delete(property);
-            else entry.resources.style.set(property, previous);
           },
         };
         entry.pendingEffects.add(pending);
@@ -940,9 +830,7 @@ class DocumentContextImplementation implements DocumentContext {
         return false;
       }
 
-      if (amount === 0) entry.resources.style.delete(property);
-      else entry.resources.style.set(property, amount);
-      entry.styleCleanupRequired = entry.resources.style.size > 0;
+      entry.styleCleanupRequired = this.platform.getAttribute(real, "style") !== null;
       return true;
     });
   }
@@ -955,14 +843,12 @@ class DocumentContextImplementation implements DocumentContext {
     return this.nodeOperation(real, () => {
       const entry = this.#requireEntryByReal(real);
       const controller = this.platform.createAbortController();
-      this.#reserve("listeners", 1);
       let active = true;
       const cleanup = (): void => {
         if (!active) return;
         this.platform.abort(controller);
         active = false;
         entry.listeners.delete(cleanup);
-        this.#usage.listeners -= 1;
       };
       entry.listeners.add(cleanup);
       try {
@@ -1093,61 +979,6 @@ class DocumentContextImplementation implements DocumentContext {
     }
   }
 
-  #reserve(name: keyof SafeDocumentQuotas, amount: number): void {
-    const next = this.#usage[name] + amount;
-    if (next > this.#quotas[name]) {
-      throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
-    }
-    this.#usage[name] = next;
-  }
-
-  #reserveCall(name: RateName): void {
-    this.#reserveRate(name);
-    this.#reserve(name, 1);
-  }
-
-  #reserveRate(name: RateName): void {
-    const state = this.#rateWindows[name];
-    if (state.failed) {
-      throw createSafeDOMError(
-        "RATE_LIMIT_EXCEEDED",
-        `SafeDocument rate clock failed: ${name}`,
-      );
-    }
-
-    let now: number;
-    try {
-      now = this.platform.monotonicNow();
-    } catch {
-      state.failed = true;
-      throw createSafeDOMError(
-        "RATE_LIMIT_EXCEEDED",
-        `SafeDocument rate clock failed: ${name}`,
-      );
-    }
-    if (state.lastObservedAt !== undefined && now < state.lastObservedAt) {
-      state.failed = true;
-      throw createSafeDOMError(
-        "RATE_LIMIT_EXCEEDED",
-        `SafeDocument rate clock failed: ${name}`,
-      );
-    }
-    state.lastObservedAt = now;
-
-    const rate = this.#rates[name];
-    if (state.startedAt === undefined || now - state.startedAt >= rate.windowMs) {
-      state.startedAt = now;
-      state.count = 0;
-    }
-    if (state.count >= rate.limit) {
-      throw createSafeDOMError(
-        "RATE_LIMIT_EXCEEDED",
-        `SafeDocument rate exceeded: ${name}`,
-      );
-    }
-    state.count += 1;
-  }
-
   #installRootBoundary(): AbortController {
     const controller = this.platform.createAbortController();
     const signal = this.platform.getAbortSignal(controller);
@@ -1212,23 +1043,23 @@ class DocumentContextImplementation implements DocumentContext {
       throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.element");
     }
     const real = entry.real;
-    const attributeAmount = prepared.physicalValue === null
-      ? 0
-      : utf8ByteLength(prepared.attributeName) + utf8ByteLength(prepared.physicalValue);
-    const previousAmount = entry.resources.attribute.get(prepared.attributeName) ?? 0;
-    const aggregate = new Map<keyof SafeDocumentQuotas, number>();
-    aggregate.set("attributeBytes", attributeAmount - previousAmount);
-    for (const delta of prepared.quotaDeltas) {
-      aggregate.set(delta.name, (aggregate.get(delta.name) ?? 0) + delta.amount);
-    }
-    for (const [name, delta] of aggregate) {
-      if (delta > 0 && this.#usage[name] + delta > this.#quotas[name]) {
-        throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${name}`);
-      }
-    }
-
     const previousPhysical = this.platform.getAttribute(real, prepared.attributeName);
-    for (const [name, delta] of aggregate) this.#usage[name] += delta;
+    const restorePrevious = (): boolean => {
+      try {
+        const current = this.platform.getAttribute(real, prepared.attributeName);
+        if (current !== previousPhysical) {
+          if (previousPhysical === null) this.platform.removeAttribute(real, prepared.attributeName);
+          else this.platform.setAttribute(real, prepared.attributeName, previousPhysical);
+        }
+      } catch {
+        // Readback below decides whether a throwing restoration took effect.
+      }
+      try {
+        return this.platform.getAttribute(real, prepared.attributeName) === previousPhysical;
+      } catch {
+        return false;
+      }
+    };
     try {
       if (prepared.physicalValue === null) {
         this.platform.removeAttribute(real, prepared.attributeName);
@@ -1236,35 +1067,8 @@ class DocumentContextImplementation implements DocumentContext {
         this.platform.setAttribute(real, prepared.attributeName, prepared.physicalValue);
       }
     } catch (mutationError) {
-      let restoreFailed = false;
-      try {
-        if (previousPhysical === null) this.platform.removeAttribute(real, prepared.attributeName);
-        else this.platform.setAttribute(real, prepared.attributeName, previousPhysical);
-      } catch {
-        restoreFailed = true;
-      }
-      for (const [name, delta] of aggregate) this.#usage[name] -= delta;
-      if (restoreFailed) {
-        let retainedAttributeAmount = Math.max(previousAmount, attributeAmount);
-        try {
-          const observed = this.platform.getAttribute(real, prepared.attributeName);
-          retainedAttributeAmount = observed === null
-            ? 0
-            : utf8ByteLength(prepared.attributeName) + utf8ByteLength(observed);
-        } catch {
-          // The exact physical state is unavailable. Retain the larger known
-          // amount until terminal cleanup confirms the attribute is absent.
-        }
-        this.#usage.attributeBytes += retainedAttributeAmount - previousAmount;
-        if (retainedAttributeAmount === 0) {
-          entry.resources.attribute.delete(prepared.attributeName);
-        } else {
-          entry.resources.attribute.set(prepared.attributeName, retainedAttributeAmount);
-        }
+      if (!restorePrevious()) {
         this.#identifierNamespace.recordFailedMutation(entry, prepared);
-        for (const reservation of prepared.failureQuotaReservations) {
-          this.#usage[reservation.name] += reservation.amount;
-        }
         entry.state = "revoked";
         throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.rollback");
       }
@@ -1273,17 +1077,6 @@ class DocumentContextImplementation implements DocumentContext {
     }
 
     prepared.commit();
-    if (attributeAmount === 0) entry.resources.attribute.delete(prepared.attributeName);
-    else entry.resources.attribute.set(prepared.attributeName, attributeAmount);
-  }
-
-  #applyNamespaceDeltas(deltas: readonly NamespaceQuotaDelta[]): void {
-    for (const delta of deltas) {
-      if (this.#usage[delta.name] + delta.amount < 0) {
-        throw createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.accounting");
-      }
-    }
-    for (const delta of deltas) this.#usage[delta.name] += delta.amount;
   }
 
   #auditPlacements(): Set<RegistryEntry> {
@@ -1297,9 +1090,9 @@ class DocumentContextImplementation implements DocumentContext {
     const compromisedEntries = [...compromised];
     // Snapshot the complete terminal worklist before revoking or untracking
     // any ancestor. Descendants may already be revoked or disposed after an
-    // unproven rollback and still retain logical accounting.
+    // unproven rollback and still retain logical state.
     const terminalEntries = trackedEntries.filter((entry) => (
-      !entry.accountingReleased
+      !entry.terminalFinalized
       && compromisedEntries.some((rootEntry) => this.#isWithin(entry.real, rootEntry.real))
     )).map((entry) => ({
       cleanup: this.#terminalCleanup(entry),
@@ -1383,7 +1176,40 @@ class DocumentContextImplementation implements DocumentContext {
         ? error
         : createSafeDOMError("DOM_OPERATION_FAILED", "IdentifierNamespace.clear");
     }
-    for (const name of entry.resources.request.keys()) {
+    if (entry.specializedKind === "canvas") {
+      const canvas = entry.real as HTMLCanvasElement;
+      try {
+        this.platform.setCanvasWidth(canvas, 0);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearWidth");
+      }
+      try {
+        this.platform.setCanvasHeight(canvas, 0);
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearHeight");
+      }
+      try {
+        const width = this.platform.getCanvasWidth(canvas);
+        const height = this.platform.getCanvasHeight(canvas);
+        assertCanvasDimension(width);
+        assertCanvasDimension(height);
+        if (width !== 0 || height !== 0) {
+          throw createSafeDOMError(
+            "DOM_OPERATION_FAILED",
+            "SafeCanvasElement.clearDimensions",
+          );
+        }
+      } catch (error) {
+        firstFailure ??= isSafeDOMError(error)
+          ? error
+          : createSafeDOMError("DOM_OPERATION_FAILED", "SafeCanvasElement.clearDimensions");
+      }
+    }
+    for (const name of entry.requestAttributes) {
       try {
         this.platform.removeAttribute(entry.real, name);
       } catch (error) {
@@ -1411,7 +1237,7 @@ class DocumentContextImplementation implements DocumentContext {
   ): void {
     const pendingDescendants = this.registry.entries().filter((candidate) => (
       candidate !== rootEntry
-      && !candidate.accountingReleased
+      && !candidate.terminalFinalized
       && this.#isWithin(candidate.real, rootEntry.real)
     )).map((candidate) => ({
       cleanup: this.#terminalCleanup(candidate),
@@ -1446,14 +1272,14 @@ class DocumentContextImplementation implements DocumentContext {
     detach: "none" | "always" | "from-root",
     cleanup: TerminalCleanup,
   ): void {
-    if (entry.accountingReleased) return;
+    if (entry.terminalFinalized) return;
     if (entry.state === "active") entry.state = state;
     else if (entry.state !== state) return;
 
     // Capability revocation happens before cleanup. Physical cleanup is only
     // allowed while the raw node remains in an owned placement. Once the host
     // has moved it outside the mount, the raw bytes belong to the host: abort
-    // wrapper listeners and release logical state/accounting without writing
+    // wrapper listeners and release logical state without writing
     // attributes, style, text, IDL state, or tree placement.
     let firstFailure: SafeDOMError | undefined;
     if (cleanup === "owned-physical") {
@@ -1467,6 +1293,7 @@ class DocumentContextImplementation implements DocumentContext {
     } else {
       entry.pendingEffects.clear();
       entry.styleCleanupRequired = false;
+      entry.requestAttributes.clear();
     }
     for (const cleanup of [...entry.listeners]) {
       try {
@@ -1490,14 +1317,9 @@ class DocumentContextImplementation implements DocumentContext {
       }
     }
     if (firstFailure !== undefined) throw firstFailure;
-    this.#applyNamespaceDeltas(this.#identifierNamespace.releaseEntry(entry).quotaDeltas);
-    for (const resource of Object.keys(entry.resources) as AccountedResource[]) {
-      const quota = RESOURCE_QUOTA[resource];
-      for (const amount of entry.resources[resource].values()) this.#usage[quota] -= amount;
-      entry.resources[resource].clear();
-    }
-    this.#usage.nodes -= 1;
-    entry.accountingReleased = true;
+    this.#identifierNamespace.releaseEntry(entry);
+    entry.requestAttributes.clear();
+    entry.terminalFinalized = true;
     this.registry.stopTracking(entry);
   }
 
@@ -1507,30 +1329,12 @@ class DocumentContextImplementation implements DocumentContext {
     action: () => void,
   ): void {
     const slots = this.#snapshotMutationSlots(entry, changes);
-    const previousChanges = changes.map((change): ResourceChange => ({
-      ...change,
-      amount: entry.resources[change.resource].get(change.slot) ?? 0,
-    }));
-    const deltas = this.#resourceDeltas(entry, changes);
-
-    for (const [quota, delta] of deltas) {
-      if (delta > 0 && this.#usage[quota] + delta > this.#quotas[quota]) {
-        throw createSafeDOMError("QUOTA_EXCEEDED", `SafeDocument quota exceeded: ${quota}`);
-      }
-    }
-    for (const [quota, delta] of deltas) this.#usage[quota] += delta;
 
     try {
       action();
     } catch (error) {
       const restored = this.#restoreMutationSlots(slots);
-      for (const [quota, delta] of deltas) this.#usage[quota] -= delta;
       if (!restored) {
-        const retained = this.#observeRetainedChanges(entry, changes, slots);
-        for (const [quota, delta] of this.#resourceDeltas(entry, retained)) {
-          this.#usage[quota] += delta;
-        }
-        this.#recordResourceChanges(entry, retained);
         const pending: PendingPhysicalEffect = {
           cleanup: (): void => {
             if (!this.#restoreMutationSlots(slots)) {
@@ -1539,10 +1343,6 @@ class DocumentContextImplementation implements DocumentContext {
                 "SafeDocument.resourceRollback",
               );
             }
-            for (const [quota, delta] of this.#resourceDeltas(entry, previousChanges)) {
-              this.#usage[quota] += delta;
-            }
-            this.#recordResourceChanges(entry, previousChanges);
           },
         };
         entry.pendingEffects.add(pending);
@@ -1555,28 +1355,6 @@ class DocumentContextImplementation implements DocumentContext {
         "The DOM mutation could not be completed",
       );
     }
-
-    this.#recordResourceChanges(entry, changes);
-  }
-
-  #resourceDeltas(
-    entry: RegistryEntry,
-    changes: readonly ResourceChange[],
-  ): Map<ResourceQuota, number> {
-    const deltas = new Map<ResourceQuota, number>();
-    for (const change of changes) {
-      const previous = entry.resources[change.resource].get(change.slot) ?? 0;
-      const quota = RESOURCE_QUOTA[change.resource];
-      deltas.set(quota, (deltas.get(quota) ?? 0) + change.amount - previous);
-    }
-    return deltas;
-  }
-
-  #recordResourceChanges(entry: RegistryEntry, changes: readonly ResourceChange[]): void {
-    for (const change of changes) {
-      if (change.amount === 0) entry.resources[change.resource].delete(change.slot);
-      else entry.resources[change.resource].set(change.slot, change.amount);
-    }
   }
 
   #snapshotMutationSlots(
@@ -1585,7 +1363,7 @@ class DocumentContextImplementation implements DocumentContext {
   ): readonly MutationSlot[] {
     const slots = new Map<string, MutationSlot>();
     for (const change of changes) {
-      const kind = change.resource === "text" ? "text" : "attribute";
+      const kind = change.resource;
       const key = `${kind}:${change.slot}`;
       if (slots.has(key)) continue;
       const access = this.#physicalSlotAccess(entry, kind, change.slot);
@@ -1675,40 +1453,12 @@ class DocumentContextImplementation implements DocumentContext {
     return restored;
   }
 
-  #observeRetainedChanges(
-    entry: RegistryEntry,
-    changes: readonly ResourceChange[],
-    slots: readonly MutationSlot[],
-  ): readonly ResourceChange[] {
-    const byKey = new Map(slots.map((slot) => [slot.key, slot]));
-    return changes.map((change): ResourceChange => {
-      const kind = change.resource === "text" ? "text" : "attribute";
-      const physical = byKey.get(`${kind}:${change.slot}`);
-      const previousAmount = entry.resources[change.resource].get(change.slot) ?? 0;
-      if (physical === undefined) {
-        return { ...change, amount: Math.max(previousAmount, change.amount) };
-      }
-      try {
-        const observed = physical.read();
-        const amount = change.resource === "request"
-          ? observed === null ? 0 : 1
-          : observed === null
-            ? 0
-            : utf8ByteLength(observed)
-              + (change.resource === "attribute" ? utf8ByteLength(change.slot) : 0);
-        return { ...change, value: observed, amount };
-      } catch {
-        return { ...change, amount: Math.max(previousAmount, change.amount) };
-      }
-    });
-  }
 }
 
 interface ResourceChange {
-  readonly resource: AccountedResource;
+  readonly resource: "attribute" | "text";
   readonly slot: string;
   readonly value: string | null;
-  readonly amount: number;
 }
 
 interface MutationSlot {

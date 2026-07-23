@@ -1,3 +1,14 @@
+// @ts-expect-error quota defaults are not part of the Ark 1.0 package surface
+import { DEFAULT_SAFE_DOCUMENT_QUOTAS } from "ark-of-atrahasis";
+// @ts-expect-error rate defaults are not part of the Ark 1.0 package surface
+import { DEFAULT_SAFE_DOCUMENT_RATES } from "ark-of-atrahasis";
+// @ts-expect-error quota types are not part of the Ark 1.0 package surface
+import type { SafeDocumentQuotas } from "ark-of-atrahasis";
+// @ts-expect-error rate-limit types are not part of the Ark 1.0 package surface
+import type { SafeDocumentRateLimit } from "ark-of-atrahasis";
+// @ts-expect-error rate-map types are not part of the Ark 1.0 package surface
+import type { SafeDocumentRates } from "ark-of-atrahasis";
+
 import type {
 	AriaIdRefListName,
 	AriaIdRefName,
@@ -22,8 +33,7 @@ import type {
 	SafeDialogElement,
 	SafeDocument,
 	SafeDocumentOptions,
-	SafeDocumentRateLimit,
-	SafeDocumentRates,
+	SafeDOMErrorCode,
 	SafeElement,
 	SafeEventBase,
 	SafeFieldsetElement,
@@ -265,10 +275,38 @@ input.setType({});
 // @ts-expect-error symbols cannot be input keyword values
 input.setType(Symbol("text"));
 
-// @ts-expect-error rate limits require primitive numeric thresholds
-const invalidRatePrimitive: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: "1", windowMs: 1_000 } } };
-// @ts-expect-error supplied rate entries require a complete window contract
-const incompleteRate: SafeDocumentOptions = { harden: value => value, rates: { operations: { limit: 1 } } };
+const removedQuotaOptions: SafeDocumentOptions = {
+	harden: (value) => value,
+	// @ts-expect-error document quotas are not configurable in the Ark 1.0 API
+	quotas: { operations: 1 },
+};
+const removedRateOptions: SafeDocumentOptions = {
+	harden: (value) => value,
+	// @ts-expect-error document rates are not configurable in the Ark 1.0 API
+	rates: { operations: { limit: 1, windowMs: 1_000 } },
+};
+void removedQuotaOptions;
+void removedRateOptions;
+void DEFAULT_SAFE_DOCUMENT_QUOTAS;
+void DEFAULT_SAFE_DOCUMENT_RATES;
+declare const removedQuotas: SafeDocumentQuotas;
+declare const removedRateLimit: SafeDocumentRateLimit;
+declare const removedRates: SafeDocumentRates;
+void removedQuotas;
+void removedRateLimit;
+void removedRates;
+// @ts-expect-error quota exhaustion is not an Ark 1.0 public error code
+const removedQuotaErrorCode: SafeDOMErrorCode = "QUOTA_EXCEEDED";
+// @ts-expect-error rate limiting is not an Ark 1.0 public error code
+const removedRateErrorCode: SafeDOMErrorCode = "RATE_LIMIT_EXCEEDED";
+// @ts-expect-error quota configuration is not an Ark 1.0 public error code
+const removedInvalidQuotaErrorCode: SafeDOMErrorCode = "INVALID_QUOTA";
+// @ts-expect-error rate configuration is not an Ark 1.0 public error code
+const removedInvalidRateErrorCode: SafeDOMErrorCode = "INVALID_RATE";
+void removedQuotaErrorCode;
+void removedRateErrorCode;
+void removedInvalidQuotaErrorCode;
+void removedInvalidRateErrorCode;
 
 // @ts-expect-error the explicit form-control grant accepts only literal true
 const _disabledFormControlGrant: SafeFormControlPolicy = { allowNonCredentialFormElements: false };
@@ -302,8 +340,6 @@ declare const event: SafeEventBase<"generic">;
 declare const urlPolicyEngine: URLPolicyEngine;
 declare const stylePolicyEngine: StylePolicyEngine;
 declare const documentOptions: SafeDocumentOptions;
-declare const rateLimit: SafeDocumentRateLimit;
-declare const documentRates: SafeDocumentRates;
 declare const formControlPolicy: SafeFormControlPolicy;
 declare const replacementDocument: SafeDocument;
 declare const replacementTextNode: SafeTextNode;
@@ -340,10 +376,6 @@ declare const replacementDocumentOptions: SafeDocumentOptions;
 safeDocument.createDiv = replacementDocument.createDiv;
 // @ts-expect-error document option function capabilities are readonly
 documentOptions.harden = replacementDocumentOptions.harden;
-// @ts-expect-error rate-limit fields are readonly
-rateLimit.limit = 2;
-// @ts-expect-error rate-map entries are readonly
-documentRates.operations = rateLimit;
 // @ts-expect-error form-control policy fields are readonly
 formControlPolicy.allowNonCredentialFormElements = true;
 // @ts-expect-error text-node functions are readonly
@@ -443,5 +475,3 @@ void invalidAriaIdRef;
 void invalidAriaIdRefList;
 void invalidAriaRole;
 void invalidSpecializedKind;
-void invalidRatePrimitive;
-void incompleteRate;

@@ -173,6 +173,21 @@ test("logical style authority is exactly the reviewed 34-longhand set", () => {
   );
 });
 
+test("the style ceiling excludes properties that activate host-defined network resources", () => {
+  const safeProperties: readonly string[] = SAFE_STYLE_PROPERTIES;
+
+  for (const property of [
+    "animation-duration",
+    "animation-name",
+    "display",
+    "font-family",
+    "font-style",
+    "font-weight",
+  ]) {
+    assert.equal(safeProperties.includes(property), false, property);
+  }
+});
+
 test("style values cannot smuggle URL/network CSS through escapes, comments, or indirection", () => {
   const { root } = fixture();
   const safeDocument = createSafeDocument(root, {

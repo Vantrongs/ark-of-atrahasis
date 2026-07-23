@@ -160,40 +160,6 @@ describe("identifier namespace", () => {
     expect(root.querySelector("th")?.getAttribute("headers")).toMatch(/^aoa-i-[0-9a-f]{48}$/);
   });
 
-  it("enforces exact live mapping/reference/UTF-8 budgets with net replacement and release", () => {
-    const root = makeRoot();
-    const safeDocument = createSafeDocument(root, {
-      quotas: {
-        identifierMappings: 1,
-        identifierReferences: 2,
-        identifierBytes: 1,
-      },
-    });
-    const cell = safeDocument.createTd();
-    cell.setHeaders("a a");
-    safeDocument.appendChild(cell);
-    const physical = requireElement(root.querySelector("td")).getAttribute("headers");
-
-    expect(() => cell.setHeaders("bb bb")).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-      operation: "SafeDocument quota exceeded: identifierBytes",
-    }));
-    expect(cell.getHeaders()).toBe("a a");
-    expect(root.querySelector("td")?.getAttribute("headers")).toBe(physical);
-
-    cell.setHeaders("b b");
-    expect(cell.getHeaders()).toBe("b b");
-    const target = safeDocument.createDiv();
-    expect(() => target.setId("c")).toThrowError(expect.objectContaining({
-      code: "QUOTA_EXCEEDED",
-      operation: "SafeDocument quota exceeded: identifierMappings",
-    }));
-
-    cell.dispose();
-    target.setId("c");
-    expect(target.getId()).toBe("c");
-  });
-
   it("keeps detached IDs reserved while mounted lookup remains canonical and fail closed", () => {
     const root = makeRoot();
     const safeDocument = createSafeDocument(root);
@@ -218,22 +184,75 @@ describe("identifier namespace", () => {
     expect(safeDocument.getElement("stable")).toBe(target);
   });
 
-  it("rejects more than 256 list occurrences before allocating namespace state", () => {
-    const safeDocument = createSafeDocument(makeRoot(), {
-      quotas: { identifierMappings: 1, identifierReferences: 256, identifierBytes: 1 },
-    });
-    const cell = safeDocument.createTd();
-    expect(() => cell.setHeaders(Array.from({ length: 257 }, () => "a").join(" ")))
-      .toThrowError(expect.objectContaining({
-        code: "QUOTA_EXCEEDED",
-        operation: "IdentifierNamespace.referenceTokens",
-      }));
-    const target = safeDocument.createDiv();
-    target.setId("a");
-    expect(target.getId()).toBe("a");
+  it("accepts and canonicalizes more than 256 tokens across every IDREF-list entrypoint", () => {
+    const separators = [" ", "\t", "\n", "\f", "\r"] as const;
+    const repeated = (length: number): string => Array.from(
+      { length },
+      (_, index) => index === 0 ? "a" : `${separators[index % separators.length]}a`,
+    ).join("");
+    const cases = [
+      ...ARIA_IDREF_LIST_NAMES.map((name) => ({
+        label: `aria-${name}`,
+        create: (safeDocument: ReturnType<typeof createSafeDocument>) => {
+          const wrapper = safeDocument.createDiv();
+          return {
+            wrapper,
+            set: (value: string) => wrapper.setAria(name, value),
+            get: () => wrapper.getAria(name),
+            attribute: `aria-${name}`,
+          };
+        },
+      })),
+      ...(["th", "td"] as const).map((tag) => ({
+        label: `${tag}.headers`,
+        create: (safeDocument: ReturnType<typeof createSafeDocument>) => {
+          const wrapper = tag === "th" ? safeDocument.createTh() : safeDocument.createTd();
+          return {
+            wrapper,
+            set: (value: string) => wrapper.setHeaders(value),
+            get: () => wrapper.getHeaders(),
+            attribute: "headers",
+          };
+        },
+      })),
+    ];
+
+    for (const testCase of cases) {
+      const root = makeRoot();
+      const safeDocument = createSafeDocument(root);
+      const { wrapper, set, get, attribute } = testCase.create(safeDocument);
+      set(repeated(257));
+      safeDocument.appendChild(wrapper);
+      const raw = requireElement(root.querySelector("div, th, td"));
+      const canonical = Array.from({ length: 257 }, () => "a").join(" ");
+      expect(get(), testCase.label).toBe(canonical);
+      const physicalTokens = raw.getAttribute(attribute)?.split(" ");
+      expect(physicalTokens, testCase.label).toHaveLength(257);
+      expect(new Set(physicalTokens), testCase.label).toHaveLength(1);
+      expect(physicalTokens, testCase.label).not.toContain("a");
+    }
   });
 
-  it("rolls back logical, physical, and quota state when the captured DOM write fails", () => {
+  it("accepts more than 8,192 occurrences in one IDREF list", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
+    const cell = safeDocument.createTh();
+    const occurrenceCount = 8_193;
+    const logicalValue = Array.from({ length: occurrenceCount }, () => "repeated").join(" ");
+
+    cell.setHeaders(logicalValue);
+    safeDocument.appendChild(cell);
+
+    expect(cell.getHeaders().split(" ")).toHaveLength(occurrenceCount);
+    const physicalTokens = requireElement(root.querySelector("th"))
+      .getAttribute("headers")
+      ?.split(" ");
+    expect(physicalTokens).toHaveLength(occurrenceCount);
+    expect(new Set(physicalTokens)).toHaveLength(1);
+    expect(physicalTokens).not.toContain("repeated");
+  });
+
+  it("rolls back logical and physical state when the captured DOM write fails", () => {
     const root = makeRoot();
     const prototype = window.Element.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "setAttribute");
@@ -254,9 +273,7 @@ describe("identifier namespace", () => {
     });
 
     try {
-      const safeDocument = createSafeDocument(root, {
-        quotas: { identifierMappings: 1, identifierBytes: 3, attributeBytes: 56 },
-      });
+      const safeDocument = createSafeDocument(root);
       const target = safeDocument.createDiv();
       target.setId("old");
       safeDocument.appendChild(target);
@@ -344,12 +361,8 @@ describe("identifier namespace", () => {
       });
 
       try {
-        const safeDocument = createSafeDocument(
-          root,
-          testCase.attribute === "id" ? { quotas: { identifierMappings: 1 } } : undefined,
-        );
+        const safeDocument = createSafeDocument(root);
         const prepared = testCase.prepare(safeDocument);
-        const replacement = testCase.attribute === "id" ? safeDocument.createDiv() : undefined;
         safeDocument.appendChild(prepared.wrapper);
         const raw = requireElement(root.firstElementChild);
         failWrite = true;
@@ -359,19 +372,10 @@ describe("identifier namespace", () => {
           operation: "IdentifierNamespace.rollback",
         }));
         expect(raw.getAttribute(testCase.attribute)).toMatch(/^aoa-[in]-[0-9a-f]{48}$/);
-        if (replacement !== undefined) {
-          expect(() => replacement.setId("replacement")).toThrowError(expect.objectContaining({
-            code: "QUOTA_EXCEEDED",
-            operation: "SafeDocument quota exceeded: identifierMappings",
-          }));
-        }
 
         prepared.wrapper.dispose();
         expect(raw.hasAttribute(testCase.attribute)).toBe(false);
-        if (replacement !== undefined) {
-          replacement.setId("replacement");
-          expect(replacement.getId()).toBe("replacement");
-        }
+        expect(root.firstElementChild).toBeNull();
       } finally {
         Object.defineProperty(prototype, "setAttribute", setDescriptor);
         Object.defineProperty(prototype, "removeAttribute", removeDescriptor);
@@ -379,7 +383,7 @@ describe("identifier namespace", () => {
     }
   });
 
-  it("does not release pending physical attribute accounting before retry cleanup", () => {
+  it("retains a failed physical ID effect until retry cleanup removes it", () => {
     const root = makeRoot();
     const prototype = window.Element.prototype;
     const setDescriptor = Object.getOwnPropertyDescriptor(prototype, "setAttribute");
@@ -395,7 +399,7 @@ describe("identifier namespace", () => {
     const nativeSetAttribute = setDescriptor.value;
     const nativeRemoveAttribute = removeDescriptor.value;
     let failWrite = false;
-    let failRestore = false;
+    let remainingRemovalFailures = 0;
     Object.defineProperty(prototype, "setAttribute", {
       ...setDescriptor,
       value(this: Element, name: string, value: string): void {
@@ -409,8 +413,8 @@ describe("identifier namespace", () => {
     Object.defineProperty(prototype, "removeAttribute", {
       ...removeDescriptor,
       value(this: Element, name: string): void {
-        if (failRestore && name === "id") {
-          failRestore = false;
+        if (remainingRemovalFailures > 0 && name === "id") {
+          remainingRemovalFailures -= 1;
           throw window;
         }
         Reflect.apply(nativeRemoveAttribute, this, [name]);
@@ -418,23 +422,35 @@ describe("identifier namespace", () => {
     });
 
     try {
-      const safeDocument = createSafeDocument(root, { quotas: { attributeBytes: 56 } });
+      const safeDocument = createSafeDocument(root);
       const target = safeDocument.createDiv();
       const replacement = safeDocument.createDiv();
       safeDocument.appendChild(target);
       failWrite = true;
-      failRestore = true;
+      remainingRemovalFailures = 2;
       expect(() => target.setId("pending")).toThrowError(expect.objectContaining({
         operation: "IdentifierNamespace.rollback",
       }));
-      expect(() => replacement.setId("replacement")).toThrowError(expect.objectContaining({
-        code: "QUOTA_EXCEEDED",
-        operation: "SafeDocument quota exceeded: attributeBytes",
+      const raw = requireElement(root.querySelector("div"));
+      const pendingPhysical = raw.getAttribute("id");
+      expect(pendingPhysical).toMatch(/^aoa-i-[0-9a-f]{48}$/);
+
+      replacement.setId("pending");
+      safeDocument.appendChild(replacement);
+      const replacementRaw = requireElement(root.querySelector("div:last-child"));
+      expect(replacement.getId()).toBe("pending");
+      expect(replacementRaw.id).not.toBe(pendingPhysical);
+      expect(safeDocument.getElement("pending")).toBe(replacement);
+
+      expect(() => target.dispose()).toThrowError(expect.objectContaining({
+        code: "DOM_OPERATION_FAILED",
+        operation: "Element.removeAttribute",
       }));
+      expect(raw.getAttribute("id")).toBe(pendingPhysical);
 
       target.dispose();
-      replacement.setId("replacement");
-      expect(replacement.getId()).toBe("replacement");
+      expect(raw.hasAttribute("id")).toBe(false);
+      expect(safeDocument.getElement("pending")).toBe(replacement);
     } finally {
       Object.defineProperty(prototype, "setAttribute", setDescriptor);
       Object.defineProperty(prototype, "removeAttribute", removeDescriptor);
@@ -480,9 +496,7 @@ describe("identifier namespace", () => {
     });
 
     try {
-      const safeDocument = createSafeDocument(root, {
-        quotas: { identifierMappings: 1, identifierBytes: 3 },
-      });
+      const safeDocument = createSafeDocument(root);
       const target = safeDocument.createDiv();
       const replacement = safeDocument.createDiv();
       target.setId("old");
@@ -494,9 +508,11 @@ describe("identifier namespace", () => {
       failRestore = true;
       expect(() => target.setId("")).toThrowError(expect.objectContaining({
         code: "DOM_OPERATION_FAILED",
-        operation: "IdentifierNamespace.rollback",
+        operation: "Element.removeAttribute",
       }));
       expect(raw.id).toBe(oldPhysical);
+      expect(target.getId()).toBe("old");
+      expect(safeDocument.getElement("old")).toBe(target);
       expect(() => replacement.setId("old")).toThrowError(expect.objectContaining({
         code: "DUPLICATE_IDENTIFIER",
       }));
@@ -551,10 +567,13 @@ describe("identifier namespace", () => {
     }
   });
 
-  it("rejects ASCII whitespace in single IDREF tokens before consuming operation quota", () => {
-    const safeDocument = createSafeDocument(makeRoot(), { quotas: { operations: 3 } });
+  it("rejects ASCII whitespace in single IDREF tokens without physical effects", () => {
+    const root = makeRoot();
+    const safeDocument = createSafeDocument(root);
     const target = safeDocument.createDiv();
     const label = safeDocument.createLabel();
+    safeDocument.appendChild(target);
+    safeDocument.appendChild(label);
     expect(() => target.setId("bad id")).toThrowError(expect.objectContaining({
       code: "ERR_INVALID_ARGUMENT",
       operation: "SafeElement.setId.value",
@@ -569,7 +588,14 @@ describe("identifier namespace", () => {
         operation: "SafeElement.setAria.value",
       }),
     );
-    expect(() => target.setTitle("last metered operation")).not.toThrow();
+    expect(target.getId()).toBe("");
+    expect(label.getFor()).toBe("");
+    expect(target.getAria("activedescendant")).toBeUndefined();
+    expect(root.querySelector("div")?.hasAttribute("id")).toBe(false);
+    expect(root.querySelector("label")?.hasAttribute("for")).toBe(false);
+    expect(root.querySelector("div")?.hasAttribute("aria-activedescendant")).toBe(false);
+    target.setTitle("still active");
+    expect(root.querySelector("div")?.getAttribute("title")).toBe("still active");
   });
 });
 

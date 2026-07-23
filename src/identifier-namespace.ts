@@ -1,5 +1,4 @@
 import { createSafeDOMError, isSafeDOMError } from "./errors.ts";
-import { utf8ByteLength } from "./utf8.ts";
 import type { PlatformOps } from "./platform.ts";
 import type { NodeRegistry, RegistryEntry } from "./registry.ts";
 import type { SafeElement } from "./types.ts";
@@ -7,27 +6,11 @@ import type { SpecializedElementKind } from "./vocabularies.ts";
 
 export type IdentifierReferenceKind = "single" | "list";
 
-export type NamespaceQuotaName =
-  | "identifierMappings"
-  | "identifierReferences"
-  | "identifierBytes";
-
-export interface NamespaceQuotaDelta {
-  readonly name: NamespaceQuotaName;
-  readonly amount: number;
-}
-
 export interface PreparedNamespaceMutation {
   readonly attributeName: string;
   readonly physicalValue: string | null;
   readonly reserveTokens: readonly string[];
-  readonly failureQuotaReservations: readonly NamespaceQuotaDelta[];
-  readonly quotaDeltas: readonly NamespaceQuotaDelta[];
   commit(): void;
-}
-
-export interface NamespaceRelease {
-  readonly quotaDeltas: readonly NamespaceQuotaDelta[];
 }
 
 export interface EventTargetResolution {
@@ -50,7 +33,7 @@ export interface IdentifierNamespace {
   resolveEventTarget(value: unknown): EventTargetResolution;
   recordFailedMutation(entry: RegistryEntry, prepared: PreparedNamespaceMutation): void;
   clearPhysicalEffects(entry: RegistryEntry): void;
-  releaseEntry(entry: RegistryEntry): NamespaceRelease;
+  releaseEntry(entry: RegistryEntry): void;
   assertEmpty(): void;
 }
 
@@ -59,14 +42,12 @@ interface IdRecord {
   readonly physical: string;
   target: RegistryEntry | null;
   references: number;
-  readonly localBytes: number;
 }
 
 interface NameRecord {
   readonly local: string;
   readonly physical: string;
   users: number;
-  readonly localBytes: number;
 }
 
 interface ReferenceSlot {
@@ -77,20 +58,28 @@ interface ReferenceSlot {
 
 const TOKEN_BYTES = 24;
 const TOKEN_ATTEMPTS = 8;
-const MAX_IDREF_TOKENS_PER_ATTRIBUTE = 256;
 const ASCII_WHITESPACE = /[\t\n\f\r ]/;
-const ASCII_WHITESPACE_RUN = /[\t\n\f\r ]+/;
 
-function quotaDeltas(
-  mappings: number,
-  references: number,
-  bytes: number,
-): readonly NamespaceQuotaDelta[] {
-  return [
-    { name: "identifierMappings", amount: mappings },
-    { name: "identifierReferences", amount: references },
-    { name: "identifierBytes", amount: bytes },
-  ];
+function isASCIIWhitespaceCode(code: number): boolean {
+  return code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d || code === 0x20;
+}
+
+function splitReferenceTokens(local: string): readonly string[] {
+  const tokens: string[] = [];
+  let tokenStart = -1;
+  for (let index = 0; index <= local.length; index += 1) {
+    const atEnd = index === local.length;
+    const whitespace = !atEnd && isASCIIWhitespaceCode(local.charCodeAt(index));
+    if (!atEnd && !whitespace) {
+      if (tokenStart !== -1) continue;
+      tokenStart = index;
+      continue;
+    }
+    if (tokenStart === -1) continue;
+    tokens.push(local.slice(tokenStart, index));
+    tokenStart = -1;
+  }
+  return tokens;
 }
 
 function increment<RecordType>(map: Map<RecordType, number>, record: RecordType): void {
@@ -99,7 +88,6 @@ function increment<RecordType>(map: Map<RecordType, number>, record: RecordType)
 
 interface LocalNamespaceRecord {
   readonly physical: string;
-  readonly localBytes: number;
 }
 
 function unchangedMutation(
@@ -110,32 +98,20 @@ function unchangedMutation(
     attributeName,
     physicalValue,
     reserveTokens: [],
-    failureQuotaReservations: quotaDeltas(0, 0, 0),
-    quotaDeltas: quotaDeltas(0, 0, 0),
     commit: () => undefined,
   };
 }
 
 function mappedMutation(
   attributeName: "id" | "name",
-  previous: LocalNamespaceRecord | undefined,
   next: LocalNamespaceRecord | undefined,
   created: boolean,
-  removesPrevious: boolean,
   commit: () => void,
 ): PreparedNamespaceMutation {
-  const createdBytes = created ? next?.localBytes ?? 0 : 0;
-  const removedBytes = removesPrevious ? previous?.localBytes ?? 0 : 0;
   return {
     attributeName,
     physicalValue: next?.physical ?? null,
     reserveTokens: created && next !== undefined ? [next.physical] : [],
-    failureQuotaReservations: quotaDeltas(created ? 1 : 0, 0, createdBytes),
-    quotaDeltas: quotaDeltas(
-      (created ? 1 : 0) - (removesPrevious ? 1 : 0),
-      0,
-      createdBytes - removedBytes,
-    ),
     commit,
   };
 }
@@ -154,9 +130,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
   readonly #pendingPhysicalByEntry = new Map<RegistryEntry, {
     readonly attributes: Set<string>;
     readonly reservedTokens: Set<string>;
-    mappings: number;
-    references: number;
-    bytes: number;
   }>();
 
   constructor(root: ShadowRoot, registry: NodeRegistry, platform: PlatformOps) {
@@ -182,19 +155,15 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
         physical: this.#createToken("aoa-i-", new Set()),
         target: null,
         references: 0,
-        localBytes: utf8ByteLength(local),
       };
       created = true;
     }
 
-    const removesPrevious = previous !== undefined && previous.references === 0;
     const preparedNext = next;
     return mappedMutation(
       "id",
-      previous,
       preparedNext,
       created,
-      removesPrevious,
       () => {
         if (created && preparedNext !== undefined) this.#installIdRecord(preparedNext);
         if (previous !== undefined) {
@@ -230,19 +199,15 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
         local,
         physical: this.#createToken("aoa-n-", new Set()),
         users: 0,
-        localBytes: utf8ByteLength(local),
       };
       created = true;
     }
 
-    const removesPrevious = previous?.users === 1;
     const preparedNext = next;
     return mappedMutation(
       "name",
-      previous,
       preparedNext,
       created,
-      removesPrevious,
       () => {
         if (created && preparedNext !== undefined) this.#installNameRecord(preparedNext);
         if (previous !== undefined) {
@@ -269,10 +234,7 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
   ): PreparedNamespaceMutation {
     const localTokens = kind === "single"
       ? (local === "" ? [] : [local])
-      : local.split(ASCII_WHITESPACE_RUN).filter((token) => token !== "");
-    if (localTokens.length > MAX_IDREF_TOKENS_PER_ATTRIBUTE) {
-      throw createSafeDOMError("QUOTA_EXCEEDED", "IdentifierNamespace.referenceTokens");
-    }
+      : splitReferenceTokens(local);
 
     const previousSlots = this.#referenceSlotsByEntry.get(entry);
     const previous = previousSlots?.get(attributeName);
@@ -291,7 +253,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
           physical: this.#createToken("aoa-i-", pendingTokens),
           target: null,
           references: 0,
-          localBytes: utf8ByteLength(token),
         };
         pendingByLocal.set(token, record);
         pendingTokens.add(record.physical);
@@ -308,10 +269,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
       if (projected === 0 && record.target === null) collectedRecords.push(record);
     }
 
-    let createdBytes = 0;
-    for (const record of createdRecords) createdBytes += record.localBytes;
-    let collectedBytes = 0;
-    for (const record of collectedRecords) collectedBytes += record.localBytes;
     const canonicalLocal = localTokens.join(" ");
     const physicalValue = nextRecords.map((record) => record.physical).join(" ");
     const nextSlot: ReferenceSlot = {
@@ -325,16 +282,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
       attributeName,
       physicalValue,
       reserveTokens: createdRecords.map((record) => record.physical),
-      failureQuotaReservations: quotaDeltas(
-        createdRecords.length,
-        nextRecords.length,
-        createdBytes,
-      ),
-      quotaDeltas: quotaDeltas(
-        createdRecords.length - collectedRecords.length,
-        nextRecords.length - (previous?.records.length ?? 0),
-        createdBytes - collectedBytes,
-      ),
       commit: () => {
         for (const record of createdRecords) this.#installIdRecord(record);
         for (const record of previous?.records ?? []) record.references -= 1;
@@ -381,9 +328,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
       pending = {
         attributes: new Set(),
         reservedTokens: new Set(),
-        mappings: 0,
-        references: 0,
-        bytes: 0,
       };
       this.#pendingPhysicalByEntry.set(entry, pending);
     }
@@ -391,11 +335,6 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     for (const token of prepared.reserveTokens) {
       pending.reservedTokens.add(token);
       this.#usedPhysicalTokens.add(token);
-    }
-    for (const reservation of prepared.failureQuotaReservations) {
-      if (reservation.name === "identifierMappings") pending.mappings += reservation.amount;
-      else if (reservation.name === "identifierReferences") pending.references += reservation.amount;
-      else pending.bytes += reservation.amount;
     }
     this.#entriesWithNamespaceState.add(entry);
   }
@@ -423,15 +362,12 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     }
   }
 
-  releaseEntry(entry: RegistryEntry): NamespaceRelease {
+  releaseEntry(entry: RegistryEntry): void {
     if (!this.#entriesWithNamespaceState.delete(entry)) {
-      return { quotaDeltas: quotaDeltas(0, 0, 0) };
+      return;
     }
 
     const pending = this.#pendingPhysicalByEntry.get(entry);
-    let mappings = -(pending?.mappings ?? 0);
-    let references = -(pending?.references ?? 0);
-    let bytes = -(pending?.bytes ?? 0);
     if (pending !== undefined) {
       for (const token of pending.reservedTokens) this.#usedPhysicalTokens.delete(token);
       this.#pendingPhysicalByEntry.delete(entry);
@@ -445,16 +381,12 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     if (name !== undefined) {
       this.#nameByEntry.delete(entry);
       name.users -= 1;
-      if (this.#collectNameRecord(name)) {
-        mappings -= 1;
-        bytes -= name.localBytes;
-      }
+      this.#collectNameRecord(name);
     }
     const slots = this.#referenceSlotsByEntry.get(entry);
     const affected = new Set<IdRecord>();
     if (slots !== undefined) {
       for (const slot of slots.values()) {
-        references -= slot.records.length;
         for (const record of slot.records) {
           record.references -= 1;
           affected.add(record);
@@ -464,12 +396,8 @@ class IdentifierNamespaceImplementation implements IdentifierNamespace {
     }
     if (id !== undefined) affected.add(id);
     for (const record of affected) {
-      if (this.#collectIdRecord(record)) {
-        mappings -= 1;
-        bytes -= record.localBytes;
-      }
+      this.#collectIdRecord(record);
     }
-    return { quotaDeltas: quotaDeltas(mappings, references, bytes) };
   }
 
   assertEmpty(): void {

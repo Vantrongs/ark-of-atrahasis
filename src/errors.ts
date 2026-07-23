@@ -1,8 +1,6 @@
 export type SafeDOMErrorCode =
   | "INVALID_ROOT"
   | "ROOT_ALREADY_CLAIMED"
-  | "INVALID_QUOTA"
-  | "INVALID_RATE"
   | "CROSS_OWNER"
   | "DUPLICATE_REGISTRATION"
   | "DUPLICATE_IDENTIFIER"
@@ -16,8 +14,6 @@ export type SafeDOMErrorCode =
   | "NODE_DISPOSED"
   | "NODE_REVOKED"
   | "PLACEMENT_VIOLATION"
-  | "QUOTA_EXCEEDED"
-  | "RATE_LIMIT_EXCEEDED"
   | "DOM_OPERATION_FAILED";
 
 export interface SafeDOMError {
@@ -30,8 +26,6 @@ export interface SafeDOMError {
 const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze({
   INVALID_ROOT: "The root capability is invalid",
   ROOT_ALREADY_CLAIMED: "The root capability is already claimed",
-  INVALID_QUOTA: "The quota configuration is invalid",
-  INVALID_RATE: "The rate configuration is invalid",
   CROSS_OWNER: "The wrapper belongs to a different safe document",
   DUPLICATE_REGISTRATION: "The DOM node already has a different wrapper",
   DUPLICATE_IDENTIFIER: "The local identifier already has an active target",
@@ -46,8 +40,6 @@ const ERROR_MESSAGES: Readonly<Record<SafeDOMErrorCode, string>> = Object.freeze
   NODE_DISPOSED: "The node wrapper has been disposed",
   NODE_REVOKED: "The node wrapper has been revoked",
   PLACEMENT_VIOLATION: "The node left its assigned mount and was revoked",
-  QUOTA_EXCEEDED: "A safe document quota was exceeded",
-  RATE_LIMIT_EXCEEDED: "A safe document rate limit was exceeded",
   DOM_OPERATION_FAILED: "The platform DOM operation failed",
 });
 
